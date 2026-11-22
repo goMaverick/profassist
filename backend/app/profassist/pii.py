@@ -78,6 +78,61 @@ def _token(kind: str, number: int) -> str:
     return f"[{kind}_{number}]"
 
 
+def _presidio_extra(text: str) -> list[tuple[str, str]]:
+    """Presidio pattern pass. Falls back quietly when the package is absent."""
+    try:
+        from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+        from presidio_analyzer.nlp_engine import NlpEngine
+        from presidio_anonymizer import AnonymizerEngine
+    except Exception:
+        return []
+
+    class _NoNlp(NlpEngine):
+        def load(self) -> None:
+            return None
+
+        def is_loaded(self) -> bool:
+            return True
+
+        def process_text(self, text: str, language: str) -> dict:
+            return {}
+
+        def process_batch(self, texts, language: str, **kwargs):
+            return [{} for _ in texts]
+
+        def is_stopword(self, word: str, language: str) -> bool:
+            return False
+
+        def is_punct(self, text: str, language: str) -> bool:
+            return False
+
+        def get_supported_entities(self) -> list[str]:
+            return []
+
+        def get_supported_languages(self) -> list[str]:
+            return ["en"]
+
+    try:
+        email = PatternRecognizer(
+            supported_entity="EMAIL_ADDRESS",
+            patterns=[Pattern("email", r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b", 0.8)],
+        )
+        sid = PatternRecognizer(
+            supported_entity="STUDENT_ID",
+            patterns=[Pattern("sid", r"\b\d{7,10}\b", 0.6)],
+        )
+        engine = AnalyzerEngine(nlp_engine=_NoNlp(), registry=None, supported_languages=["en"])
+        engine.registry.add_recognizer(email)
+        engine.registry.add_recognizer(sid)
+        findings = engine.analyze(text=text, language="en")
+        anonymized = AnonymizerEngine().anonymize(text=text, analyzer_results=findings)
+        if anonymized.text == text:
+            return []
+        return [("PRESIDIO", anonymized.text)]
+    except Exception:
+        return []
+
+
 def scrub(text: str, known_names: list[str] | None = None) -> ScrubResult:
     """Replace personal data. Quarantine if some of it cannot be removed."""
     result = ScrubResult(text=text or "")
@@ -122,6 +177,10 @@ def scrub(text: str, known_names: list[str] | None = None) -> ScrubResult:
             continue
         result.uncertain.append(f"{first} {second}")
 
+    extra = _presidio_extra(result.text)
+    if extra:
+        result.text = extra[0][1]
+        result.replacements.append({"token": "[PRESIDIO]", "value": "redacted", "kind": "PRESIDIO"})
     result.quarantined = bool(result.uncertain)
     return result
 

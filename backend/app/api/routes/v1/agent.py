@@ -36,6 +36,24 @@ async def agent_websocket(
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
+    from sqlalchemy import select
+
+    from app.db.models.organization import Organization, OrganizationMember
+    from app.db.session import get_db_context
+    from app.profassist.models import AiSettings
+
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(AiSettings.chat_enabled)
+            .join(Organization, Organization.id == AiSettings.organization_id)
+            .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
+            .where(OrganizationMember.user_id == user.id, Organization.is_personal.is_(False))
+        )
+        flags = list(result.scalars().all())
+    if flags and not any(flags):
+        await websocket.close(code=4003, reason="AI chat is disabled")
+        return
+
     await manager.connect(websocket)
     session = AgentSession(
         websocket,

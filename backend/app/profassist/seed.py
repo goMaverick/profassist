@@ -51,7 +51,7 @@ async def seed_demo(db: AsyncSession) -> None:
     )
     if existing_style.scalar_one_or_none() is None:
         await save_style(db, org.id, user.id, DEFAULT_SOUL)
-    summary = await sync_moodle(db, org.id)
+    summary = await sync_moodle(db, org.id, user.id)
 
     result = await db.execute(
         select(Course).where(Course.organization_id == org.id, Course.code == "MAAI903")
@@ -65,7 +65,16 @@ async def seed_demo(db: AsyncSession) -> None:
             db,
             org.id,
             course.id,
+            user.id,
             "lecture-note.txt",
             LECTURE_NOTE.encode(),
         )
+    from app.profassist.models import Assessment, Chunk, Material, Objective, SlideDeck
+
+    for model in (Material, Chunk, Objective, SlideDeck, Assessment):
+        rows = await db.execute(
+            select(model).where(model.organization_id == org.id, model.owner_user_id.is_(None))
+        )
+        for row in rows.scalars().all():
+            row.owner_user_id = user.id
     logger.info("Demo seed sync %s", summary)

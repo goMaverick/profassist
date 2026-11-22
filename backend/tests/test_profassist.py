@@ -196,6 +196,59 @@ def test_hash_embed_is_stable() -> None:
     assert len(hash_embed("campus energy")) == 64
 
 
+def test_slide_studio_cites_and_flags_a_gap() -> None:
+    from app.profassist.skills.slide_studio import run_slide_studio
+
+    note = (
+        "Explain how an LLM agent differs from a trained machine learning model. "
+        "An assessment brief should name the audience and the artefact."
+    )
+    deck = run_slide_studio(
+        [
+            "Explain how an LLM agent differs from a trained machine learning model.",
+            "Describe the campus telescope that is not in the notes.",
+        ],
+        [{"id": "c1", "text": note, "filename": "lecture-note.txt", "section": "note"}],
+    )
+    covered = next(slide for slide in deck["slides"] if not slide["gap"])
+    bullet = covered["bullets"][0]
+    assert bullet["citation"]["filename"] == "lecture-note.txt"
+    assert bullet["text"] in note
+    assert deck["gaps"]
+    assert deck["pptx"][:2] == b"PK"
+
+
+def test_memory_scope_is_professor_and_tenant() -> None:
+    import uuid
+
+    from app.profassist.memory import scope_id
+    from app.profassist.pii import scrub
+
+    org = uuid.uuid4()
+    professor = uuid.uuid4()
+    other = uuid.uuid4()
+    assert scope_id(org, professor) != scope_id(org, other)
+    blocked = scrub("Email sara.almaktoum@student.uowd.ac.ae stays out of memory.", [])
+    assert "@" not in blocked.text
+
+
+def test_mlflow_empty_state_when_server_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.tracking import list_registered_models
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:9")
+    payload = list_registered_models()
+    assert payload["reachable"] is False
+    assert payload["models"][0]["status"] == "not_trained"
+
+
+def test_skill_file_lists_tools() -> None:
+    from app.profassist.skills.loader import load_skill
+
+    skill = load_skill("slide-studio")
+    assert "plan" in skill["tools"]
+    assert "pptx" in skill["tools"]
+
+
 def test_pptx_is_a_zip() -> None:
     data = build_pptx("Draft", [{"title": "One idea", "bullets": ["Cite the note."], "notes": "n"}])
     assert data[:2] == b"PK"

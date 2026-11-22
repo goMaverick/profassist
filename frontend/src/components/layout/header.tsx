@@ -60,6 +60,7 @@ const NAV: NavEntry[] = [
       { label: "Organizations", href: ROUTES.ORGS, icon: Building2 },
       { label: "Course files", href: ROUTES.KB, icon: Database },
       { label: "Quality", href: "/quality", icon: Activity },
+      { label: "Slide review", href: "/slides", icon: BookOpen },
     ],
   },
 ];

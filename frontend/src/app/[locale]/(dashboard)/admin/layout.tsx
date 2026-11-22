@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Activity, LayoutDashboard, MessageSquare, Star, Users } from "lucide-react";
+import { Activity, Bot, LayoutDashboard, MessageSquare, Star, Users } from "lucide-react";
 
 import { ROUTES } from "@/lib/constants";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -13,6 +13,8 @@ const ADMIN_TABS: PageTab[] = [
   { label: "Conversations", href: ROUTES.ADMIN_CONVERSATIONS, icon: MessageSquare },
   { label: "Ratings", href: ROUTES.ADMIN_RATINGS, icon: Star },
   { label: "System", href: ROUTES.ADMIN_SYSTEM, icon: Activity },
+  { label: "AI", href: "/admin/ai", icon: Bot },
+  { label: "Models", href: "/admin/models", icon: Activity },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

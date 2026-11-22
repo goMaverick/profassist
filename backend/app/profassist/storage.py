@@ -1,6 +1,7 @@
 """Store files in MinIO when it is configured, otherwise on the local media disk."""
 
 import logging
+import tempfile
 from pathlib import Path
 
 from app.core.config import settings
@@ -52,6 +53,22 @@ def read_bytes(storage_key: str) -> bytes:
 
 
 def extract_text(filename: str, data: bytes) -> str:
+    import os
+
+    if os.getenv("DOCLING_ENABLED", "").lower() in {"1", "true", "yes"}:
+        try:
+            from docling.document_converter import DocumentConverter
+
+            suffix = os.path.splitext(filename)[1] or ".pdf"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+                handle.write(data)
+                path = handle.name
+            converted = DocumentConverter().convert(path)
+            text = converted.document.export_to_markdown()
+            if text.strip():
+                return text
+        except Exception:
+            logger.info("Docling did not parse %s; using the built-in parser", filename)
     lower = filename.lower()
     if lower.endswith(".pdf"):
         import fitz

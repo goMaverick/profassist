@@ -13,6 +13,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/skills:/app/skills:ro
       - ./backend/cli:/app/cli:ro
       - media_data:/app/media
     env_file:
@@ -37,6 +38,9 @@ services:
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
       - LLM_BASE_URL=${LLM_BASE_URL:-}
       - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-false}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DOCLING_ENABLED=${DOCLING_ENABLED:-false}
+      - MEM0_HISTORY_PATH=/tmp/profassist-mem0.db
     command: ["sh", "/app/docker-entrypoint.sh"]
     networks:
       - backend
@@ -177,6 +181,28 @@ services:
       - minio_data:/data
     networks:
       - backend
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    container_name: profassist_mlflow
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql+psycopg2://postgres:postgres@db:5432/profassist
+      --default-artifact-root s3://profassist/mlflow
+    environment:
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=profassist
+      - AWS_SECRET_ACCESS_KEY=profassist-secret
+    ports:
+      - "5000:5000"
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
     restart: unless-stopped
 
   frontend:

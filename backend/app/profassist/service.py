@@ -11,6 +11,7 @@ from app.profassist.errors import ProfassistError
 from app.profassist.grading import assert_can_push, is_blind_sample, redact_blind
 from app.profassist.llm import complete as llm_complete
 from app.profassist.llm import mode as llm_mode
+from app.profassist.memory import recall, remember
 from app.profassist.models import (
     Approval,
     Assessment,
@@ -32,6 +33,7 @@ from app.profassist.models import (
 from app.profassist.moodle import CLOS, get_connector
 from app.profassist.pii import scrub
 from app.profassist.rag import chunk_text, index_chunks, rank_chunks
+from app.profassist.settings_admin import load_runtime
 from app.profassist.similarity import compare_submissions
 from app.profassist.slides import build_pptx
 from app.profassist.storage import extract_text, read_bytes, save_bytes
@@ -53,9 +55,18 @@ async def _course(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> 
     return row
 
 
-async def _owned(db: AsyncSession, model: type, org_id: uuid.UUID, row_id: uuid.UUID):
+async def _owned(
+    db: AsyncSession,
+    model: type,
+    org_id: uuid.UUID,
+    row_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+):
     row = await db.get(model, row_id)
     if row is None or row.organization_id != org_id:
+        raise ProfassistError(404, "Not found in this workspace")
+    owner = getattr(row, "owner_user_id", None)
+    if user_id is not None and owner is not None and owner != user_id:
         raise ProfassistError(404, "Not found in this workspace")
     return row
 
@@ -92,10 +103,16 @@ async def _soul(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> str:
     return row.soul_md if row else DEFAULT_SOUL
 
 
-async def _chunks(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[Chunk]:
+async def _chunks(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[Chunk]:
     result = await db.execute(
         select(Chunk)
-        .where(Chunk.organization_id == org_id, Chunk.course_id == course_id)
+        .where(
+            Chunk.organization_id == org_id,
+            Chunk.course_id == course_id,
+            Chunk.owner_user_id == user_id,
+        )
         .order_by(Chunk.ordinal)
     )
     return list(result.scalars().all())
@@ -119,7 +136,7 @@ async def list_courses(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, An
     return [_course_dict(row) for row in result.scalars().all()]
 
 
-async def home(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+async def home(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
     courses = await list_courses(db, org_id)
     course_ids = [uuid.UUID(row["id"]) for row in courses]
     drafts = []
@@ -128,12 +145,16 @@ async def home(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         sub_rows = await db.execute(select(Submission).where(Submission.organization_id == org_id))
         submissions = list(sub_rows.scalars().all())
         draft_rows = await db.execute(
-            select(GradeDraft).where(GradeDraft.organization_id == org_id)
+            select(GradeDraft).where(
+                GradeDraft.organization_id == org_id, GradeDraft.owner_user_id == user_id
+            )
         )
         drafts = list(draft_rows.scalars().all())
         flag_rows = await db.execute(
             select(IntegrityFlag).where(
-                IntegrityFlag.organization_id == org_id, IntegrityFlag.status == "open"
+                IntegrityFlag.organization_id == org_id,
+                IntegrityFlag.owner_user_id == user_id,
+                IntegrityFlag.status == "open",
             )
         )
         flags = len(list(flag_rows.scalars().all()))
@@ -157,7 +178,12 @@ async def home(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
 
 
 async def _index_material(
-    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, material: Material, text: str
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    material: Material,
+    text: str,
+    user_id: uuid.UUID,
 ) -> None:
     rows = []
     for ordinal, part in enumerate(chunk_text(text)):
@@ -165,19 +191,21 @@ async def _index_material(
             organization_id=org_id,
             course_id=course_id,
             material_id=material.id,
+            owner_user_id=user_id,
             ordinal=ordinal,
             text=part,
         )
         db.add(chunk)
         await db.flush()
-        rows.append({"id": str(chunk.id), "text": part})
-    index_chunks(str(org_id), str(course_id), rows)
+        rows.append({"id": str(chunk.id), "text": part, "filename": material.filename})
+    index_chunks(str(org_id), str(course_id), rows, owner_user_id=str(user_id))
 
 
 async def add_material(
     db: AsyncSession,
     org_id: uuid.UUID,
     course_id: uuid.UUID,
+    user_id: uuid.UUID,
     filename: str,
     data: bytes,
 ) -> dict[str, Any]:
@@ -192,6 +220,7 @@ async def add_material(
     material = Material(
         organization_id=org_id,
         course_id=course.id,
+        owner_user_id=user_id,
         filename=filename,
         text_content=raw,
         scrubbed_text=cleaned.text,
@@ -207,7 +236,7 @@ async def add_material(
     await db.flush()
     await _remember_pii(db, org_id, cleaned.replacements, f"material:{material.id}")
     if not cleaned.quarantined:
-        await _index_material(db, org_id, course.id, material, cleaned.text)
+        await _index_material(db, org_id, course.id, material, cleaned.text, user_id)
     return _material_dict(material)
 
 
@@ -220,10 +249,16 @@ def _material_dict(row: Material) -> dict[str, Any]:
     }
 
 
-async def list_materials(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict]:
+async def list_materials(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict]:
     await _course(db, org_id, course_id)
     result = await db.execute(
-        select(Material).where(Material.organization_id == org_id, Material.course_id == course_id)
+        select(Material).where(
+            Material.organization_id == org_id,
+            Material.course_id == course_id,
+            Material.owner_user_id == user_id,
+        )
     )
     return [_material_dict(row) for row in result.scalars().all()]
 
@@ -232,7 +267,9 @@ async def draft_objectives(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
     course = await _course(db, org_id, course_id)
-    chunks = await _chunks(db, org_id, course.id)
+    await load_runtime(db, org_id)
+    memories = await recall(db, org_id, user_id)
+    chunks = await _chunks(db, org_id, course.id, user_id)
     if not chunks:
         raise ProfassistError(400, "Upload a course note before drafting objectives.")
     payload_chunks = [{"id": str(row.id), "text": row.text} for row in chunks]
@@ -242,13 +279,14 @@ async def draft_objectives(
         query="course learning outcome",
         chunks=payload_chunks,
         clos=course.clos or CLOS,
-        soul=await _soul(db, org_id, user_id),
+        soul=(await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories),
     )
     created = []
     for ordinal, objective in enumerate(result.get("objectives") or []):
         row = Objective(
             organization_id=org_id,
             course_id=course.id,
+            owner_user_id=user_id,
             ordinal=ordinal + 1,
             text=objective.get("text") or "",
             status="proposed",
@@ -275,11 +313,17 @@ def _objective_dict(row: Objective) -> dict[str, Any]:
     }
 
 
-async def list_objectives(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict]:
+async def list_objectives(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict]:
     await _course(db, org_id, course_id)
     result = await db.execute(
         select(Objective)
-        .where(Objective.organization_id == org_id, Objective.course_id == course_id)
+        .where(
+            Objective.organization_id == org_id,
+            Objective.course_id == course_id,
+            Objective.owner_user_id == user_id,
+        )
         .order_by(Objective.ordinal)
     )
     return [_objective_dict(row) for row in result.scalars().all()]
@@ -288,7 +332,7 @@ async def list_objectives(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.U
 async def approve_objective(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, objective_id: uuid.UUID
 ) -> dict[str, Any]:
-    row = await _owned(db, Objective, org_id, objective_id)
+    row = await _owned(db, Objective, org_id, objective_id, user_id)
     row.status = "approved"
     db.add(
         Approval(
@@ -307,11 +351,15 @@ async def draft_slides(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> dict[str, Any]:
     course = await _course(db, org_id, course_id)
-    objectives = await list_objectives(db, org_id, course.id)
+    await load_runtime(db, org_id)
+    objectives = await list_objectives(db, org_id, course.id, user_id)
     approved = [row for row in objectives if row["status"] == "approved"]
     if not approved:
         raise ProfassistError(400, "Approve at least one objective before drafting slides.")
-    chunks = [{"id": str(row.id), "text": row.text} for row in await _chunks(db, org_id, course.id)]
+    chunks = [
+        {"id": str(row.id), "text": row.text}
+        for row in await _chunks(db, org_id, course.id, user_id)
+    ]
     query = " ".join(row["text"] for row in approved)
     ranked = rank_chunks(query, chunks, limit=4)
     result = agents.run_course(
@@ -331,6 +379,7 @@ async def draft_slides(
     deck = SlideDeck(
         organization_id=org_id,
         course_id=course.id,
+        owner_user_id=user_id,
         title=result.get("title") or course.title,
         slides=slides,
         status="draft",
@@ -355,11 +404,15 @@ def _deck_dict(row: SlideDeck) -> dict[str, Any]:
     }
 
 
-async def list_decks(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict]:
+async def list_decks(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict]:
     await _course(db, org_id, course_id)
     result = await db.execute(
         select(SlideDeck).where(
-            SlideDeck.organization_id == org_id, SlideDeck.course_id == course_id
+            SlideDeck.organization_id == org_id,
+            SlideDeck.course_id == course_id,
+            SlideDeck.owner_user_id == user_id,
         )
     )
     return [_deck_dict(row) for row in result.scalars().all()]
@@ -392,8 +445,13 @@ async def deck_bytes(db: AsyncSession, org_id: uuid.UUID, deck_id: uuid.UUID) ->
 async def draft_assessment(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> dict[str, Any]:
+    await load_runtime(db, org_id)
     course = await _course(db, org_id, course_id)
-    chunks = [{"id": str(row.id), "text": row.text} for row in await _chunks(db, org_id, course.id)]
+    memories = await recall(db, org_id, user_id)
+    chunks = [
+        {"id": str(row.id), "text": row.text}
+        for row in await _chunks(db, org_id, course.id, user_id)
+    ]
     if not chunks:
         raise ProfassistError(400, "Upload a course note before designing a rubric.")
     result = agents.run_course(
@@ -402,9 +460,9 @@ async def draft_assessment(
         query="assessment rubric",
         chunks=rank_chunks("assessment rubric feedback", chunks, limit=3),
         clos=course.clos or CLOS,
-        soul=await _soul(db, org_id, user_id),
+        soul=(await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories),
     )
-    assessment = await _primary_assessment(db, org_id, course)
+    assessment = await _primary_assessment(db, org_id, course, user_id)
     assessment.brief = result.get("brief") or assessment.brief
     assessment.clos = course.clos or CLOS
     assessment.status = "draft"
@@ -429,10 +487,14 @@ async def draft_assessment(
     return await _assessment_dict(db, assessment)
 
 
-async def _primary_assessment(db: AsyncSession, org_id: uuid.UUID, course: Course) -> Assessment:
+async def _primary_assessment(
+    db: AsyncSession, org_id: uuid.UUID, course: Course, user_id: uuid.UUID
+) -> Assessment:
     result = await db.execute(
         select(Assessment).where(
-            Assessment.organization_id == org_id, Assessment.course_id == course.id
+            Assessment.organization_id == org_id,
+            Assessment.course_id == course.id,
+            Assessment.owner_user_id == user_id,
         )
     )
     row = result.scalars().first()
@@ -441,6 +503,7 @@ async def _primary_assessment(db: AsyncSession, org_id: uuid.UUID, course: Cours
     row = Assessment(
         organization_id=org_id,
         course_id=course.id,
+        owner_user_id=user_id,
         title="Group report 1",
         brief="",
         clos=course.clos or CLOS,
@@ -477,11 +540,15 @@ async def _assessment_dict(db: AsyncSession, row: Assessment) -> dict[str, Any]:
     }
 
 
-async def get_assessment(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> dict | None:
+async def get_assessment(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> dict | None:
     course = await _course(db, org_id, course_id)
     result = await db.execute(
         select(Assessment).where(
-            Assessment.organization_id == org_id, Assessment.course_id == course.id
+            Assessment.organization_id == org_id,
+            Assessment.course_id == course.id,
+            Assessment.owner_user_id == user_id,
         )
     )
     row = result.scalars().first()
@@ -493,7 +560,7 @@ async def get_assessment(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UU
 async def approve_assessment(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assessment_id: uuid.UUID
 ) -> dict[str, Any]:
-    row = await _owned(db, Assessment, org_id, assessment_id)
+    row = await _owned(db, Assessment, org_id, assessment_id, user_id)
     criteria = await db.execute(
         select(RubricCriterion).where(RubricCriterion.assessment_id == row.id)
     )
@@ -539,7 +606,9 @@ async def push_record(
     return receipt
 
 
-async def sync_moodle(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+async def sync_moodle(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None = None
+) -> dict[str, Any]:
     connector = get_connector()
     created = {"courses": 0, "students": 0, "submissions": 0}
     for remote in connector.list_courses():
@@ -591,6 +660,7 @@ async def sync_moodle(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
                 assessment = Assessment(
                     organization_id=org_id,
                     course_id=course.id,
+                    owner_user_id=user_id,
                     title=assignment["name"],
                     brief="",
                     clos=course.clos or CLOS,
@@ -635,9 +705,11 @@ async def sync_moodle(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     return {"moodle_mode": connector.mode, **created}
 
 
-async def grade_queue(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> dict[str, Any]:
+async def grade_queue(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> dict[str, Any]:
     course = await _course(db, org_id, course_id)
-    assessment = await get_assessment(db, org_id, course.id)
+    assessment = await get_assessment(db, org_id, course.id, user_id)
     result = await db.execute(
         select(Submission).where(
             Submission.organization_id == org_id, Submission.course_id == course.id
@@ -649,6 +721,7 @@ async def grade_queue(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID)
             select(GradeDraft)
             .where(
                 GradeDraft.organization_id == org_id,
+                GradeDraft.owner_user_id == user_id,
                 GradeDraft.submission_id == submission.id,
             )
             .order_by(GradeDraft.created_at.desc())
@@ -690,7 +763,9 @@ async def run_grade(
             422,
             "This submission is quarantined because personal data could not be removed confidently.",
         )
-    assessment = await _owned(db, Assessment, org_id, submission.assessment_id)
+    course = await _course(db, org_id, submission.course_id)
+    await load_runtime(db, org_id)
+    assessment = await _primary_assessment(db, org_id, course, user_id)
     if assessment.status != "approved":
         raise ProfassistError(400, "Approve the rubric before grading. The council will wait.")
     criteria_result = await db.execute(
@@ -703,13 +778,18 @@ async def run_grade(
         raise ProfassistError(400, "This rubric has no criteria yet.")
     existing_result = await db.execute(
         select(GradeDraft)
-        .where(GradeDraft.organization_id == org_id, GradeDraft.submission_id == submission.id)
+        .where(
+            GradeDraft.organization_id == org_id,
+            GradeDraft.owner_user_id == user_id,
+            GradeDraft.submission_id == submission.id,
+        )
         .order_by(GradeDraft.created_at.desc())
     )
     existing = existing_result.scalars().first()
     if existing and existing.status in {"approved", "pushed"}:
         raise ProfassistError(409, "This draft is already approved, so it was not regenerated.")
-    soul = await _soul(db, org_id, user_id)
+    memories = await recall(db, org_id, user_id)
+    soul = (await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories)
     results = []
     feedback_parts = []
     for criterion in criteria:
@@ -743,7 +823,10 @@ async def run_grade(
         )
         if outcome["feedback"]:
             feedback_parts.append(f"{criterion.name}: {outcome['feedback']}")
-    draft = existing or GradeDraft(organization_id=org_id, submission_id=submission.id)
+    draft = existing or GradeDraft(
+        organization_id=org_id, owner_user_id=user_id, submission_id=submission.id
+    )
+    draft.owner_user_id = user_id
     draft.results = results
     draft.overall_feedback = "\n\n".join(feedback_parts)
     draft.status = "draft"
@@ -784,8 +867,10 @@ def _draft_dict(draft: GradeDraft, submission: Submission) -> dict[str, Any]:
     }
 
 
-async def get_draft(db: AsyncSession, org_id: uuid.UUID, draft_id: uuid.UUID) -> dict[str, Any]:
-    draft = await _owned(db, GradeDraft, org_id, draft_id)
+async def get_draft(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, draft_id: uuid.UUID
+) -> dict[str, Any]:
+    draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     submission = await _owned(db, Submission, org_id, draft.submission_id)
     return _draft_dict(draft, submission)
 
@@ -793,7 +878,7 @@ async def get_draft(db: AsyncSession, org_id: uuid.UUID, draft_id: uuid.UUID) ->
 async def reveal_draft(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, draft_id: uuid.UUID
 ) -> dict[str, Any]:
-    draft = await _owned(db, GradeDraft, org_id, draft_id)
+    draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     draft.blind_revealed = True
     db.add(
         Approval(
@@ -812,11 +897,12 @@ async def reveal_draft(
 async def edit_draft(
     db: AsyncSession,
     org_id: uuid.UUID,
+    user_id: uuid.UUID,
     draft_id: uuid.UUID,
     feedback: str,
     levels: dict[str, str],
 ) -> dict[str, Any]:
-    draft = await _owned(db, GradeDraft, org_id, draft_id)
+    draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     if draft.status != "draft":
         raise ProfassistError(409, "Approved drafts stay as you approved them.")
     draft.overall_feedback = feedback
@@ -828,7 +914,7 @@ async def edit_draft(
 async def approve_draft(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, draft_id: uuid.UUID
 ) -> dict[str, Any]:
-    draft = await _owned(db, GradeDraft, org_id, draft_id)
+    draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     if draft.status != "draft":
         raise ProfassistError(409, "This draft is already approved.")
     if draft.blind and not draft.blind_revealed and not draft.professor_levels:
@@ -854,7 +940,7 @@ async def approve_draft(
 async def push_draft(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, draft_id: uuid.UUID
 ) -> dict[str, Any]:
-    draft = await _owned(db, GradeDraft, org_id, draft_id)
+    draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     submission = await _owned(db, Submission, org_id, draft.submission_id)
     receipt = await push_record(
         db,
@@ -874,12 +960,14 @@ async def push_draft(
 
 
 async def scan_integrity(
-    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
     course = await _course(db, org_id, course_id)
+    await load_runtime(db, org_id)
     await db.execute(
         delete(IntegrityFlag).where(
             IntegrityFlag.organization_id == org_id,
+            IntegrityFlag.owner_user_id == user_id,
             IntegrityFlag.course_id == course.id,
             IntegrityFlag.status == "open",
         )
@@ -903,6 +991,7 @@ async def scan_integrity(
         viva = llm_complete("viva", {"passage": flag["passage_a"][:400]}).get("questions") or []
         row = IntegrityFlag(
             organization_id=org_id,
+            owner_user_id=user_id,
             course_id=course.id,
             left_submission_id=uuid.UUID(flag["left_id"]),
             right_submission_id=uuid.UUID(flag["right_id"]),
@@ -938,11 +1027,15 @@ def _flag_dict(row: IntegrityFlag) -> dict[str, Any]:
     }
 
 
-async def list_flags(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict]:
+async def list_flags(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict]:
     await _course(db, org_id, course_id)
     result = await db.execute(
         select(IntegrityFlag).where(
-            IntegrityFlag.organization_id == org_id, IntegrityFlag.course_id == course_id
+            IntegrityFlag.organization_id == org_id,
+            IntegrityFlag.owner_user_id == user_id,
+            IntegrityFlag.course_id == course_id,
         )
     )
     return [_flag_dict(row) for row in result.scalars().all()]
@@ -953,7 +1046,7 @@ async def set_flag(
 ) -> dict[str, Any]:
     if status not in {"confirmed", "dismissed", "open"}:
         raise ProfassistError(400, "Use confirmed, dismissed, or open.")
-    row = await _owned(db, IntegrityFlag, org_id, flag_id)
+    row = await _owned(db, IntegrityFlag, org_id, flag_id, user_id)
     row.status = status
     db.add(
         Approval(
@@ -1004,11 +1097,17 @@ async def save_style(
         db.add(row)
     else:
         row.soul_md = soul_md
+    await remember(db, org_id, user_id, soul_md[:500], kind="style", source="soul.md")
     return {"soul_md": soul_md}
 
 
-async def run_reflection(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
-    result = await db.execute(select(GradeDraft).where(GradeDraft.organization_id == org_id))
+async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
+    await load_runtime(db, org_id)
+    result = await db.execute(
+        select(GradeDraft).where(
+            GradeDraft.organization_id == org_id, GradeDraft.owner_user_id == user_id
+        )
+    )
     changes = []
     for draft in result.scalars().all():
         for name, level in (draft.professor_levels or {}).items():
@@ -1028,14 +1127,22 @@ async def run_reflection(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         else "No level changes are stored yet. Propose a cautious note she can ignore."
     )
     text = agents.run_reflection(seed)
-    row = Reflection(organization_id=org_id, proposal=text, status="proposed")
+    row = Reflection(
+        organization_id=org_id, owner_user_id=user_id, proposal=text, status="proposed"
+    )
     db.add(row)
     await db.flush()
     return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
 
 
-async def list_reflections(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
-    result = await db.execute(select(Reflection).where(Reflection.organization_id == org_id))
+async def list_reflections(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    result = await db.execute(
+        select(Reflection).where(
+            Reflection.organization_id == org_id, Reflection.owner_user_id == user_id
+        )
+    )
     return [
         {"id": str(row.id), "proposal": row.proposal, "status": row.status}
         for row in result.scalars().all()
@@ -1045,7 +1152,7 @@ async def list_reflections(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str
 async def approve_reflection(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, reflection_id: uuid.UUID
 ) -> dict[str, Any]:
-    row = await _owned(db, Reflection, org_id, reflection_id)
+    row = await _owned(db, Reflection, org_id, reflection_id, user_id)
     row.status = "approved"
     style = await db.execute(
         select(StyleProfile).where(
@@ -1065,3 +1172,65 @@ async def approve_reflection(
 
 def calibrator_page() -> dict[str, Any]:
     return stubs.grade_calibrator()
+
+
+async def build_cited_deck(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> dict[str, Any]:
+    """Slide-studio skill: multi-hop retrieval, citations, gaps, then pptx."""
+    from app.profassist.skills.slide_studio import run_slide_studio
+
+    await load_runtime(db, org_id)
+    course = await _course(db, org_id, course_id)
+    objectives = [
+        row["text"]
+        for row in await list_objectives(db, org_id, course.id, user_id)
+        if row["status"] == "approved"
+    ]
+    if not objectives:
+        raise ProfassistError(400, "Approve an objective before building a cited deck.")
+    materials = {
+        row.id: row.filename
+        for row in (
+            await db.execute(
+                select(Material).where(
+                    Material.organization_id == org_id,
+                    Material.course_id == course.id,
+                    Material.owner_user_id == user_id,
+                )
+            )
+        ).scalars()
+    }
+    chunks = []
+    for row in await _chunks(db, org_id, course.id, user_id):
+        chunks.append(
+            {
+                "id": str(row.id),
+                "text": row.text,
+                "filename": materials.get(row.material_id, "note"),
+                "section": "note",
+            }
+        )
+    if not chunks:
+        raise ProfassistError(400, "Upload a course note before building a cited deck.")
+    built = run_slide_studio(objectives, chunks)
+    deck = SlideDeck(
+        organization_id=org_id,
+        course_id=course.id,
+        owner_user_id=user_id,
+        title=f"{course.code} cited deck",
+        slides=built["slides"],
+        status="draft",
+    )
+    db.add(deck)
+    await db.flush()
+    if built["pptx"]:
+        deck.storage_key = save_bytes(
+            f"{org_id}/{user_id}/{course.id}/cited-{deck.id}.pptx",
+            built["pptx"],
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+    payload = _deck_dict(deck)
+    payload["gaps"] = built["gaps"]
+    payload["skill"] = built["skill"]
+    return payload

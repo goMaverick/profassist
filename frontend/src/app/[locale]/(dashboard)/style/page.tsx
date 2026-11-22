@@ -8,20 +8,29 @@ interface Reflection {
   proposal: string;
   status: string;
 }
+interface Memory {
+  id: string;
+  kind: string;
+  text: string;
+  source: string;
+}
 
 export default function StylePage() {
   const [soul, setSoul] = useState("");
   const [items, setItems] = useState<Reflection[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
 
   async function load() {
-    const [style, reflections] = await Promise.all([
+    const [style, reflections, memory] = await Promise.all([
       pa<{ soul_md: string }>("/style"),
       pa<{ items: Reflection[] }>("/reflections"),
+      pa<{ items: Memory[] }>("/memories"),
     ]);
     setSoul(style.soul_md);
     setItems(reflections.items);
+    setMemories(memory.items);
   }
 
   useEffect(() => {
@@ -68,6 +77,29 @@ export default function StylePage() {
           Ask for a reflection
         </button>
       </div>
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-medium">What I remember</h2>
+        <p className="text-foreground/60 text-sm">
+          Only your memories, in this university. Names are removed before anything is saved. Delete one if it is wrong.
+        </p>
+        {memories.length === 0 && <p className="text-foreground/60 text-sm">Nothing remembered yet. Saving your style writes the first one.</p>}
+        {memories.map((memory) => (
+          <div key={memory.id} className="border-foreground/10 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm">
+            <p>{memory.text}</p>
+            <button
+              className="underline"
+              onClick={async () => {
+                await run(async () => {
+                  await pa(`/memories/${memory.id}`, { method: "DELETE" });
+                  await load();
+                }, setError);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        ))}
+      </section>
       {items.map((item) => (
         <article key={item.id} className="border-foreground/10 rounded-lg border p-3 text-sm">
           <p className="text-foreground/50 text-xs uppercase">{item.status}</p>
