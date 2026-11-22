@@ -35,6 +35,7 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Array<{ name: string; due?: string; number?: string }>>([]);
   const [error, setError] = useState("");
   const [courseId, setCourseId] = useState("");
+  const [copying, setCopying] = useState<number | null>(null);
 
   useEffect(() => {
     pa<Home>("/home")
@@ -46,10 +47,14 @@ export default function HomePage() {
     pa<{ items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }> }>("/outlines")
       .then((data) => setTasks(data.items[0]?.body?.tasks || []))
       .catch(() => setTasks([]));
+    pa<{ summary: { review: number; concern: number } }>("/integrity/overview?course=all")
+      .then((data) => setCopying((data.summary.review || 0) + (data.summary.concern || 0)))
+      .catch(() => setCopying(null));
   }, []);
 
   const course = home?.courses.find((item) => item.id === courseId) || home?.courses[0];
   const waiting = Math.max(0, (home?.drafts || 0) - (home?.approved || 0));
+  const cases = copying ?? home?.open_flags ?? 0;
 
   if (!home && !error) {
     return (
@@ -73,14 +78,14 @@ export default function HomePage() {
         <h2 style={{ margin: "0 0 8px", fontSize: "1.25rem", fontWeight: 400 }}>To do</h2>
         <div className="pa-todo">
           <Link href="/grade"><span>{waiting} grade{waiting === 1 ? "" : "s"} waiting for approval</span><strong>Review</strong></Link>
-          <Link href="/integrity"><span>{home?.open_flags || 0} possible copying case{(home?.open_flags || 0) === 1 ? "" : "s"}</span><strong>Look</strong></Link>
+          <Link href="/integrity"><span>{cases} possible copying case{cases === 1 ? "" : "s"}</span><strong>Look</strong></Link>
           <Link href="/outline"><span>Outline {course?.code || "MAAI 903"} needs learning outcomes</span><strong>Continue</strong></Link>
         </div>
       </section>
       <div className="pa-kpi-row">
         <Stat icon={<Incomplete size={16} />} label="Submissions" value={home?.submissions || 0} delta="in the queue" />
         <Stat icon={<CheckmarkFilled size={16} />} label="Awaiting you" value={waiting} delta="drafts not approved" />
-        <Stat icon={<Flag size={16} />} label="Open flags" value={home?.open_flags || 0} delta="for you to look at" />
+        <Stat icon={<Flag size={16} />} label="Open flags" value={cases} delta="for you to look at" />
         <Stat icon={<Send size={16} />} label="Pushed" value={home?.pushed || 0} delta="saved on this computer" />
       </div>
       <div className="pa-chart-row">

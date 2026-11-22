@@ -191,13 +191,13 @@ export function HomeChat({
             <MessageContent>
               {turn.reasoning && (
                 <Reasoning isStreaming={turn.streaming && !turn.text} defaultOpen={false}>
-                  <ReasoningTrigger />
+                  <ReasoningTrigger getThinkingMessage={() => "Why?"} />
                   <ReasoningContent>{turn.reasoning}</ReasoningContent>
                 </Reasoning>
               )}
               {turn.tool && (
                 <Tool>
-                  <ToolHeader type="dynamic-tool" state="output-available" toolName={turn.tool.name} title={turn.tool.name} />
+                  <ToolHeader type="dynamic-tool" state="output-available" toolName={turn.tool.name} title={toolTitle(turn.tool.name)} />
                   <ToolContent>
                     <ResultCard output={turn.tool.output} href={turn.tool.href} />
                   </ToolContent>
@@ -215,6 +215,11 @@ export function HomeChat({
       )}
     </section>
   );
+}
+
+function toolTitle(name: string) {
+  if (name === "integrity_concerns") return "Checked integrity";
+  return name.replaceAll("_", " ");
 }
 
 function ResultCard({ output, href }: { output: unknown; href?: string }) {
