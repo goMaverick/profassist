@@ -154,6 +154,56 @@ async def save_step(
     return _public(row)
 
 
+def asked_count(text: str) -> int | None:
+    """How many items the professor asked for, when they named a count."""
+    import re
+
+    words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+    }
+    lowered = (text or "").lower()
+    match = re.search(
+        r"\b(\d+|one|two|three|four|five|six|seven|eight)\s+(?:draft\s+)?(?:learning\s+)?outcomes?\b",
+        lowered,
+    )
+    if not match:
+        match = re.search(
+            r"\b(?:draft|write|suggest|give|list)\s+(\d+|one|two|three|four|five|six|seven|eight)\b",
+            lowered,
+        )
+    if not match:
+        return None
+    token = match.group(1)
+    count = words.get(token, int(token) if token.isdigit() else 0)
+    return count or None
+
+
+def shape_outcomes(suggestion: dict[str, Any], message: str) -> tuple[dict[str, Any], str | None]:
+    """Keep only the number of outcomes the professor asked for, as a numbered list."""
+    count = asked_count(message)
+    clos = list((suggestion or {}).get("clos") or [])
+    if not count or not clos:
+        return suggestion or {}, None
+    trimmed = clos[:count]
+    shaped = {**(suggestion or {}), "clos": trimmed}
+    lines = []
+    for index, item in enumerate(trimmed, start=1):
+        if isinstance(item, dict):
+            text = str(item.get("text") or item.get("code") or "").strip()
+        else:
+            text = str(item).strip()
+        lines.append(f"{index}. {text}")
+    reply = "Here are the learning outcomes:\n\n" + "\n".join(lines)
+    return shaped, reply
+
+
 async def assist_step(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -184,6 +234,10 @@ async def assist_step(
         },
     )
     suggestion = drafted.get("suggestion") or {}
+    if step == "outcomes":
+        suggestion, numbered = shape_outcomes(suggestion, cleaned.text)
+        if numbered:
+            drafted["reply"] = numbered
     if suggestion:
         await save_step(db, org_id, user_id, outline_id, step, suggestion, trust_course_text=True)
         row = await get_outline(db, org_id, user_id, outline_id)

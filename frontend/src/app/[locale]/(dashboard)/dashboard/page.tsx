@@ -35,7 +35,7 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Array<{ name: string; due?: string; number?: string }>>([]);
   const [error, setError] = useState("");
   const [courseId, setCourseId] = useState("");
-  const [copying, setCopying] = useState<number | null>(null);
+  const [board, setBoard] = useState<Array<{ course: string; slug: string; status: string; flagged_pairs: number }>>([]);
 
   useEffect(() => {
     pa<Home>("/home")
@@ -47,14 +47,23 @@ export default function HomePage() {
     pa<{ items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }> }>("/outlines")
       .then((data) => setTasks(data.items[0]?.body?.tasks || []))
       .catch(() => setTasks([]));
-    pa<{ summary: { review: number; concern: number } }>("/integrity/overview?course=all")
-      .then((data) => setCopying((data.summary.review || 0) + (data.summary.concern || 0)))
-      .catch(() => setCopying(null));
+    pa<{ items: Array<{ course: string; slug: string; status: string; flagged_pairs: number }> }>("/integrity/overview?course=all")
+      .then((data) => setBoard(data.items || []))
+      .catch(() => setBoard([]));
   }, []);
 
   const course = home?.courses.find((item) => item.id === courseId) || home?.courses[0];
   const waiting = Math.max(0, (home?.drafts || 0) - (home?.approved || 0));
-  const cases = copying ?? home?.open_flags ?? 0;
+  const compact = (value?: string) => (value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const flagged = board.filter((item) => item.status !== "Clear");
+  const cases = flagged.reduce((sum, item) => sum + (item.flagged_pairs || 0), 0);
+  const selected = compact(course?.code);
+  const inThisCourse = flagged.some((item) => compact(item.slug) === selected || compact(item.course) === selected);
+  const copyingLabel = cases === 0
+    ? "No copying cases"
+    : inThisCourse
+      ? `${cases} possible copying case${cases === 1 ? "" : "s"}`
+      : `${cases} copying cases in other courses`;
 
   if (!home && !error) {
     return (
@@ -78,7 +87,7 @@ export default function HomePage() {
         <h2 style={{ margin: "0 0 8px", fontSize: "1.25rem", fontWeight: 400 }}>To do</h2>
         <div className="pa-todo">
           <Link href="/grade"><span>{waiting} grade{waiting === 1 ? "" : "s"} waiting for approval</span><strong>Review</strong></Link>
-          <Link href="/integrity"><span>{cases} possible copying case{cases === 1 ? "" : "s"}</span><strong>Look</strong></Link>
+          <Link href="/integrity"><span>{copyingLabel}</span><strong>Look</strong></Link>
           <Link href="/outline"><span>Outline {course?.code || "MAAI 903"} needs learning outcomes</span><strong>Continue</strong></Link>
         </div>
       </section>

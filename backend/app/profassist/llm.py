@@ -15,7 +15,7 @@ from app.profassist.config import (
 )
 from app.profassist.observe import record_step
 from app.profassist.pii import assert_prompt_is_clean, scrub
-from app.profassist.providers import extra_kwargs, key_configured, litellm_model
+from app.profassist.providers import key_configured, litellm_model
 from app.profassist.runtime import agent_route, labelled_about, prompt_for
 
 logger = logging.getLogger(__name__)
@@ -441,19 +441,19 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
         return drafted
 
-    import litellm
+    from app.profassist.providers import generate
 
     model = litellm_model(provider, payload.get("model") or route["model"] or llm_model())
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "messages": [
+    response = generate(
+        provider,
+        payload.get("model") or route["model"] or llm_model(),
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": 0.2,
-        **extra_kwargs(provider),
-    }
-    response = litellm.completion(**kwargs)
+        temperature=0.2,
+        max_tokens=1500,
+    )
     content = response.choices[0].message.content or "{}"
     start = content.find("{")
     end = content.rfind("}")
@@ -466,6 +466,27 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         parsed = demo_complete(task, payload)
     if not isinstance(parsed, dict):
         parsed = demo_complete(task, payload)
+    if task in {"grade_persona", "grade_revise"} and isinstance(parsed, dict):
+        parsed.setdefault("persona", payload.get("persona") or "evidence")
+    if task == "outline_assist":
+        suggestion = parsed.get("suggestion") if isinstance(parsed.get("suggestion"), dict) else None
+        if suggestion is None and any(
+            key in parsed for key in ("clos", "plos", "weeks", "description", "tasks", "policies")
+        ):
+            suggestion = parsed
+        needed = {
+            "outcomes": "clos",
+            "schedule": "weeks",
+            "readings": "readings",
+            "assessments": "tasks",
+            "description": "description",
+            "policies": "policies",
+        }.get(str(payload.get("step") or ""))
+        present = suggestion.get(needed) if isinstance(suggestion, dict) and needed else suggestion
+        if needed and not present:
+            parsed = demo_complete(task, payload)
+        elif isinstance(suggestion, dict):
+            parsed = {"reply": str(parsed.get("reply") or ""), "suggestion": suggestion}
     record_step(
         step_name,
         input_data={

@@ -277,6 +277,21 @@ def _count(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
+def _spoken_code(code: str) -> str:
+    compact = _norm(code)
+    split = ""
+    letters = ""
+    digits = ""
+    for char in compact:
+        if char.isdigit():
+            digits += char
+        else:
+            letters += char
+    if letters and digits:
+        split = f"{letters} {digits}"
+    return split or code or "This course"
+
+
 def _norm(code: str) -> str:
     return "".join(ch for ch in (code or "").upper() if ch.isalnum())
 
@@ -563,7 +578,16 @@ def _submission(
 
 
 def concerns(code: str, number: str = "") -> dict[str, Any]:
-    board = overview(code or "MAAI903")
+    """The same cases the integrity page and the home to-do count.
+
+    Every non-clear pair, across every assignment in the course, with the two
+    group names, the similarity, and a link that opens that pair.
+    """
+    named = (code or "").strip()
+    board = overview(named or "MAAI903")
+    missing = bool(named) and not board["items"]
+    if missing:
+        board = overview("all")
     items = board["items"]
     if number:
         items = [item for item in items if str(item["number"]) == str(number)]
@@ -575,9 +599,19 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
         href = f"/integrity?course={first['slug']}&assignment={first['number']}"
     from app.profassist.integrity_docs import pair_matches
 
-    lines = []
+    lines: list[str] = []
+    cases: list[dict[str, Any]] = []
     match_rows: list[dict[str, Any]] = []
+    if missing:
+        pair_count = sum(int(item["flagged_pairs"]) for item in worrying)
+        assignment_count = len({(item["slug"], str(item["number"])) for item in worrying})
+        lines.append(
+            f"{_spoken_code(named)} has no copying cases yet. "
+            f"{pair_count} cases need a look across {assignment_count} assignments in other courses."
+        )
     for item in picked:
+        if worrying and item["status"] == "Clear":
+            continue
         detail = ""
         if first and item is first:
             rows = pair_matches(item["slug"], str(item["number"]), "A", "B") or pair_matches(
@@ -599,11 +633,41 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
             f"{item['course']} assignment {item['number']} ({item['name']}): {item['status']}, "
             f"highest {item['highest']}% across {_count(item['flagged_pairs'], 'pair', 'pairs')} to read.{detail}"
         )
+        matrix = assignment_matrix(item["slug"], str(item["number"]))
+        for pair in matrix.get("pairs") or []:
+            if pair.get("status") == "Clear":
+                continue
+            case_href = (
+                f"/integrity?course={item['slug']}&assignment={item['number']}"
+                f"&pair={pair['left']}-{pair['right']}"
+            )
+            cases.append(
+                {
+                    "course": item["course"],
+                    "slug": item["slug"],
+                    "assignment": str(item["number"]),
+                    "name": item["name"],
+                    "groups": [pair["left"], pair["right"]],
+                    "percent": pair["percent"],
+                    "status": pair["status"],
+                    "href": case_href,
+                }
+            )
+            lines.append(
+                f"Group {pair['left']} and Group {pair['right']} are {pair['percent']}% similar. "
+                f"[Open the case]({case_href})."
+            )
+            href = href if href != "/integrity" else case_href
+    if cases:
+        href = cases[0]["href"]
+    if not lines:
+        lines.append("Nothing needs a look on that assignment.")
     return {
         "course": code,
         "assignment": number,
         "items": picked,
+        "cases": cases,
         "matches": match_rows,
         "href": href,
-        "message": " ".join(lines) or "Nothing needs a look on that assignment.",
+        "message": "\n".join(lines),
     }

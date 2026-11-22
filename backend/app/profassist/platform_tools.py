@@ -4,6 +4,8 @@ Every tool checks the signed-in professor and her university. Moodle push and
 deletes wait for an explicit confirm token.
 """
 
+import json
+import logging
 import uuid
 from contextvars import ContextVar
 from typing import Any
@@ -14,6 +16,7 @@ from app.profassist.errors import ProfassistError
 from app.profassist.runtime import tool_enabled
 
 _actor: ContextVar[dict[str, Any] | None] = ContextVar("pa_tool_actor", default=None)
+logger = logging.getLogger(__name__)
 
 CONFIRM = "confirm"
 
@@ -160,13 +163,19 @@ def _assignment_args(text: str) -> dict[str, Any]:
     return {"number": number, "code": code, "due": due, "title": f"Assignment {number[1:]}"}
 
 
+def _mentioned_code(text: str) -> str:
+    import re
+
+    coded = re.search(r"\b([a-z]{2,})\s*(\d{3})\b", text)
+    if not coded:
+        return ""
+    return f"{coded.group(1).upper()}{coded.group(2)}"
+
+
 def _integrity_args(text: str) -> dict[str, Any]:
     import re
 
-    code = "MAAI903"
-    coded = re.search(r"maai\s*(\d+)", text)
-    if coded:
-        code = f"MAAI{coded.group(1)}"
+    code = _mentioned_code(text) or "MAAI903"
     number = ""
     numbered = re.search(r"assignment\s+(\d+)", text)
     if numbered:
@@ -197,8 +206,18 @@ def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
         return "list_courses", {}
     if "assessment" in text and ("suggest" in text or "generat" in text):
         return "suggest_assessments", {}
+    if "learning outcome" in text or "outcomes" in text:
+        return "assist_outline", {
+            "step": "outcomes",
+            "message": message,
+            "code": _mentioned_code(text),
+        }
     if "wizard" in text or "outline" in text:
-        return "assist_outline", {"step": "outcomes"}
+        return "assist_outline", {
+            "step": "outcomes",
+            "message": message,
+            "code": _mentioned_code(text),
+        }
     if "memor" in text:
         return "list_memories", {}
     if "setting" in text or "admin" in text:
@@ -278,7 +297,15 @@ async def _assist_outline(db, current, args):
         created = await start_outline(db, current["org_id"], current["user_id"], demo=False)
         outline_id = uuid.UUID(created["id"])
     else:
-        outline_id = uuid.UUID(rows[0]["id"])
+        wanted = "".join(ch for ch in str(args.get("code") or "").upper() if ch.isalnum())
+        chosen = rows[0]
+        if wanted:
+            for row in rows:
+                code = "".join(ch for ch in str(row.get("code") or "").upper() if ch.isalnum())
+                if code == wanted:
+                    chosen = row
+                    break
+        outline_id = uuid.UUID(chosen["id"])
     return await assist_step(
         db,
         current["org_id"],
@@ -493,8 +520,10 @@ async def chat_turn(
     pending_tool: str = "",
 ) -> dict[str, Any]:
     from app.profassist.pii import scrub
+    from app.profassist.settings_admin import load_runtime
 
     message = scrub(message or "").text
+    await load_runtime(db, org_id, user_id)
     set_tool_actor(org_id, user_id, is_admin=is_admin)
     try:
         if confirmed and pending_tool:
@@ -534,7 +563,8 @@ async def chat_turn(
         if payload.get("needs_confirm"):
             reply = f"I can {payload['preview']} Reply confirm to go ahead."
         else:
-            reply = _reply(name, payload.get("result"))
+            fallback = _reply(name, payload.get("result"))
+            reply = _speak(message, name, payload.get("result"), fallback)
         return {"reply": reply, **payload}
     finally:
         clear_tool_actor()
@@ -603,6 +633,78 @@ def chat_stream_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return events
 
 
+def _speak(message: str, tool: str, result: Any, fallback: str) -> str:
+    """Ask the configured model to phrase the answer. The offline line is the fallback."""
+    from app.profassist.providers import generate, key_configured
+    from app.profassist.runtime import agent_route
+
+    route = agent_route("chat")
+    if not key_configured(route["provider"]):
+        return fallback
+    try:
+        brief = json.dumps(result, default=str)[:1200]
+        response = generate(
+            route["provider"],
+            route["model"],
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You help one university professor. Answer in two or three plain sentences. "
+                        "Use the tool result when it is present. Do not invent student names or marks."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question: {message}\nTool: {tool}\nResult: {brief}\n"
+                        f"If the result is empty, you may say: {fallback}"
+                    ),
+                },
+            ],
+            temperature=0.2,
+            max_tokens=800,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        return _keep_shape(message, tool, result, text or fallback, fallback)
+    except Exception:
+        logger.info("The chat model did not answer; using the offline reply")
+        return fallback
+
+
+def _numbered_items(text: str) -> int:
+    import re
+
+    return len(re.findall(r"(?m)^\s*\d+\.\s+\S", text or ""))
+
+
+def _keep_shape(message: str, tool: str, result: Any, spoken: str, fallback: str) -> str:
+    """Keep a count the professor asked for, and keep the case links the tool found."""
+    if tool == "assist_outline" and isinstance(result, dict):
+        from app.profassist.outline import asked_count
+
+        count = asked_count(message)
+        prepared = str(result.get("reply") or fallback)
+        if count and _numbered_items(prepared) >= count and _numbered_items(spoken) < count:
+            return prepared
+    if tool == "integrity_concerns" and isinstance(result, dict):
+        cases = result.get("cases") or []
+        if cases:
+            return _case_reply(result)
+    return spoken or fallback
+
+
+def _case_reply(result: dict[str, Any]) -> str:
+    """The same sentence the home to-do uses. The screen draws the rows itself."""
+    message = str(result.get("message") or "")
+    first = message.split("\n", 1)[0].strip()
+    if first:
+        return first
+    cases = result.get("cases") or []
+    assignments = len({(case.get("course"), case.get("assignment")) for case in cases})
+    return f"{len(cases)} cases need a look across {assignments} assignments."
+
+
 def _reply(name: str, result: Any) -> str:
     if name == "list_courses" and isinstance(result, list):
         if not result:
@@ -617,6 +719,8 @@ def _reply(name: str, result: Any) -> str:
         )
     if name == "dropout_risk" and isinstance(result, dict):
         return result.get("message") or "Risk scores are advisory."
+    if name == "assist_outline" and isinstance(result, dict) and result.get("reply"):
+        return str(result["reply"])
     if name == "integrity_concerns" and isinstance(result, dict):
         return result.get("message") or "Nothing needs a look."
     if name == "suggest_assessments" and isinstance(result, dict):
