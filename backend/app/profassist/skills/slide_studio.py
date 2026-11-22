@@ -16,6 +16,7 @@ class SlideState(TypedDict, total=False):
 
 
 from app.profassist import llm
+from app.profassist.observe import invoke_graph
 from app.profassist.rag import keyword_score
 from app.profassist.runtime import prompt_for, tool_enabled
 from app.profassist.skills.loader import load_skill
@@ -162,8 +163,11 @@ def run_slide_studio(objectives: list[str], chunks: list[dict[str, Any]]) -> dic
     graph.add_edge("plan", "retrieve")
     graph.add_edge("retrieve", "draft")
     graph.add_edge("draft", END)
-    result = graph.compile().invoke(
-        {"objectives": objectives, "chunks": chunks, "skill": skill["instructions"]}
+    result, _url = invoke_graph(
+        graph.compile(),
+        {"objectives": objectives, "chunks": chunks, "skill": skill["instructions"]},
+        name="slide-studio",
+        metadata={"kind": "slide_studio"},
     )
     slides = result.get("slides") or []
     pptx = b""

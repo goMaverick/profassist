@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[LifespanState, None]:
         async with get_db_context() as _seed_db:
             await seed_demo(_seed_db)
             logger.info("ProfAssist demo workspace is ready")
+    try:
+        from app.profassist.observe import seed_prompts
+
+        seed_prompts()
+    except Exception:
+        logger.info("Langfuse prompts were not seeded")
     yield state
     if "vector_store" in state:
         with suppress(Exception):

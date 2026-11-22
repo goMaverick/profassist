@@ -191,6 +191,7 @@ class GradeDraft(Base, TimestampMixin):
     blind: Mapped[bool] = mapped_column(nullable=False, default=False)
     blind_revealed: Mapped[bool] = mapped_column(nullable=False, default=False)
     bundle_version: Mapped[str] = mapped_column(String(64), nullable=False, default="poc-1")
+    trace_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     professor_levels: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 

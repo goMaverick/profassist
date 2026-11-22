@@ -267,7 +267,7 @@ async def draft_objectives(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
     course = await _course(db, org_id, course_id)
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     memories = await recall(db, org_id, user_id)
     chunks = await _chunks(db, org_id, course.id, user_id)
     if not chunks:
@@ -351,7 +351,7 @@ async def draft_slides(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> dict[str, Any]:
     course = await _course(db, org_id, course_id)
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     objectives = await list_objectives(db, org_id, course.id, user_id)
     approved = [row for row in objectives if row["status"] == "approved"]
     if not approved:
@@ -445,7 +445,7 @@ async def deck_bytes(db: AsyncSession, org_id: uuid.UUID, deck_id: uuid.UUID) ->
 async def draft_assessment(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> dict[str, Any]:
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     course = await _course(db, org_id, course_id)
     memories = await recall(db, org_id, user_id)
     chunks = [
@@ -736,6 +736,7 @@ async def grade_queue(
                 "draft_id": str(draft.id) if draft else None,
                 "draft_status": draft.status if draft else None,
                 "blind": bool(draft.blind) if draft else False,
+                "trace_url": (draft.trace_url or "") if draft else "",
             }
         )
     return {"course": _course_dict(course), "assessment": assessment, "submissions": rows}
@@ -764,7 +765,7 @@ async def run_grade(
             "This submission is quarantined because personal data could not be removed confidently.",
         )
     course = await _course(db, org_id, submission.course_id)
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     assessment = await _primary_assessment(db, org_id, course, user_id)
     if assessment.status != "approved":
         raise ProfassistError(400, "Approve the rubric before grading. The council will wait.")
@@ -797,6 +798,7 @@ async def run_grade(
             submission.scrubbed_text,
             {"name": criterion.name, "levels": criterion.levels},
             soul,
+            title=assessment.title,
         )
         judge = outcome["judge"]
         calibrator = stubs.grade_calibrator(
@@ -833,6 +835,8 @@ async def run_grade(
     draft.blind = is_blind_sample(submission.group_name)
     draft.blind_revealed = False
     draft.bundle_version = "poc-1"
+    if outcome.get("trace_url"):
+        draft.trace_url = outcome["trace_url"]
     draft.professor_levels = {}
     db.add(draft)
     await db.flush()
@@ -864,6 +868,7 @@ def _draft_dict(draft: GradeDraft, submission: Submission) -> dict[str, Any]:
             "One-click approval stays off until the calibrator is trained and agrees "
             "with the council at p(keep) of at least 0.85."
         ),
+        "trace_url": draft.trace_url or "",
     }
 
 
@@ -963,7 +968,7 @@ async def scan_integrity(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
     course = await _course(db, org_id, course_id)
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     await db.execute(
         delete(IntegrityFlag).where(
             IntegrityFlag.organization_id == org_id,
@@ -1102,7 +1107,7 @@ async def save_style(
 
 
 async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     result = await db.execute(
         select(GradeDraft).where(
             GradeDraft.organization_id == org_id, GradeDraft.owner_user_id == user_id
@@ -1180,7 +1185,7 @@ async def build_cited_deck(
     """Slide-studio skill: multi-hop retrieval, citations, gaps, then pptx."""
     from app.profassist.skills.slide_studio import run_slide_studio
 
-    await load_runtime(db, org_id)
+    await load_runtime(db, org_id, user_id)
     course = await _course(db, org_id, course_id)
     objectives = [
         row["text"]

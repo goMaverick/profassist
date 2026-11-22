@@ -241,6 +241,19 @@ def test_mlflow_empty_state_when_server_is_down(monkeypatch: pytest.MonkeyPatch)
     assert payload["models"][0]["status"] == "not_trained"
 
 
+def test_trace_link_uses_the_public_langfuse_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGFUSE_PUBLIC_BASE_URL", "http://localhost:3100")
+    monkeypatch.setenv("LANGFUSE_PROJECT_ID", "profassist-project")
+    from app.profassist.observe import opaque, prompt_status, trace_url
+
+    assert opaque("same") == opaque("same")
+    assert opaque("a") != opaque("b")
+    assert trace_url("abc") == "http://localhost:3100/project/profassist-project/traces/abc"
+    status = prompt_status("grading_council", None)
+    assert status["source"] == "code"
+    assert "Quote the submission" in status["text"]
+
+
 def test_skill_file_lists_tools() -> None:
     from app.profassist.skills.loader import load_skill
 

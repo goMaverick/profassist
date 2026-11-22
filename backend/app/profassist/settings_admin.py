@@ -20,7 +20,12 @@ async def _settings(db: AsyncSession, org_id: uuid.UUID) -> AiSettings:
     return row
 
 
-async def load_runtime(db: AsyncSession, org_id: uuid.UUID) -> None:
+async def load_runtime(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None = None
+) -> None:
+    from app.profassist.observe import set_actor
+
+    set_actor(str(org_id), str(user_id or ""))
     settings = await _settings(db, org_id)
     prompt_rows = await db.execute(
         select(PromptVersion).where(
@@ -41,15 +46,27 @@ async def load_runtime(db: AsyncSession, org_id: uuid.UUID) -> None:
 
 async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     settings = await _settings(db, org_id)
-    versions = await db.execute(
-        select(PromptVersion)
-        .where(PromptVersion.organization_id == org_id)
-        .order_by(PromptVersion.agent_key, PromptVersion.version.desc())
+    version_rows = list(
+        (
+            await db.execute(
+                select(PromptVersion)
+                .where(PromptVersion.organization_id == org_id)
+                .order_by(PromptVersion.agent_key, PromptVersion.version.desc())
+            )
+        )
+        .scalars()
+        .all()
     )
-    audits = await db.execute(
-        select(PromptAudit)
-        .where(PromptAudit.organization_id == org_id)
-        .order_by(PromptAudit.created_at.desc())
+    audit_rows = list(
+        (
+            await db.execute(
+                select(PromptAudit)
+                .where(PromptAudit.organization_id == org_id)
+                .order_by(PromptAudit.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
     )
     tool_rows = await db.execute(
         select(AgentToolSetting).where(AgentToolSetting.organization_id == org_id)
@@ -59,6 +76,10 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     for agent, names in DEFAULT_TOOLS.items():
         for name in names:
             tools.append({"agent": agent, "tool": name, "enabled": stored.get((agent, name), True)})
+    from app.profassist.observe import prompt_status
+
+    published = {row.agent_key: row.body for row in version_rows if row.active}
+    sources = [prompt_status(name, published.get(name)) for name in DEFAULT_PROMPTS]
     return {
         "chat_enabled": settings.chat_enabled,
         "provider": settings.provider,
@@ -71,8 +92,9 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
                 "body": row.body,
                 "active": row.active,
             }
-            for row in versions.scalars().all()
+            for row in version_rows
         ],
+        "prompt_sources": sources,
         "defaults": catalog()["prompts"],
         "tools": tools,
         "audit": [
@@ -83,7 +105,7 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
                 "before": row.before,
                 "after": row.after,
             }
-            for row in list(audits.scalars().all())[:20]
+            for row in audit_rows[:20]
         ],
     }
 

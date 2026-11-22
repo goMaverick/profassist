@@ -6,6 +6,7 @@ from langgraph.graph import END, StateGraph
 
 from app.profassist import llm
 from app.profassist.grading import reconcile
+from app.profassist.observe import invoke_graph
 from app.profassist.rag import keyword_score
 
 PERSONAS = ("evidence", "strict", "supportive")
@@ -91,7 +92,12 @@ def build_course_graph():
 
 
 def run_course(task: str, **state: Any) -> dict[str, Any]:
-    result = build_course_graph().invoke({"task": task, **state})
+    result, _url = invoke_graph(
+        build_course_graph(),
+        {"task": task, **state},
+        name=f"{task}: {state.get('title') or 'course'}",
+        metadata={"kind": task},
+    )
     return result.get("result") or {}
 
 
@@ -157,14 +163,20 @@ def build_grading_graph():
     return graph.compile()
 
 
-def run_grading_council(submission: str, criterion: dict[str, Any], soul: str) -> dict[str, Any]:
-    result = build_grading_graph().invoke(
-        {"submission": submission, "criterion": criterion, "soul": soul, "votes": []}
+def run_grading_council(
+    submission: str, criterion: dict[str, Any], soul: str, *, title: str = "assignment"
+) -> dict[str, Any]:
+    result, url = invoke_graph(
+        build_grading_graph(),
+        {"submission": submission, "criterion": criterion, "soul": soul, "votes": []},
+        name=f"grade: {title} / {criterion.get('name') or 'criterion'}",
+        metadata={"kind": "grade", "criterion": criterion.get("name")},
     )
     return {
         "votes": result.get("votes") or [],
         "judge": result.get("judge") or {},
         "feedback": result.get("feedback") or "",
+        "trace_url": url,
     }
 
 
@@ -183,4 +195,10 @@ def run_reflection(proposal: str) -> str:
     graph.add_node("reflect", node)
     graph.set_entry_point("reflect")
     graph.add_edge("reflect", END)
-    return graph.compile().invoke({"proposal": proposal}).get("text") or proposal
+    result, _url = invoke_graph(
+        graph.compile(),
+        {"proposal": proposal},
+        name="reflection",
+        metadata={"kind": "reflection"},
+    )
+    return result.get("text") or proposal

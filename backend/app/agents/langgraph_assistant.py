@@ -187,6 +187,10 @@ class LangGraphAssistant:
         thread_id: str = "default",
     ) -> tuple[str, list[Any], AgentContext]:
         messages = self._convert_history(history)
+        from app.profassist.observe import callbacks
+        from app.profassist.pii import scrub
+
+        user_input = scrub(user_input or "", []).text
         messages.append(HumanMessage(content=user_input))
 
         agent_context: AgentContext = context if context is not None else {}
@@ -194,10 +198,12 @@ class LangGraphAssistant:
         logger.info("Running agent with user input: %s...", user_input[:100])
 
         config = {
+            "callbacks": callbacks(),
+            "run_name": "chat",
             "configurable": {
                 "thread_id": thread_id,
                 **agent_context,
-            }
+            },
         }
         token = _active_kb_collections.set(agent_context.get("kb_collection_names") or [])
         try:
@@ -231,15 +237,21 @@ class LangGraphAssistant:
         thread_id: str = "default",
     ):
         messages = self._convert_history(history)
+        from app.profassist.observe import callbacks
+        from app.profassist.pii import scrub
+
+        user_input = scrub(user_input or "", []).text
         messages.append(HumanMessage(content=user_input))
 
         agent_context: AgentContext = context if context is not None else {}
 
         config = {
+            "callbacks": callbacks(),
+            "run_name": "chat",
             "configurable": {
                 "thread_id": thread_id,
                 **agent_context,
-            }
+            },
         }
 
         logger.info("Starting stream for user input: %s...", user_input[:100])
