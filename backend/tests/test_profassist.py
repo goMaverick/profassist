@@ -802,3 +802,123 @@ def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) 
     )
     assert "42.7" in result["feedback"]
     assert "!" not in result["feedback"]
+
+
+def test_fresh_course_appears_on_the_integrity_board() -> None:
+    from app.profassist.integrity_board import overview, register_course, unregister_course
+    from app.profassist.journey import fresh_board
+
+    course = fresh_board("AAS 910", "Assurance Studio", "A3", "Group project")
+    register_course(course)
+    try:
+        board = overview(course["slug"])
+        assert board["summary"]["courses"] == 1
+        card = board["items"][0]
+        assert card["number"] == "A3"
+        assert card["groups"] == 4
+        assert card["status"] == "Concern"
+    finally:
+        unregister_course(course["slug"])
+
+
+def test_fake_moodle_stages_pdf_and_docx_without_a_network_call() -> None:
+    from app.profassist.moodle import CATALOG, STUDENTS, SUBMISSIONS, FakeMoodleConnector
+
+    client = FakeMoodleConnector()
+    course_id = "mdl-journey-test"
+    assignment_id = "asg-journey-test"
+    student_id = "j-journey-test-1"
+    submission_id = "sub-journey-test-a"
+    client.stage_course_work(
+        course={
+            "id": course_id,
+            "code": "AAS910TEST",
+            "title": "Assurance Studio",
+            "term": "2026",
+        },
+        students=[
+            {
+                "id": student_id,
+                "course_id": course_id,
+                "display_name": "Sara Al Maktoum",
+                "email": "",
+                "student_number": "8889101",
+            }
+        ],
+        assignment={
+            "id": assignment_id,
+            "course_id": course_id,
+            "name": "Group project",
+            "kind": "assignment",
+            "rubric": [],
+        },
+        submissions=[
+            {
+                "id": submission_id,
+                "assignment_id": assignment_id,
+                "group_name": "Group A",
+                "text": "Group A submitted a file.",
+                "files": [
+                    {
+                        "filename": "group-a.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-1.4",
+                    }
+                ],
+            },
+            {
+                "id": submission_id + "-b",
+                "assignment_id": assignment_id,
+                "group_name": "Group B",
+                "text": "Group B submitted a file.",
+                "files": [
+                    {
+                        "filename": "group-b.docx",
+                        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "data": b"PK",
+                    }
+                ],
+            },
+            {
+                "id": submission_id + "-c",
+                "assignment_id": assignment_id,
+                "group_name": "Group C",
+                "text": "Group C submitted a file.",
+                "files": [
+                    {"filename": "group-c.pdf", "content_type": "application/pdf", "data": b"%PDF"}
+                ],
+            },
+        ],
+    )
+    try:
+        assert any(row["id"] == course_id for row in client.list_courses())
+        rows = client.list_submissions(assignment_id)
+        names = {row["files"][0]["filename"] for row in rows}
+        assert {"group-a.pdf", "group-b.docx", "group-c.pdf"} <= names
+        client.stage_course_work(
+            course={
+                "id": course_id,
+                "code": "AAS910TEST",
+                "title": "Assurance Studio",
+                "term": "2026",
+            },
+            students=[],
+            assignment={
+                "id": assignment_id,
+                "course_id": course_id,
+                "name": "Group project",
+                "kind": "assignment",
+                "rubric": [],
+            },
+            submissions=[],
+        )
+        assert sum(1 for row in client.list_courses() if row["id"] == course_id) == 1
+    finally:
+        CATALOG["courses"][:] = [row for row in CATALOG["courses"] if row.get("id") != course_id]
+        CATALOG["assignments"][:] = [
+            row for row in CATALOG["assignments"] if row.get("id") != assignment_id
+        ]
+        STUDENTS[:] = [row for row in STUDENTS if row.get("id") != student_id]
+        SUBMISSIONS[:] = [
+            row for row in SUBMISSIONS if not str(row.get("id", "")).startswith("sub-journey-test")
+        ]

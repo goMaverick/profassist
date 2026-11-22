@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { firstCourse, pa, ProfassistError, type Course } from "@/lib/profassist";
+import { pa, ProfassistError, type Course } from "@/lib/profassist";
 
 export function Banner({ children }: { children: React.ReactNode }) {
   return (
@@ -17,8 +17,11 @@ export function useWorkspace() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    firstCourse()
-      .then(setCourse)
+    pa<{ items: Course[] }>("/courses")
+      .then((data) => {
+        const saved = window.sessionStorage.getItem("pa-course") || "";
+        setCourse(data.items.find((item) => item.id === saved) || data.items[0] || null);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load the workspace"))
       .finally(() => setLoading(false));
   }, []);

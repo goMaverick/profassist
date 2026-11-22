@@ -297,6 +297,21 @@ def _pair_id(course: str, number: str, left: str, right: str) -> str:
     return f"{_norm(course)}-{number}-{left}-{right}"
 
 
+def register_course(course: dict[str, Any]) -> None:
+    """Add a course the professor just created. Replaces the same slug."""
+    slug = course["slug"]
+    for index, item in enumerate(COURSES):
+        if item["slug"] == slug:
+            COURSES[index] = course
+            return
+    COURSES.append(course)
+
+
+def unregister_course(slug: str) -> None:
+    wanted = _norm(slug)
+    COURSES[:] = [item for item in COURSES if item["slug"] != wanted]
+
+
 def _course(code: str) -> dict[str, Any] | None:
     wanted = _norm(code)
     for course in COURSES:

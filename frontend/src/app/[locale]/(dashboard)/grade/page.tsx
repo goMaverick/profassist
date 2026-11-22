@@ -98,6 +98,7 @@ export default function GradePage() {
   const [levels, setLevels] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState("Group A");
+  const [sent, setSent] = useState("");
 
   async function loadQueue(courseId: string) {
     const queue = await pa<{
@@ -162,10 +163,24 @@ export default function GradePage() {
       {feedbackFor && (
         <FeedbackDesk
           group={feedbackFor}
+          courseCode={course.code}
+          sent={sent}
           onClose={() => setFeedbackFor("")}
           onApprove={() => {
             const row = rows.find((item) => item.group_name === feedbackFor);
             if (row?.draft_id) void approve(row.draft_id);
+          }}
+          onSend={() => {
+            void run(
+              () =>
+                pa<{ message: string }>("/grade/send", {
+                  method: "POST",
+                  body: JSON.stringify({ group: feedbackFor, course: course.code }),
+                }),
+              setError,
+            ).then((result) => {
+              if (result) setSent(result.message);
+            });
           }}
         />
       )}
@@ -287,7 +302,21 @@ function letterOf(score: number) {
   return "F";
 }
 
-function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: () => void; onApprove: () => void }) {
+function FeedbackDesk({
+  group,
+  courseCode,
+  sent,
+  onClose,
+  onApprove,
+  onSend,
+}: {
+  group: string;
+  courseCode: string;
+  sent: string;
+  onClose: () => void;
+  onApprove: () => void;
+  onSend: () => void;
+}) {
   const [notes, setNotes] = useState<FeedbackNotes | null>(null);
   const [pick, setPick] = useState<{ page: number; quote: string; box: Box } | null>(null);
   const [comment, setComment] = useState("");
@@ -305,19 +334,20 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
   const [fresh, setFresh] = useState("");
 
   useEffect(() => {
-    pa<FeedbackNotes>(`/grade/feedback?group=${encodeURIComponent(group)}`)
+    pa<FeedbackNotes>(`/grade/feedback?group=${encodeURIComponent(group)}&course=${encodeURIComponent(courseCode)}`)
       .then((data) => {
         setNotes(data);
         setOverrides(data.overrides || {});
       })
       .catch(() => setNotes(null));
-  }, [group]);
+  }, [group, courseCode]);
 
   async function persist(next: FeedbackNotes) {
     const saved = await pa<FeedbackNotes>("/grade/feedback", {
       method: "POST",
       body: JSON.stringify({
         group,
+        course: courseCode,
         comments: next.comments,
         rubric: next.rubric,
         overall: next.overall,
@@ -448,7 +478,7 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
                             <button key={item.name} type="button" className={band === item.name ? "is-on" : ""} aria-pressed={band === item.name} onClick={() => choose(row, item.name)}>
                               <strong>{item.name}</strong>
                               <span>{item.low}-{item.high}</span>
-                              {band === item.name && <em>{changed ? "You picked" : "AI picked"}</em>}
+                              {band === item.name && <em>{changed ? "Changed by you" : "AI picked"}</em>}
                             </button>
                           ))}
                         </div>
@@ -514,10 +544,38 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
             }}>Save to bank</Button>
           </>
         )}
+        <TextArea id="margin-comment" labelText="Margin comment" value={comment} onChange={(event) => setComment(event.target.value)} />
+        <Button
+          kind="tertiary"
+          onClick={() => {
+            const row = criteria[0];
+            if (!row || !comment.trim()) return;
+            const next = {
+              ...notes,
+              comments: [
+                ...notes.comments,
+                { id: `you-${Date.now()}`, page: row.page, box: row.box, quote: row.evidence, text: comment.trim() },
+              ],
+            };
+            setComment("");
+            setNotes(next);
+            setDocOpen(true);
+            void persist(next);
+          }}
+        >
+          Add margin comment
+        </Button>
         <div className="pa-grade-bar">
           <Button kind="secondary" onClick={() => void persist(notes)}>Save draft</Button>
           <Button kind="primary" onClick={() => { setStep(2); onApprove(); }}>Approve grade</Button>
+          <Button kind="primary" onClick={() => { setStep(3); onSend(); }}>Send to Moodle</Button>
         </div>
+        {sent && (
+          <>
+            <p className="pa-grade-banner">{sent}</p>
+            <p>This assignment is complete. Recorded here. Moodle was not contacted.</p>
+          </>
+        )}
         {howOpen && (
           <div className="pa-drawer" role="dialog" aria-label="How was this made?">
             <div className="pa-drawer-card">

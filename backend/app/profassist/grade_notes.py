@@ -85,7 +85,9 @@ def letter_for(score: int) -> str:
     return "F"
 
 
-def draft_mark(group: str = "Group A") -> dict[str, Any]:
+def draft_mark(
+    group: str = "Group A", course: str = "MAAI903", number: str = "1"
+) -> dict[str, Any]:
     """What the grading council drafted from the Workshops rubric. Synthetic demo only."""
     criteria = [
         {
@@ -161,7 +163,7 @@ def draft_mark(group: str = "Group A") -> dict[str, Any]:
         from app.profassist.integrity_docs import locate_sentence
 
         for row in criteria:
-            found = locate_sentence("MAAI903", "1", "A", str(row["evidence"]))
+            found = locate_sentence(course, number, "A", str(row["evidence"]))
             if not found:
                 continue
             row["page"] = found["page"]
@@ -179,14 +181,14 @@ def draft_mark(group: str = "Group A") -> dict[str, Any]:
     }
 
 
-def _path(user_id: str, group: str) -> Path:
-    safe = "".join(ch for ch in f"{user_id}-{group}" if ch.isalnum() or ch in {"-", "_"})
+def _path(user_id: str, group: str, course: str = "MAAI903") -> Path:
+    safe = "".join(ch for ch in f"{user_id}-{course}-{group}" if ch.isalnum() or ch in {"-", "_"})
     path = Path(settings.MEDIA_DIR) / "profassist" / "feedback" / f"{safe}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _seed(group: str) -> dict[str, Any]:
+def _seed(group: str, course: str = "MAAI903", number: str = "1") -> dict[str, Any]:
     comments: list[dict[str, Any]] = []
     if group in {"Group A", "A"}:
         from app.profassist.integrity_docs import locate_sentence
@@ -202,7 +204,7 @@ def _seed(group: str) -> dict[str, Any]:
             ),
         ]
         for sentence, note in planted:
-            found = locate_sentence("MAAI903", "1", "A", sentence)
+            found = locate_sentence(course, number, "A", sentence)
             if not found:
                 continue
             comments.append(
@@ -216,39 +218,53 @@ def _seed(group: str) -> dict[str, Any]:
             )
     return {
         "group": group,
+        "course": course,
+        "number": number,
         "comments": comments,
         "rubric": [dict(row) for row in RUBRIC],
         "overall": OVERALL,
         "bank": list(BANK),
         "release": "draft",
-        "ai_grade": draft_mark(group),
+        "ai_grade": draft_mark(group, course, number),
         "overrides": {},
     }
 
 
-def load_feedback(user_id: str, group: str) -> dict[str, Any]:
-    path = _path(user_id, group)
+def load_feedback(
+    user_id: str, group: str, course: str = "MAAI903", number: str = "1"
+) -> dict[str, Any]:
+    path = _path(user_id, group, course)
     if not path.exists():
-        return _seed(group)
+        return _seed(group, course, number)
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
-        return _seed(group)
+        return _seed(group, course, number)
     data.setdefault("comments", [])
     data.setdefault("rubric", [dict(row) for row in RUBRIC])
     data.setdefault("overall", OVERALL)
     data.setdefault("bank", list(BANK))
     data.setdefault("release", "draft")
     data.setdefault("overrides", {})
-    data["ai_grade"] = draft_mark(data.get("group") or group)
+    data["course"] = course
+    data["number"] = number
+    data["ai_grade"] = draft_mark(data.get("group") or group, course, number)
     return data
 
 
-def save_feedback(user_id: str, group: str, payload: dict[str, Any]) -> dict[str, Any]:
-    current = load_feedback(user_id, group)
+def save_feedback(
+    user_id: str,
+    group: str,
+    payload: dict[str, Any],
+    course: str = "MAAI903",
+    number: str = "1",
+) -> dict[str, Any]:
+    current = load_feedback(user_id, group, course, number)
     current.update(
         {
             "group": group,
+            "course": course,
+            "number": number,
             "comments": payload.get("comments", current["comments"]),
             "rubric": payload.get("rubric", current["rubric"]),
             "overall": payload.get("overall", current["overall"]),
@@ -258,14 +274,16 @@ def save_feedback(user_id: str, group: str, payload: dict[str, Any]) -> dict[str
         }
     )
     stored = {key: value for key, value in current.items() if key != "ai_grade"}
-    _path(user_id, group).write_text(json.dumps(stored))
-    current["ai_grade"] = draft_mark(group)
+    _path(user_id, group, course).write_text(json.dumps(stored))
+    current["ai_grade"] = draft_mark(group, course, number)
     return current
 
 
-def release_feedback(user_id: str, group: str) -> dict[str, Any]:
+def release_feedback(
+    user_id: str, group: str, course: str = "MAAI903", number: str = "1"
+) -> dict[str, Any]:
     """Approve keeps the notes private unless push is explicitly enabled."""
-    notes = load_feedback(user_id, group)
+    notes = load_feedback(user_id, group, course, number)
     audit = {
         "target_type": "grade_feedback",
         "action": "approved",
@@ -273,7 +291,7 @@ def release_feedback(user_id: str, group: str) -> dict[str, Any]:
     }
     if not moodle_push_enabled():
         notes["release"] = "held"
-        _path(user_id, group).write_text(json.dumps(notes))
+        _path(user_id, group, course).write_text(json.dumps(notes))
         return {
             "pushed": False,
             "message": "Saved with the grade. Moodle was not contacted because push is off.",
@@ -291,7 +309,7 @@ def release_feedback(user_id: str, group: str) -> dict[str, Any]:
         }
     )
     notes["release"] = "pushed"
-    _path(user_id, group).write_text(json.dumps(notes))
+    _path(user_id, group, course).write_text(json.dumps(notes))
     audit["note"] = "Feedback pushed with the grade. Moodle was not contacted."
     return {
         "pushed": True,

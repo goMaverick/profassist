@@ -85,11 +85,14 @@ export default function OutlineWizardPage() {
   } | null>(null);
 
   useEffect(() => {
-    pa<{ items: Outline[] }>("/outlines")
-      .then(async (data) => {
-        const opened = data.items.length
-          ? data.items[0]
-          : await pa<Outline>("/outlines?demo=true", { method: "POST" });
+    const fresh = new URLSearchParams(window.location.search).get("fresh") === "1";
+    const open = fresh
+      ? pa<Outline>("/outlines", { method: "POST" })
+      : pa<{ items: Outline[] }>("/outlines").then(async (data) =>
+          data.items.length ? data.items[0] : pa<Outline>("/outlines?demo=true", { method: "POST" }),
+        );
+    open
+      .then(async (opened) => {
         setOutline(opened);
         if (opened.instructions) setInstructions(opened.instructions);
         const materials = await pa<{ items: CourseFile[] }>(`/outlines/${opened.id}/materials`).catch(() => ({
@@ -184,6 +187,7 @@ export default function OutlineWizardPage() {
           <div className="pa-step-head">
             <div>
               <p className="pa-step-kicker">Step {step + 1} of {STEPS.length}</p>
+              <Button kind="ghost" size="sm" onClick={() => window.location.assign("/outline?fresh=1")}>Start a new course</Button>
               <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "1.5rem", fontWeight: 400, margin: 0 }}>
                 <StepIcon size={20} />
                 {current?.label}
@@ -288,6 +292,7 @@ export default function OutlineWizardPage() {
               const next = await run(() => pa<Outline>(`/outlines/${outline.id}/finish`, { method: "POST" }), setError);
               if (next) {
                 setOutline(next);
+                if (next.course_id) window.sessionStorage.setItem("pa-course", next.course_id);
                 setNote("The subject outline is stored, indexed, and ready to download.");
               }
             }}>Generate</Button>
