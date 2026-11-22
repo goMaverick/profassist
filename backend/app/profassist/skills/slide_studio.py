@@ -14,6 +14,7 @@ class SlideState(TypedDict, total=False):
     slides: list[dict[str, Any]]
     skill: str
 
+
 from app.profassist import llm
 from app.profassist.rag import keyword_score
 from app.profassist.runtime import prompt_for, tool_enabled
