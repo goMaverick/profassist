@@ -115,8 +115,8 @@ function IntegrityBody() {
               </div>
               {showPair && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-                  <p>The pipeline versions the dataset before training and records the threshold.</p>
-                  <p>The pipeline versions the dataset before training and records the same threshold.</p>
+                  <p>Group A kept a weekly review with facilities. <mark>The shared draft still contains the typo sustanability.</mark></p>
+                  <p>Group B stays cautious about a campus-wide claim. <mark>The shared draft still contains the typo sustanability.</mark></p>
                 </div>
               )}
               <details style={{ marginTop: 16 }}>
@@ -138,7 +138,6 @@ function IntegrityBody() {
                   <p>B: The pipeline versions the dataset before training and records the same threshold.</p>
                 </div>
               </details>
-              <p>No submissions yet? Sync from Moodle, then come back to compare them.</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
                 {assignments.map((item) => (
                   <Button key={item.id} kind="tertiary" size="sm" onClick={() => router.replace(`/integrity?tab=similarity&id=${item.id}`)}>

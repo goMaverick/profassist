@@ -56,8 +56,7 @@ interface Draft {
 const LEVELS = ["beginning", "developing", "proficient", "advanced"];
 const GROUP_PEOPLE: Record<string, string> = {
   "Group A": "Sara Al Maktoum, Omar Haddad",
-  "Group B": "Noor Rahman",
-  "Group B18": "Noor Rahman, Layla Karim",
+  "Group B": "Omar Haddad",
   "Group C": "Layla Karim",
 };
 

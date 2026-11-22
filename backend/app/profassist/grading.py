@@ -82,7 +82,9 @@ def reconcile(votes: list[dict[str, Any]], submission: str) -> dict[str, Any]:
 
 
 def is_blind_sample(key: str) -> bool:
-    """About one draft in twenty hides the council level until the professor decides."""
+    """Group B is the held-back sample. About one other name in twenty is too."""
+    if (key or "").strip() in {"Group B", "Group B18"}:
+        return True
     return zlib.crc32((key or "").encode()) % 20 == 0
 
 

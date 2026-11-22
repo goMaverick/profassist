@@ -147,6 +147,11 @@
   text-transform: uppercase;
 }
 
+mark {
+  background: #f1c21b;
+  color: #161616;
+}
+
 .pa-why {
   padding: 0;
   border: 0;

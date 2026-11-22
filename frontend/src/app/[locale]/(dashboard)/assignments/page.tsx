@@ -22,11 +22,11 @@ import { pa, run, useWorkspace } from "@/components/profassist/bits";
 import { AiLive } from "@/components/profassist/ai-live";
 
 const COUNCIL_IDEAS = [
-  { title: "Clinic triage assistant", brief: "A group designs an intake model and a rollback plan for a campus clinic.", exemplar: "Strong work names the data version, the threshold, and one failure mode. Average work describes the model without the rollback. Weak work lists tools and stops." },
-  { title: "Library occupancy forecast", brief: "Predict seat demand and publish the model card with the data version.", exemplar: "Strong work shows a week of forecasts against the actual count. Average work has the chart and no error. Weak work is a screenshot." },
-  { title: "Energy dashboard", brief: "Stream building meters into a monitored pipeline with a drift check.", exemplar: "Strong work states what happens when the meter feed stops. Average work deploys the API. Weak work describes the dashboard only." },
-  { title: "Exam integrity review", brief: "Compare submissions after the shared brief is removed. A flag is not a verdict.", exemplar: "Strong work quotes the shared sentence and the sentence that remains. Average work reports a score. Weak work calls it cheating." },
-  { title: "Deployment rehearsal", brief: "Ship a small API, then write the runbook a mixed audience can follow.", exemplar: "Strong work includes the rollback command and who is called. Average work lists the steps. Weak work says it was deployed." },
+  { title: "Clinic triage assistant", brief: "A group designs an intake model and a rollback plan for a campus clinic.", strong: "Names the data version, the threshold, and one failure mode.", average: "Describes the model without the rollback.", weak: "Lists tools and stops." },
+  { title: "Library occupancy forecast", brief: "Predict seat demand and publish the model card with the data version.", strong: "Shows a week of forecasts against the actual count.", average: "Has the chart and no error.", weak: "Is a screenshot." },
+  { title: "Energy dashboard", brief: "Stream building meters into a monitored pipeline with a drift check.", strong: "States what happens when the meter feed stops.", average: "Deploys the API.", weak: "Describes the dashboard only." },
+  { title: "Exam integrity review", brief: "Compare submissions after the shared brief is removed.", strong: "Quotes the shared sentence and the sentence that remains.", average: "Reports a score.", weak: "Calls it cheating." },
+  { title: "Deployment rehearsal", brief: "Ship a small API, then write the runbook a mixed audience can follow.", strong: "Includes the rollback command and who is called.", average: "Lists the steps.", weak: "Says it was deployed." },
 ];
 
 interface CatalogItem {
@@ -189,7 +189,7 @@ function AssignmentsBody() {
           <div className="pa-kpi-row">
             <Tile><p className="pa-step-kicker">Submissions</p><strong style={{ fontSize: "2rem" }}>{summary.submissions}</strong></Tile>
             <Tile><p className="pa-step-kicker">Groups</p><strong style={{ fontSize: "2rem" }}>{summary.groups}</strong></Tile>
-            <Tile><p className="pa-step-kicker">Approved grades</p><strong style={{ fontSize: "2rem" }}>{summary.approved}</strong><p>{summary.drafts} drafts</p></Tile>
+            <Tile><p className="pa-step-kicker">Approved grades</p><strong style={{ fontSize: "2rem" }}>{summary.approved}</strong><p>{summary.drafts} draft{summary.drafts === 1 ? "" : "s"}</p></Tile>
             <Tile><p className="pa-step-kicker">Open flags</p><strong style={{ fontSize: "2rem" }}>{summary.flags}</strong></Tile>
           </div>
           <Tile>
@@ -208,7 +208,12 @@ function AssignmentsBody() {
                 <Tile key={idea.title}>
                   <strong>{index + 1}. {idea.title}</strong>
                   <p>{idea.brief}</p>
-                  <p><b>Exemplar.</b> {idea.exemplar}</p>
+                  <details>
+                    <summary>Exemplar</summary>
+                    <p><strong>Strong.</strong> {idea.strong}</p>
+                    <p><strong>Average.</strong> {idea.average}</p>
+                    <p><strong>Weak.</strong> {idea.weak}</p>
+                  </details>
                 </Tile>
               ))}
             </div>
