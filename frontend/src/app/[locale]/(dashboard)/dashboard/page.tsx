@@ -1,19 +1,10 @@
 "use client";
 
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { ClickableTile, Column, Grid, InlineNotification, Tag, Tile } from "@carbon/react";
-import {
-  Document,
-  Education,
-  Flag,
-  Certificate,
-  PresentationFile,
-  Report,
-  User,
-  Watson,
-} from "@carbon/icons-react";
+import { CheckmarkFilled, Flag, Incomplete, Send } from "@carbon/icons-react";
 import { pa } from "@/lib/profassist";
+import { HomeChat } from "@/components/profassist/home-chat";
 
 interface Home {
   courses: Array<{ id: string; code: string; title: string; term: string }>;
@@ -23,84 +14,186 @@ interface Home {
   pushed: number;
   open_flags: number;
   moodle_mode: string;
-  llm_mode: string;
   principle: string;
-  calibrator: { status: string; message: string };
 }
 
-const CARDS = [
-  { href: "/outline", title: "Subject outline", text: "Walk the faculty template and download the PDF.", icon: Document },
-  { href: "/generate", title: "Assessments", text: "Pick outcomes. The council suggests a task and a rubric.", icon: Report },
-  { href: "/studio", title: "Course studio", text: "Notes, objectives, and the materials the agents read.", icon: Education },
-  { href: "/slides", title: "Slides", text: "A cited deck for the week you choose.", icon: PresentationFile },
-  { href: "/grade", title: "Review and grade", text: "Council, your edit, then a recorded push.", icon: Certificate },
-  { href: "/integrity", title: "Integrity", text: "Shared passages and viva questions. Not a verdict.", icon: Flag },
-  { href: "/students", title: "Students", text: "The roster. Early warning is not trained.", icon: User },
-  { href: "/style", title: "My style", text: "Your voice and the About this professor note.", icon: Watson },
+const WEEK = [
+  { day: "Mon", views: 18 },
+  { day: "Tue", views: 26 },
+  { day: "Wed", views: 22 },
+  { day: "Thu", views: 31 },
+  { day: "Fri", views: 14 },
+];
+const GRADE_SLICES = [
+  { name: "Draft", value: 6, color: "#0f62fe" },
+  { name: "Approved", value: 3, color: "#78a9ff" },
+  { name: "Pushed", value: 2, color: "#a6c8ff" },
 ];
 
 export default function HomePage() {
   const [home, setHome] = useState<Home | null>(null);
+  const [tasks, setTasks] = useState<Array<{ name: string; due?: string; number?: string }>>([]);
   const [error, setError] = useState("");
+  const [courseId, setCourseId] = useState("");
 
   useEffect(() => {
     pa<Home>("/home")
-      .then(setHome)
+      .then((data) => {
+        setHome(data);
+        setCourseId(data.courses[0]?.id || "");
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load home"));
+    pa<{ items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }> }>("/outlines")
+      .then((data) => setTasks(data.items[0]?.body?.tasks || []))
+      .catch(() => setTasks([]));
   }, []);
 
-  const course = home?.courses[0];
+  const course = home?.courses.find((item) => item.id === courseId) || home?.courses[0];
+  const waiting = Math.max(0, (home?.drafts || 0) - (home?.approved || 0));
+
+  if (!home && !error) {
+    return (
+      <div className="pa-dash" aria-busy="true">
+        <div className="pa-skel" />
+        <div className="pa-kpi-row">
+          <div className="pa-skel" />
+          <div className="pa-skel" />
+          <div className="pa-skel" />
+          <div className="pa-skel" />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Grid>
-      {!home && !error && (
-        <Column lg={16}>
-          <p>Loading the workspace…</p>
-        </Column>
-      )}
-      {error && (
-        <Column sm={4} md={8} lg={16}>
-          <InlineNotification kind="error" title="Could not load" subtitle={error} hideCloseButton />
-        </Column>
-      )}
-      {home && (
-        <Column sm={4} md={8} lg={16}>
-          <InlineNotification kind="info" title="How this works" subtitle={home.principle} hideCloseButton lowContrast />
-        </Column>
-      )}
-      {home &&
-        [
-          ["Course", course?.code || "None yet"],
-          ["Submissions", String(home.submissions)],
-          ["Open flags", String(home.open_flags)],
-          ["Pushed", String(home.pushed)],
-        ].map(([label, value]) => (
-          <Column key={label} sm={2} md={2} lg={4}>
-            <Tile>
-              <div style={{ color: "#6f6f6f", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
-              <div style={{ fontSize: "2rem", marginTop: "0.5rem" }}>{value}</div>
-            </Tile>
-          </Column>
-        ))}
-      {home && CARDS.map((card) => (
-        <Column key={card.href} sm={4} md={4} lg={4}>
-          <ClickableTile href={card.href} style={{ minHeight: "9rem" }}>
-            <card.icon size={24} />
-            <h2 style={{ fontSize: "1.1rem", margin: "0.75rem 0 0.25rem" }}>{card.title}</h2>
-            <p style={{ margin: 0, color: "#525252" }}>{card.text}</p>
-          </ClickableTile>
-        </Column>
+    <div className="pa-dash">
+      {error && <p role="alert">{error}</p>}
+      <HomeChat courses={home?.courses || []} courseId={course?.id} onCourse={setCourseId} />
+      <div className="pa-kpi-row">
+        <Stat icon={<Incomplete size={16} />} label="Submissions" value={home?.submissions || 0} delta="in the queue" />
+        <Stat icon={<CheckmarkFilled size={16} />} label="Awaiting you" value={waiting} delta="drafts not approved" />
+        <Stat icon={<Flag size={16} />} label="Open flags" value={home?.open_flags || 0} delta="not a verdict" />
+        <Stat icon={<Send size={16} />} label="Pushed" value={home?.pushed || 0} delta={`${home?.moodle_mode || "fake"} Moodle`} />
+      </div>
+      <div className="pa-chart-row">
+        <section className="pa-panel">
+          <h2>Grading progress</h2>
+          <p style={{ margin: "-8px 0 12px", color: "#6f6f6f", fontSize: "0.75rem" }}>Synthetic term, demo only.</p>
+          <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+            <Donut slices={GRADE_SLICES} />
+            <ul className="pa-list" style={{ flex: 1 }}>
+              {GRADE_SLICES.map((item) => (
+                <li key={item.name}>
+                  <span>{item.name}</span>
+                  <strong style={{ color: item.color }}>{item.value}</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+        <section className="pa-panel">
+          <h2>Weekly activity</h2>
+          <p style={{ margin: "-8px 0 8px", color: "#6f6f6f", fontSize: "0.75rem" }}>Synthetic week, demo only.</p>
+          <div className="pa-bars" aria-label="Views by weekday">
+            {WEEK.map((item) => (
+              <div key={item.day}>
+                <div style={{ height: `${item.views * 4}px` }} />
+                <span>{item.day}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+      <div className="pa-split">
+        <section className="pa-panel">
+          <h2>Needs your approval</h2>
+          {waiting === 0 ? (
+            <div className="pa-empty">
+              <CheckmarkFilled size={20} />
+              <span>Nothing is waiting. Drafts stay drafts until you approve them.</span>
+            </div>
+          ) : (
+            <ul className="pa-list">
+              <li>
+                <span>{waiting} grade draft{waiting === 1 ? "" : "s"}</span>
+                <Link href="/grade">Review</Link>
+              </li>
+            </ul>
+          )}
+        </section>
+        <section className="pa-panel">
+          <h2>Upcoming deadlines</h2>
+          {tasks.length === 0 ? (
+            <div className="pa-empty">
+              <span>No dated tasks on the outline yet.</span>
+            </div>
+          ) : (
+            <ul className="pa-list">
+              {tasks.slice(0, 4).map((task) => (
+                <li key={task.number || task.name}>
+                  <span>
+                    {task.number} {task.name}
+                  </span>
+                  <span>{task.due || "Date not set"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Donut({ slices }: { slices: Array<{ name: string; value: number; color: string }> }) {
+  const total = slices.reduce((sum, item) => sum + item.value, 0) || 1;
+  const radius = 46;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const arcs = slices.map((item) => {
+    const length = (item.value / total) * circumference;
+    const arc = { ...item, length, offset };
+    offset += length;
+    return arc;
+  });
+  return (
+    <svg width="148" height="148" viewBox="0 0 148 148" role="img" aria-label={slices.map((item) => `${item.name} ${item.value}`).join(", ")}>
+      {arcs.map((item) => (
+        <circle
+          key={item.name}
+          cx="74"
+          cy="74"
+          r={radius}
+          fill="none"
+          stroke={item.color}
+          strokeWidth="18"
+          strokeDasharray={`${item.length} ${circumference - item.length}`}
+          strokeDashoffset={-item.offset}
+          transform="rotate(-90 74 74)"
+        />
       ))}
-      {home && (
-      <Column sm={4} md={8} lg={16}>
-        <Tag type="blue">Moodle {home.moodle_mode}</Tag>
-        <Tag type={home?.llm_mode === "demo" ? "gray" : "green"}>Model {home?.llm_mode || "…"}</Tag>
-        <Tag type="teal">{course?.title || "Course not seeded"}</Tag>
-        <Link href="/outline" style={{ marginLeft: "0.5rem" }}>
-          Open the subject outline
-        </Link>
-      </Column>
-      )}
-    </Grid>
+    </svg>
+  );
+}
+
+function Stat({
+  icon,
+  label,
+  value,
+  delta,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  delta: string;
+}) {
+  return (
+    <article className="pa-stat">
+      <span>
+        {icon} {label}
+      </span>
+      <strong>{value}</strong>
+      <em>{delta}</em>
+    </article>
   );
 }

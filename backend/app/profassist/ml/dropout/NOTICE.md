@@ -7,11 +7,11 @@ LICENSE file. This port keeps the attribution and does not claim a license the
 upstream project did not grant. It is a demonstration contract, not a right to
 use the model on real students.
 
-What was ported: the 14 allowlisted feature names and the rule that a score is
-advisory only. The training CSVs are not in the git tree. `data.dvc` points at
-a DVC directory that is not present here, and no serialized model is committed.
-This build therefore does not train or score. The at-risk page stays empty of
-predictions until a real day-35 LMS export and a registered model are supplied.
+What was ported: the 14 allowlisted feature names, the scikit-learn pipeline
+shape, and the rule that a score is advisory only. The upstream training CSVs
+are not in the git tree. `artifacts/model.joblib` is a logistic regression fit
+on synthetic Moodle-shaped rows by `train_synthetic.py`. It is labelled demo
+only. It is not trained on real students, and `automatic_actions` stays false.
 
 The upstream model, when trained on its synthetic bundle, is a scikit-learn
 pipeline: median imputation, missingness indicators, standard scaling, and

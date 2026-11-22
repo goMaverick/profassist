@@ -74,6 +74,8 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
         "list_outlines",
         "start_outline",
         "assist_outline",
+        "create_assignment",
+        "dropout_risk",
         "suggest_assessments",
         "accept_assessments",
         "generate_slides",

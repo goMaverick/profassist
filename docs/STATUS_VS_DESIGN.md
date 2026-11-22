@@ -4,7 +4,7 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 
 | Item | Status | Note |
 | --- | --- | --- |
-| Home | Done | Course, queue, and connector status for the signed-in professor. |
+| Home | Done | Hero chat bar above the KPIs. It greets the signed-in professor and sends the text to the LangGraph assistant, which calls the same tools as FastMCP. Tool results are cards with a link. Login, tenancy, and the privacy gate still apply. |
 | Course studio | Done | Upload notes, draft objectives, approve them. |
 | Course design assistant | Done | Weeks, outcomes, and an assessment plan. She edits the draft and approves it. It reads her notes and About section. |
 | Slide generator | Done | Slide studio plans, retrieves, cites, and exports a deck for a chosen week. |

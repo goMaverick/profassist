@@ -74,6 +74,18 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "summary": "Suggest the current wizard step.",
     },
     {
+        "name": "create_assignment",
+        "confirm": False,
+        "admin": False,
+        "summary": "Create a draft assignment on a course in this university.",
+    },
+    {
+        "name": "dropout_risk",
+        "confirm": False,
+        "admin": False,
+        "summary": "Show advisory dropout risk for the demo roster.",
+    },
+    {
         "name": "suggest_assessments",
         "confirm": False,
         "admin": False,
@@ -124,6 +136,24 @@ def tool_catalog() -> list[dict[str, Any]]:
     return [{**spec, "enabled": tool_enabled("mcp", spec["name"])} for spec in TOOL_SPECS]
 
 
+def _assignment_args(text: str) -> dict[str, Any]:
+    import re
+
+    number = "A2"
+    match = re.search(r"assignment\s+(\d+)", text)
+    if match:
+        number = f"A{match.group(1)}"
+    code = "MAAI903"
+    coded = re.search(r"maai\s*(\d+)", text)
+    if coded:
+        code = f"MAAI{coded.group(1)}"
+    due = ""
+    dated = re.search(r"due\s+(\d{1,2}\s+[a-z]+)", text)
+    if dated:
+        due = dated.group(1).title()
+    return {"number": number, "code": code, "due": due, "title": f"Assignment {number[1:]}"}
+
+
 def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
     """Demo router. A model key is not required."""
     text = (message or "").lower()
@@ -137,6 +167,14 @@ def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
             if token.isdigit():
                 week = int(token)
         return "generate_slides", {"week": week}
+    if "assignment" in text and any(word in text for word in ("create", "add", "draft")):
+        return "create_assignment", _assignment_args(text)
+    if "dropout" in text or "at risk" in text or "at-risk" in text:
+        return "dropout_risk", {}
+    if "similar" in text:
+        return "list_courses", {}
+    if "group" in text:
+        return "list_courses", {}
     if "assessment" in text and ("suggest" in text or "generat" in text):
         return "suggest_assessments", {}
     if "wizard" in text or "outline" in text:
@@ -229,6 +267,76 @@ async def _assist_outline(db, current, args):
         args.get("step") or "outcomes",
         args.get("message") or "Suggest this step",
     )
+
+
+async def _create_assignment(db, current, args):
+    from sqlalchemy import select
+
+    from app.profassist.models import Assessment, Course
+    from app.profassist.pii import scrub
+
+    wanted = "".join(ch for ch in str(args.get("code") or "MAAI903").upper() if ch.isalnum())
+    result = await db.execute(select(Course).where(Course.organization_id == current["org_id"]))
+    course = None
+    for row in result.scalars().all():
+        code = "".join(ch for ch in row.code.upper() if ch.isalnum())
+        if code == wanted or code.startswith(wanted[:4]):
+            course = row
+            break
+    if course is None:
+        raise ProfassistError(404, "No course in this university matches that code.")
+    number = str(args.get("number") or "A2")
+    due = scrub(str(args.get("due") or "")).text
+    title = f"{number} {args.get('title') or 'Assignment'}"
+    row = Assessment(
+        organization_id=current["org_id"],
+        course_id=course.id,
+        owner_user_id=current["user_id"],
+        title=title,
+        brief=f"Due {due}." if due else "Draft from the home chat.",
+        clos=list(course.clos or []),
+        status="draft",
+        external_id=f"chat-{number.lower()}",
+        kind="assignment",
+    )
+    db.add(row)
+    await db.flush()
+    return {
+        "id": str(row.id),
+        "kind": "assignment",
+        "code": course.code,
+        "title": title,
+        "due": due or "Date still open",
+        "status": "draft",
+        "href": "/generate",
+    }
+
+
+async def _dropout(db, current, _args):
+    del db
+    from app.profassist.ml.dropout import predict
+
+    _guard("dropout_risk")
+    payload = predict(
+        [
+            {"display_name": "Sara Al Maktoum", "external_id": "stu-1"},
+            {"display_name": "Omar Haddad", "external_id": "stu-2"},
+        ],
+        course_code="MAAI903",
+    )
+    return {
+        "href": "/students",
+        "trained": payload["trained"],
+        "message": payload["message"],
+        "students": [
+            {
+                "name": row["display_name"],
+                "band": row["band"],
+                "score": row["score"],
+            }
+            for row in payload["students"]
+        ],
+    }
 
 
 async def _suggest(db, current, args):
@@ -332,6 +440,8 @@ _HANDLERS = {
     "list_outlines": _list_outlines,
     "start_outline": _start_outline,
     "assist_outline": _assist_outline,
+    "create_assignment": _create_assignment,
+    "dropout_risk": _dropout,
     "suggest_assessments": _suggest,
     "accept_assessments": _accept,
     "generate_slides": _slides,
@@ -354,6 +464,9 @@ async def chat_turn(
     confirmed: bool = False,
     pending_tool: str = "",
 ) -> dict[str, Any]:
+    from app.profassist.pii import scrub
+
+    message = scrub(message or "").text
     set_tool_actor(org_id, user_id, is_admin=is_admin)
     try:
         if confirmed and pending_tool:
@@ -389,6 +502,7 @@ async def chat_turn(
             arguments = chosen.get("arguments") or {}
             confirmed_flag = False
         payload = await invoke_tool(db, name, arguments, confirmed=confirmed_flag)
+        payload["arguments"] = arguments
         if payload.get("needs_confirm"):
             reply = f"I can {payload['preview']} Reply confirm to go ahead."
         else:
@@ -425,8 +539,11 @@ def chat_stream_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "data": {
                     "name": tool,
                     "state": "approval-requested" if needs else "output-available",
-                    "input": {"tool": tool},
+                    "input": payload.get("arguments") or {"tool": tool},
                     "output": None if needs else payload.get("result"),
+                    "href": (payload.get("result") or {}).get("href")
+                    if isinstance(payload.get("result"), dict)
+                    else "",
                 },
             }
         )
@@ -465,6 +582,13 @@ def _reply(name: str, result: Any) -> str:
         return "Courses: " + ", ".join(f"{item.get('code')} {item.get('title')}" for item in result)
     if name == "moodle_sync" and isinstance(result, dict):
         return result.get("last_sync_status") or "Moodle sync finished."
+    if name == "create_assignment" and isinstance(result, dict):
+        return (
+            f"Drafted {result.get('title')} on {result.get('code')}. "
+            f"Due {result.get('due')}. It is still a draft."
+        )
+    if name == "dropout_risk" and isinstance(result, dict):
+        return result.get("message") or "Risk scores are advisory."
     if name == "suggest_assessments" and isinstance(result, dict):
         titles = [item.get("name") for item in result.get("suggestions") or []]
         return "Suggested assessments: " + ", ".join(titles)

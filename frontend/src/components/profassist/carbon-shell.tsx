@@ -8,22 +8,25 @@ import {
   Header,
   HeaderGlobalAction,
   HeaderGlobalBar,
-  HeaderName,
   SideNav,
   SideNavItems,
   SideNavLink,
   Theme,
 } from "@carbon/react";
 import {
+  Certificate,
   Chat,
+  Compare,
   Dashboard,
   Document,
   Education,
+  Events,
   Flag,
-  Certificate,
+  Notification,
   PresentationFile,
   Report,
-  User,
+  Search,
+  UserMultiple,
   Watson,
 } from "@carbon/icons-react";
 import { ProfessorChat } from "@/components/profassist/professor-chat";
@@ -113,25 +116,56 @@ function pageMeta(pathname: string) {
   };
 }
 
-const LINKS = [
-  { href: "/dashboard", label: "Home", icon: Dashboard },
-  { href: "/outline", label: "Subject outline", icon: Document },
-  { href: "/generate", label: "Assessments", icon: Report },
-  { href: "/assignments", label: "Group work", icon: Education },
-  { href: "/similarity", label: "Similarity", icon: Flag },
-  { href: "/studio", label: "Studio", icon: Education },
-  { href: "/slides", label: "Slides", icon: PresentationFile },
-  { href: "/grade", label: "Grade", icon: Certificate },
-  { href: "/integrity", label: "Integrity", icon: Flag },
-  { href: "/students", label: "Students", icon: User },
-  { href: "/style", label: "My style", icon: Watson },
+const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string; icon: typeof Dashboard }> }> = [
+  { label: "", items: [{ href: "/dashboard", label: "Home", icon: Dashboard }] },
+  {
+    label: "Teach",
+    items: [
+      { href: "/outline", label: "Outline", icon: Document },
+      { href: "/studio", label: "Studio", icon: Education },
+      { href: "/slides", label: "Slides", icon: PresentationFile },
+    ],
+  },
+  {
+    label: "Assess",
+    items: [
+      { href: "/generate", label: "Assessments", icon: Report },
+      { href: "/assignments", label: "Group work", icon: Events },
+      { href: "/grade", label: "Grade", icon: Certificate },
+      { href: "/integrity", label: "Integrity", icon: Flag },
+      { href: "/similarity", label: "Similarity", icon: Compare },
+    ],
+  },
+  { label: "Students", items: [{ href: "/students", label: "At risk", icon: UserMultiple }] },
+  { label: "Me", items: [{ href: "/style", label: "My style", icon: Watson }] },
 ];
 
 export function CarbonShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [chat, setChat] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [notes, setNotes] = useState(false);
+  const [account, setAccount] = useState(false);
+  const [query, setQuery] = useState("");
   const [logo, setLogo] = useState("/brand/uowd-logo.svg");
+
+  useEffect(() => {
+    const open = () => setChat(true);
+    window.addEventListener("pa-open-chat", open);
+    return () => window.removeEventListener("pa-open-chat", open);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     fetch("/api/profassist/brand")
@@ -145,44 +179,95 @@ export function CarbonShell({ children }: { children: React.ReactNode }) {
   return (
     <Theme theme="g10">
       <Header aria-label="ProfAssist">
-        <HeaderName href="/dashboard" prefix="">
-          <img src={logo} alt="University of Wollongong in Dubai" style={{ height: 36, width: "auto", maxWidth: 220, marginRight: 12 }} />
-          ProfAssist
-        </HeaderName>
+        <a className="pa-brand" href="/dashboard" onClick={(event) => { event.preventDefault(); router.push("/dashboard"); }}>
+          <img src={logo} alt="University of Wollongong in Dubai" />
+          <span className="pa-brand-rule" />
+          <strong>ProfAssist</strong>
+        </a>
+        <button className="pa-search" type="button" onClick={() => setPalette(true)}>
+          <Search size={16} />
+          Search
+          <kbd>⌘K</kbd>
+        </button>
         <HeaderGlobalBar>
-          <HeaderGlobalAction aria-label="Open chat" onClick={() => setChat(true)} tooltipAlignment="end">
-            <Chat size={20} />
+          <HeaderGlobalAction aria-label="Notifications" onClick={() => { setNotes((open) => !open); setAccount(false); }} tooltipAlignment="end">
+            <Notification size={20} />
           </HeaderGlobalAction>
+          <button className="pa-avatar" type="button" aria-label="Account menu" onClick={() => { setAccount((open) => !open); setNotes(false); }}>
+            LH
+          </button>
         </HeaderGlobalBar>
       </Header>
+      {notes && (
+        <div className="pa-menu" role="dialog" aria-label="Notifications">
+          <p style={{ margin: 0, padding: "8px 16px", color: "#525252", fontSize: "0.875rem" }}>You are up to date.</p>
+        </div>
+      )}
+      {account && (
+        <div className="pa-menu" role="menu" aria-label="Account">
+          <a href="/style" onClick={(event) => { event.preventDefault(); setAccount(false); router.push("/style"); }}>My style</a>
+          <button type="button" onClick={() => setAccount(false)}>Close</button>
+        </div>
+      )}
       <SideNav aria-label="Professor navigation" isFixedNav expanded>
         <SideNavItems>
-          {LINKS.map((item) => (
-            <SideNavLink
-              key={item.href}
-              renderIcon={item.icon}
-              href={item.href}
-              isActive={pathname === item.href || pathname?.endsWith(item.href)}
-              onClick={(event) => {
-                event.preventDefault();
-                router.push(item.href);
-              }}
-            >
-              {item.label}
-            </SideNavLink>
+          {GROUPS.map((group) => (
+            <div key={group.label || "home"}>
+              {group.label ? <div className="pa-nav-label">{group.label}</div> : null}
+              {group.items.map((item) => (
+                <SideNavLink
+                  key={item.href}
+                  renderIcon={item.icon}
+                  href={item.href}
+                  isActive={pathname === item.href || pathname?.endsWith(item.href)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    router.push(item.href);
+                  }}
+                >
+                  {item.label}
+                </SideNavLink>
+              ))}
+            </div>
           ))}
         </SideNavItems>
       </SideNav>
       <Content id="main" className="pa-content">
-        <PageHead pathname={pathname || "/dashboard"} onChat={() => setChat(true)} />
-        {children}
+        <div className="pa-frame">
+          <PageHead pathname={pathname || "/dashboard"} onChat={() => setChat(true)} />
+          {children}
+        </div>
       </Content>
       {chat && <ProfessorChat onClose={() => setChat(false)} />}
+      {palette && (
+        <div className="pa-palette" onClick={() => setPalette(false)}>
+          <form
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const match = GROUPS.flatMap((group) => group.items).find((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+              if (match) router.push(match.href);
+              setPalette(false);
+            }}
+          >
+            <input autoFocus placeholder="Search pages" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search pages" />
+            {GROUPS.flatMap((group) => group.items)
+              .filter((item) => item.label.toLowerCase().includes(query.toLowerCase()))
+              .map((item) => (
+                <button key={item.href} type="button" onClick={() => { router.push(item.href); setPalette(false); }}>
+                  {item.label}
+                </button>
+              ))}
+          </form>
+        </div>
+      )}
     </Theme>
   );
 }
 
 function PageHead({ pathname, onChat }: { pathname: string; onChat: () => void }) {
+  const path = pathname.replace(/^\/[a-z]{2}(?=\/)/, "");
+  if (path === "/dashboard" || path.endsWith("/dashboard")) return null;
   const meta = pageMeta(pathname);
   return (
     <header className="pa-page-head">

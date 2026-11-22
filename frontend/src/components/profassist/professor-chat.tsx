@@ -43,7 +43,7 @@ import {
 } from "@/components/ai-elements/confirmation";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool";
 import {
   Queue,
@@ -199,13 +199,18 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
             const reply = assistants[index];
             return (
               <div key={`${turn.text}-${index}`} className="contents">
+                <div className="pa-bubble-row is-user">
+                <span className="pa-mini-avatar" aria-hidden>LH</span>
                 <Message from="user">
                   <MessageContent>
                     <p>{turn.text}</p>
                     {turn.files.length > 0 && <p>Files: {turn.files.join(", ")}</p>}
                   </MessageContent>
                 </Message>
+                </div>
                 {reply && (
+                  <div className="pa-bubble-row">
+                  <span className="pa-mini-avatar" aria-hidden>AI</span>
                   <Message from="assistant">
                     <MessageContent>
                       {reply.reasoning && (
@@ -219,7 +224,7 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
                           <ToolHeader type="dynamic-tool" state={reply.tool.state} toolName={reply.tool.name} title={reply.tool.name} />
                           <ToolContent>
                             <p style={{ margin: "0 0 0.5rem", color: "#525252" }}>Called {reply.tool.name.replaceAll("_", " ")}.</p>
-                            <ResultTable value={reply.tool.output} />
+                            <ToolResult value={reply.tool.output} />
                             <Confirmation
                               approval={reply.needsConfirm ? { id: reply.tool.name } : { id: reply.tool.name, approved: true }}
                               state={reply.tool.state}
@@ -279,6 +284,7 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
                       </MessageActions>
                     </MessageContent>
                   </Message>
+                  </div>
                 )}
               </div>
             );
@@ -302,11 +308,11 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
         </Queue>
       )}
       {error && <p role="alert">{error}</p>}
-      <Suggestions>
+      <div className="pa-chips">
         {CHIPS.map((chip) => (
           <Suggestion key={chip} suggestion={chip} onClick={(value) => setText(value)} />
         ))}
-      </Suggestions>
+      </div>
       <PromptInput accept=".pdf,.docx,.pptx,.txt,.md" maxFiles={4} onSubmit={onSubmit}>
         <PromptInputBody>
           <PromptInputTextarea value={text} onChange={(event) => setText(event.target.value)} />
@@ -332,56 +338,86 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
           <PromptInputSubmit status={busy ? "streaming" : "ready"} />
         </PromptInputFooter>
       </PromptInput>
-      <style>{`
-        .pa-chat-sheet { position: fixed; top: 3rem; right: 0; bottom: 0; width: min(28rem, 100vw); z-index: 9000; display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; background: var(--color-background); border-left: 1px solid var(--color-border); }
-        .pa-chat-bar { display: flex; justify-content: space-between; align-items: center; }
-        .pa-chat-log { flex: 1; min-height: 0; }
-      `}</style>
     </aside>
   );
 }
 
-function ResultTable({ value }: { value: unknown }) {
-  const rows = resultRows(value).slice(0, 12);
-  if (!rows.length) return <p style={{ margin: 0 }}>No rows came back.</p>;
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.label}>
-            <th
-              style={{
-                textAlign: "left",
-                padding: "0.35rem 0.75rem 0.35rem 0",
-                color: "#525252",
-                fontWeight: 500,
-                verticalAlign: "top",
-              }}
-            >
-              {row.label}
-            </th>
-            <td style={{ padding: "0.35rem 0" }}>{row.value}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+interface CourseCard {
+  code?: string;
+  title?: string;
+  term?: string;
+  clos?: unknown;
+  last_sync_at?: string;
+  last_sync_status?: string;
 }
 
-function resultRows(value: unknown, prefix = ""): Array<{ label: string; value: string }> {
-  if (Array.isArray(value)) {
-    return value.slice(0, 6).flatMap((item, index) => resultRows(item, `${prefix}${index + 1}. `));
+function ToolResult({ value }: { value: unknown }) {
+  const courses = courseCards(value);
+  if (courses) {
+    return (
+      <div style={{ display: "grid", gap: "0.5rem" }}>
+        {courses.map((course) => (
+          <article key={course.code || course.title} style={{ border: "1px solid #e0e0e0", padding: "0.75rem" }}>
+            <strong>
+              {course.code} {course.title}
+            </strong>
+            <p style={{ margin: "0.25rem 0", color: "#525252" }}>
+              {course.term || "This session"}
+              {course.last_sync_at ? ` · Last sync ${humanDate(course.last_sync_at)}` : ""}
+              {course.last_sync_status ? ` · ${course.last_sync_status}` : ""}
+            </p>
+            <p style={{ margin: "0.35rem 0 0.15rem", fontSize: "0.75rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "#525252" }}>
+              Course learning outcomes
+            </p>
+            <ol style={{ margin: 0, paddingLeft: "1.1rem" }}>
+              {outcomeLines(course.clos).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ol>
+          </article>
+        ))}
+      </div>
+    );
   }
-  if (value && typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
-      const label = `${prefix}${key.replaceAll("_", " ")}`;
-      if (item && typeof item === "object") return resultRows(item, `${label}. `);
-      const text = String(item ?? "");
-      if (!text || text.length > 160) return [];
-      return [{ label, value: text }];
-    });
+  return <p style={{ margin: 0 }}>{summaryLine(value)}</p>;
+}
+
+function courseCards(value: unknown): CourseCard[] | null {
+  const rows = Array.isArray(value) ? value : [value];
+  if (!rows.length || !rows.every((row) => row && typeof row === "object" && "code" in row && "title" in row)) {
+    return null;
   }
-  const text = String(value ?? "");
-  if (!text) return [];
-  return [{ label: prefix.replace(/\.\s*$/, "") || "Result", value: text }];
+  return rows as CourseCard[];
+}
+
+function outcomeLines(clos: unknown): string[] {
+  if (!Array.isArray(clos) || clos.length === 0) return ["No outcomes stored on this course yet."];
+  return clos.slice(0, 8).map((item, index) => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object") {
+      const row = item as { code?: string; text?: string };
+      return [row.code, row.text].filter(Boolean).join(" ");
+    }
+    return `Outcome ${index + 1}`;
+  });
+}
+
+function humanDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function summaryLine(value: unknown) {
+  if (value == null) return "Waiting for a result.";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return `${value.length} rows.`;
+  return "The tool finished.";
 }

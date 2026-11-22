@@ -160,6 +160,16 @@ def test_outline_assist_scrubs_a_contact_email_before_the_model() -> None:
     assert isinstance(drafted, dict)
 
 
+def test_create_assignment_phrase_picks_the_course_tool() -> None:
+    from app.profassist.platform_tools import choose_tool
+
+    name, args = choose_tool("Create assignment 2 for MAAI 903 due 15 Dec")
+    assert name == "create_assignment"
+    assert args["number"] == "A2"
+    assert args["code"] == "MAAI903"
+    assert args["due"] == "15 Dec"
+
+
 def test_chat_stream_asks_before_a_moodle_push() -> None:
     from app.profassist.platform_tools import chat_stream_events
 
@@ -230,32 +240,34 @@ def test_moodle_schedule_respects_pause_interval_and_nightly_hour() -> None:
     assert nightly_due(now, 10, True, now) is False
 
 
-def test_dropout_adapter_names_upstream_features_and_does_not_score() -> None:
+def test_dropout_adapter_scores_synthetic_rows_and_takes_no_action() -> None:
     from app.profassist.ml.dropout import FEATURE_COLUMNS, predict
 
     payload = predict(
         [{"display_name": "Sara Al Maktoum", "external_id": "stu-1"}],
         course_code="MAAI903",
     )
-    assert payload["trained"] is False
+    assert payload["trained"] is True
     assert payload["automatic_actions"] is False
-    assert payload["status"] == "not_trained"
+    assert payload["status"] == "trained_on_synthetic_data"
+    assert payload["synthetic"] is True
     assert "active_days_14d" in FEATURE_COLUMNS
     assert "mean_score_pct_to_date" in FEATURE_COLUMNS
     assert len(FEATURE_COLUMNS) == 14
-    assert payload["students"][0]["score"] is None
-    assert payload["students"][0]["band"] is None
+    assert isinstance(payload["students"][0]["score"], float)
+    assert payload["students"][0]["band"] in {"low", "medium", "high"}
     assert payload["course_code"] == "MAAI903"
-    assert "DVC" in payload["data_needed"]
+    assert "synthetic" in payload["message"].lower()
 
 
-def test_calibrator_and_risk_are_untrained() -> None:
+def test_calibrator_stays_untrained_while_dropout_can_score() -> None:
     calibrator = grade_calibrator({"judge_level": "proficient"})
     assert calibrator["trained"] is False
     assert calibrator["level"] is None
     risk = at_risk_snapshot([{"display_name": "Sara Al Maktoum", "external_id": "stu-1"}])
-    assert risk["trained"] is False
-    assert risk["students"][0]["risk"] is None
+    assert risk["trained"] is True
+    assert risk["automatic_actions"] is False
+    assert isinstance(risk["students"][0]["score"], float)
     assert risk["students"][0]["display_name"] == "Sara Al Maktoum"
 
 

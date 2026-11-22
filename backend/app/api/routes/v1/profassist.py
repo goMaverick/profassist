@@ -94,6 +94,7 @@ from app.profassist.service import (
 )
 from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
 from app.profassist.tracking import list_registered_models
+from app.profassist.visuals import page_visuals
 
 router = APIRouter()
 
@@ -146,6 +147,12 @@ class RubricPasteBody(BaseModel):
 @router.get("/home")
 async def home_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return await home(db, org.id, user.id)
+
+
+@router.get("/visuals")
+async def visuals_view(user: CurrentUser, org: ProfOrg, page: str = "home") -> dict:
+    del user, org
+    return page_visuals(page)
 
 
 @router.get("/courses")

@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import {
+  AILabel,
   Button,
   Column,
+  FileUploaderDropContainer,
+  FileUploaderItem,
   Grid,
   InlineNotification,
   ProgressIndicator,
@@ -11,6 +14,7 @@ import {
   Tag,
   TextArea,
   TextInput,
+  Tile,
 } from "@carbon/react";
 import { Download, MagicWand, Save } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
@@ -19,12 +23,12 @@ import { CouncilStage } from "@/components/profassist/council-stage";
 
 const STEPS = [
   { id: "basics", label: "Basics" },
-  { id: "lecture", label: "Lecture" },
-  { id: "description", label: "About" },
+  { id: "lecture", label: "Lecture and educator" },
+  { id: "description", label: "Description" },
   { id: "outcomes", label: "Outcomes" },
-  { id: "schedule", label: "Weeks" },
+  { id: "schedule", label: "Weekly schedule" },
   { id: "readings", label: "Readings" },
-  { id: "assessments", label: "Tasks" },
+  { id: "assessments", label: "Assessments" },
   { id: "policies", label: "Policies" },
 ];
 
@@ -76,7 +80,7 @@ export default function OutlineWizardPage() {
       () =>
         pa<{ outline: Outline; reply: string }>(`/outlines/${outline.id}/assist`, {
           method: "POST",
-          body: JSON.stringify({ step: current.id, message: instructions || "Suggest this step" }),
+          body: JSON.stringify({ step: current?.id || "basics", message: instructions || "Suggest this step" }),
         }),
       setError,
     );
@@ -93,7 +97,7 @@ export default function OutlineWizardPage() {
       () =>
         pa<Outline>(`/outlines/${outline.id}/step`, {
           method: "PUT",
-          body: JSON.stringify({ step: current.id, payload }),
+          body: JSON.stringify({ step: current?.id || "basics", payload }),
         }),
       setError,
     );
@@ -102,11 +106,11 @@ export default function OutlineWizardPage() {
 
   return (
     <Grid>
-      <Column lg={16} md={8} sm={4}>
-        <p style={{ color: "#525252", marginTop: 0 }}>
-          {outline ? `${outline.code} · ${outline.name} · ${outline.status}` : "Loading the wizard…"}
-        </p>
-      </Column>
+      {!outline && !error && (
+        <Column lg={16}>
+          <p>Loading the wizard…</p>
+        </Column>
+      )}
       {error && (
         <Column lg={16}>
           <InlineNotification kind="error" title="Check this step" subtitle={error} hideCloseButton />
@@ -118,68 +122,72 @@ export default function OutlineWizardPage() {
         </Column>
       )}
       <Column lg={16}>
-        <h2 style={{ fontWeight: 400 }}>Attachments and instructions</h2>
-        <p style={{ color: "#525252" }}>
-          Files are stored for this professor and course, checked for personal data, and cited when the assistant drafts.
-        </p>
-        <input
-          type="file"
-          accept=".pdf,.docx,.pptx,.txt,.md"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file || !outline) return;
-            const body = new FormData();
-            body.append("file", file);
-            const saved = await run(
-              () => pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, { method: "POST", body }),
-              setError,
-            );
-            if (saved) setFiles(saved.materials);
-          }}
-        />
-        <ul>
-          {files.map((file) => (
-            <li key={file.filename}>{file.filename} · {file.status}</li>
-          ))}
-        </ul>
-        <TextArea
-          id="instructions"
-          labelText="Instructions to AI"
-          value={instructions}
-          rows={3}
-          onChange={(event) => setInstructions(event.target.value)}
-        />
-        <Button
-          kind="tertiary"
-          disabled={!outline}
-          onClick={async () => {
-            if (!outline) return;
-            await run(
-              () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
-              setError,
-            );
-            setNote("Instructions saved. Suggest this step again to regenerate with them.");
-          }}
-        >
-          Save instructions
-        </Button>
-      </Column>
-      <Column lg={16}>
-        <div className="pa-progress">
-        <ProgressIndicator currentIndex={step} onChange={(index) => setStep(index)}>
+        <div className="pa-wizard">
+        <div>
+        <ProgressIndicator vertical currentIndex={step} onChange={(index) => setStep(index)}>
           {STEPS.map((item) => (
             <ProgressStep key={item.id} label={item.label} />
           ))}
         </ProgressIndicator>
         </div>
-      </Column>
-      <Column lg={12} md={8} sm={4}>
-        {outline && current.id === "basics" && <Basics body={body.basics as Record<string, string>} onSave={save} />}
-        {outline && current.id === "lecture" && <Lecture body={body.lecture as Record<string, string>} onSave={save} />}
-        {outline && current.id === "description" && (
+        <div>
+        <Tile>
+          <h2 style={{ fontSize: "1rem", fontWeight: 600, marginTop: 0 }}>Attachments and instructions</h2>
+          <p style={{ color: "#525252" }}>
+            Files stay with this professor and course. Personal data is removed before the assistant reads them.
+          </p>
+          <FileUploaderDropContainer
+            accept={[".pdf", ".docx", ".pptx", ".txt", ".md"]}
+            labelText="Drag a PDF, DOCX, PPTX, or text file here, or click to upload"
+            onAddFiles={async (_event, content) => {
+              const file = content.addedFiles[0];
+              if (!file || !outline || file.invalidFileType) return;
+              const body = new FormData();
+              body.append("file", file);
+              const saved = await run(
+                () =>
+                  pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, {
+                    method: "POST",
+                    body,
+                  }),
+                setError,
+              );
+              if (saved) setFiles(saved.materials);
+            }}
+          />
+          {files.map((file) => (
+            <FileUploaderItem key={file.filename} name={`${file.filename} · ${file.status}`} status="complete" />
+          ))}
+          <TextArea
+            id="instructions"
+            labelText="Instructions to AI"
+            helperText="For example: focus on healthcare, or keep the deck to 10 slides."
+            value={instructions}
+            rows={3}
+            onChange={(event) => setInstructions(event.target.value)}
+          />
+          <Button
+            kind="tertiary"
+            disabled={!outline}
+            onClick={async () => {
+              if (!outline) return;
+              await run(
+                () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
+                setError,
+              );
+              setNote("Instructions saved. Suggest this step again to regenerate with them.");
+            }}
+          >
+            Save instructions
+          </Button>
+        </Tile>
+        <Tile style={{ marginTop: 16 }}>
+        {outline && current?.id === "basics" && <Basics body={body.basics as Record<string, string>} onSave={save} />}
+        {outline && current?.id === "lecture" && <Lecture body={body.lecture as Record<string, string>} onSave={save} />}
+        {outline && current?.id === "description" && (
           <Description text={String(body.description || "")} onSave={(description) => save({ description })} />
         )}
-        {outline && current.id === "outcomes" && (
+        {outline && current?.id === "outcomes" && (
           <Outcomes
             program={String(body.program || "")}
             plos={(body.plos as Array<{ code: string; text: string }>) || []}
@@ -187,32 +195,20 @@ export default function OutlineWizardPage() {
             onSave={save}
           />
         )}
-        {outline && current.id === "schedule" && (
+        {outline && current?.id === "schedule" && (
           <Schedule weeks={(body.weeks as Array<Record<string, string>>) || []} onSave={(weeks) => save({ weeks })} />
         )}
-        {outline && current.id === "readings" && (
+        {outline && current?.id === "readings" && (
           <Readings items={(body.readings as string[]) || []} onSave={(readings) => save({ readings })} />
         )}
-        {outline && current.id === "assessments" && (
+        {outline && current?.id === "assessments" && (
           <Tasks items={(body.tasks as Array<Record<string, unknown>>) || []} onSave={(tasks) => save({ tasks })} />
         )}
-        {outline && current.id === "policies" && (
+        {outline && current?.id === "policies" && (
           <Policies items={(body.policies as Array<{ key: string; title: string; body: string }>) || []} onSave={(policies) => save({ policies })} />
         )}
-        {(note || drafting) && (
-          <AiSuggestion
-            title={`Suggestion for ${current?.label || "this step"}`}
-            description="Generated from the outline, the attachments, and your instructions."
-            body={note || "Drafting…"}
-            busy={drafting}
-            citation={note}
-            onAccept={() => setNote("Kept. Edit the fields, then move to the next step.")}
-            onRegenerate={assist}
-          />
-        )}
-      </Column>
-      <Column lg={16}>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        </Tile>
+        <div className="pa-sticky-actions">
           <Button kind="tertiary" renderIcon={MagicWand} onClick={assist} disabled={!outline || drafting}>
             Suggest this step
           </Button>
@@ -251,9 +247,37 @@ export default function OutlineWizardPage() {
           )}
           {outline && <Tag type={outline.status === "published" ? "green" : "gray"}>{outline.status}</Tag>}
         </div>
+        </div>
+        <aside className="pa-ai-card">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <AILabel size="mini" aiText="AI" aria-label="AI suggestion" />
+            <h2 style={{ margin: 0 }}>Suggestion</h2>
+          </div>
+          <p style={{ marginTop: 0, color: "#525252", fontSize: "0.875rem" }}>
+            Example: focus on healthcare cases, and prefer a project a group can build in four weeks.
+          </p>
+          {(note || drafting) ? (
+            <AiSuggestion
+              title={`Suggestion for ${current?.label || "this step"}`}
+              description="Generated from the outline, the attachments, and your instructions."
+              body={note || "Drafting…"}
+              busy={drafting}
+              citation={note}
+              onAccept={() => setNote("Kept. Edit the fields, then move to the next step.")}
+              onRegenerate={assist}
+            />
+          ) : (
+            <div className="pa-empty">
+              <MagicWand size={20} />
+              <span>Ask for a suggestion. It stays in this panel until you keep or regenerate it.</span>
+            </div>
+          )}
+        </aside>
+        </div>
       </Column>
       <Column lg={16}>
-        <h2 style={{ fontWeight: 400 }}>Review before approval</h2>
+        <section className="pa-panel" style={{ marginTop: 24 }}>
+        <h2>Review before approval</h2>
         <div style={{ display: "flex", gap: "0.5rem", margin: "0.5rem 0 1rem" }}>
           <Button kind={reviewMode === "council" ? "primary" : "tertiary"} onClick={() => setReviewMode("council")}>
             Full council
@@ -335,6 +359,7 @@ export default function OutlineWizardPage() {
             )}
           </div>
         )}
+        </section>
       </Column>
     </Grid>
   );
