@@ -62,7 +62,7 @@ function IntegrityBody() {
   const { course } = useWorkspace();
   const router = useRouter();
   const params = useSearchParams();
-  const tab = params.get("tab") === "similarity" ? 0 : 1;
+  const tab = params.get("tab") === "flags" ? 1 : 0;
   const [error, setError] = useState("");
   const [flags, setFlags] = useState<Flag[]>([]);
   const [assignments, setAssignments] = useState<Array<{ id: string; number: string; title: string }>>([]);
@@ -107,8 +107,9 @@ function IntegrityBody() {
           </TabList>
           <TabPanels>
             <TabPanel>
+              <h2 style={{ margin: "0 0 8px", fontSize: "1.25rem", fontWeight: 400 }}>Possible matches</h2>
               <div className="pa-todo">
-                <button type="button" className="pa-todo" onClick={() => setShowPair((open) => !open)} style={{ textAlign: "left", cursor: "pointer" }}>
+                <button type="button" onClick={() => setShowPair(true)}>
                   <span>Group A and Group B — very similar</span><strong>Compare</strong>
                 </button>
               </div>

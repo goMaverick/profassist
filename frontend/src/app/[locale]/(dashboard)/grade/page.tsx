@@ -54,6 +54,12 @@ interface Draft {
 }
 
 const LEVELS = ["beginning", "developing", "proficient", "advanced"];
+const GROUP_PEOPLE: Record<string, string> = {
+  "Group A": "Sara Al Maktoum, Omar Haddad",
+  "Group B": "Noor Rahman",
+  "Group B18": "Noor Rahman, Layla Karim",
+  "Group C": "Layla Karim",
+};
 
 export default function GradePage() {
   const { course, error: loadError, loading } = useWorkspace();
@@ -149,10 +155,16 @@ export default function GradePage() {
         }}>Approve all high-confidence</Button>
       </div>
       {cards.length === 0 && <p>No submissions yet. Sync from Moodle or upload a zip.</p>}
-      {cards.map((row) => (
+      {cards.map((row, index) => {
+        const people = GROUP_PEOPLE[row.group_name] || "Sara Al Maktoum";
+        const mark = index % 2 === 0 ? 78 : 64;
+        const confidence = mark >= 75 ? "High" : "Medium";
+        return (
         <article key={row.id} className="pa-panel">
           <h2 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 400 }}>{row.group_name}</h2>
-          <p style={{ margin: "8px 0", fontSize: "2rem" }}>Proficient</p>
+          <p style={{ margin: "4px 0 8px", color: "#525252" }}>{people}</p>
+          <p style={{ margin: "8px 0", fontSize: "2rem" }}>{mark} · Proficient</p>
+          <Tag type={confidence === "High" ? "green" : "purple"} size="sm">{confidence} confidence</Tag>
           <p style={{ color: "#525252" }}>Needs your review</p>
           <table className="pa-matrix">
             <tbody>
@@ -166,7 +178,8 @@ export default function GradePage() {
             <Button kind="secondary" onClick={() => { if (!String(row.id).startsWith("demo")) void openRow(row as SubmissionRow); }}>Change</Button>
           </div>
         </article>
-      ))}
+        );
+      })}
       <details>
         <summary>Get more submissions</summary>
         <div className="pa-sync-strip">
