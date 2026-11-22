@@ -449,6 +449,63 @@ async def integrity_scan(
     return {"items": await scan_integrity(db, org.id, course_id, user.id)}
 
 
+class IntegrityAction(BaseModel):
+    course: str = "MAAI903"
+    number: str = "1"
+    left: str = "A"
+    right: str = "B"
+    action: str = "note"
+    note: str = ""
+
+
+@router.get("/integrity/overview")
+async def integrity_overview(course: str = "all") -> dict:
+    from app.profassist.integrity_board import overview
+
+    return overview(course)
+
+
+@router.get("/integrity/matrix")
+async def integrity_matrix(course: str, number: str) -> dict:
+    from app.profassist.integrity_board import assignment_matrix
+
+    return assignment_matrix(course, number)
+
+
+@router.get("/integrity/pair")
+async def integrity_pair(course: str, number: str, left: str, right: str) -> dict:
+    from app.profassist.integrity_board import pair_detail
+
+    return pair_detail(course, number, left, right)
+
+
+@router.post("/integrity/pair")
+async def integrity_pair_action(
+    body: IntegrityAction, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.integrity_board import _pair_id
+    from app.profassist.models import Approval
+
+    if body.action not in {"ok", "flag", "note"}:
+        return {"saved": False}
+    row = Approval(
+        organization_id=org.id,
+        user_id=user.id,
+        target_type="integrity_pair",
+        target_id=_pair_id(body.course, body.number, body.left, body.right),
+        action=body.action,
+        note=body.note or "",
+    )
+    db.add(row)
+    await db.flush()
+    return {
+        "saved": True,
+        "action": body.action,
+        "note": body.note,
+        "message": "Saved for you. Nothing was sent to Moodle or to a student.",
+    }
+
+
 @router.get("/courses/{course_id}/integrity")
 async def integrity(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return {"items": await list_flags(db, org.id, course_id, user.id)}

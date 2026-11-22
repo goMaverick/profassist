@@ -1,236 +1,323 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Column, Grid, InlineNotification, Tab, TabList, TabPanel, TabPanels, Tabs, Tile } from "@carbon/react";
-import { pa, run, useWorkspace } from "@/components/profassist/bits";
-import { AiLive } from "@/components/profassist/ai-live";
+import { Button, Dropdown, Tag, TextArea, Tile } from "@carbon/react";
+import { pa, run } from "@/components/profassist/bits";
 
-const HEAT = [
-  ["", "A", "B", "C", "D"],
-  ["A", "1", "0.91", "0.22", "0.18"],
-  ["B", "0.91", "1", "0.31", "0.14"],
-  ["C", "0.22", "0.31", "1", "0.44"],
-  ["D", "0.18", "0.14", "0.44", "1"],
-];
-
-interface Flag {
-  id: string;
-  section: string;
-  passage_a: string;
-  passage_b: string;
-  score: number;
-  kind: string;
-  viva: string[];
-  rare_details: string[];
+interface CourseOption {
+  code: string;
+  slug: string;
+  title: string;
+}
+interface Card {
+  course: string;
+  slug: string;
+  title: string;
+  number: string;
+  name: string;
+  groups: number;
+  flagged_pairs: number;
+  highest: number;
+  writing_flags: number;
   status: string;
-  note: string;
 }
-interface Pair {
-  left_group: string;
-  right_group: string;
-  same_idea: boolean;
-  score: number;
-  left_excerpt: string;
-  right_excerpt: string;
+interface Overview {
+  courses: CourseOption[];
+  summary: { courses: number; assignments: number; groups: number; review: number; concern: number };
+  items: Card[];
 }
-interface Report {
-  model: string;
-  trained: boolean;
-  threshold: number;
-  note: string;
-  pairs: Pair[];
+interface PairRow {
+  left: string;
+  right: string;
+  percent: number;
+  shared: number;
+  writing: boolean;
+  status: string;
+}
+interface Matrix {
+  course: string;
+  slug: string;
+  assignment: string;
+  name: string;
+  groups: string[];
+  matrix: number[][];
+  pairs: PairRow[];
+}
+interface Passage {
+  id: string;
+  percent: number;
+  common: boolean;
+  writing: string;
+  left: string;
+  right: string;
+}
+interface PairDetail {
+  course: string;
+  slug: string;
+  assignment: string;
+  name: string;
+  left: string;
+  right: string;
+  percent: number;
+  status: string;
+  left_text: Array<{ id: string; text: string }>;
+  right_text: Array<{ id: string; text: string }>;
+  passages: Passage[];
+  why: string;
 }
 
 export default function IntegrityPage() {
   return (
-    <Suspense fallback={<p>Loading integrity…</p>}>
-      <IntegrityBody />
+    <Suspense fallback={<p>Opening integrity…</p>}>
+      <IntegrityDrill />
     </Suspense>
   );
 }
 
-function heatColor(value: string) {
-  const score = Number(value);
-  if (!Number.isFinite(score)) return "transparent";
-  if (score >= 0.8) return "#e8daff";
-  if (score >= 0.4) return "#d0e2ff";
-  return "#f4f4f4";
+function statusType(status: string): "green" | "blue" | "red" | "gray" {
+  if (status === "Clear") return "green";
+  if (status === "Review") return "blue";
+  if (status === "Concern") return "red";
+  return "gray";
 }
 
-function IntegrityBody() {
-  const { course } = useWorkspace();
+function heat(percent: number) {
+  if (percent >= 75) return "#ffd7d9";
+  if (percent >= 40) return "#d0e2ff";
+  if (percent === 100) return "#e0e0e0";
+  return "#defbe6";
+}
+
+function IntegrityDrill() {
   const router = useRouter();
   const params = useSearchParams();
-  const tab = params.get("tab") === "flags" ? 1 : 0;
+  const course = params.get("course") || "all";
+  const assignment = params.get("assignment") || "";
+  const pair = params.get("pair") || "";
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [matrix, setMatrix] = useState<Matrix | null>(null);
+  const [detail, setDetail] = useState<PairDetail | null>(null);
+  const [sort, setSort] = useState<"percent" | "shared">("percent");
+  const [why, setWhy] = useState(false);
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
-  const [flags, setFlags] = useState<Flag[]>([]);
-  const [assignments, setAssignments] = useState<Array<{ id: string; number: string; title: string }>>([]);
-  const [report, setReport] = useState<Report | null>(null);
-  const [showPair, setShowPair] = useState(true);
 
   useEffect(() => {
-    if (!course) return;
-    pa<{ items: Flag[] }>(`/courses/${course.id}/integrity`)
-      .then((data) => setFlags(data.items))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load flags"));
-    pa<{ items: Array<{ id: string; number: string; title: string }> }>(`/assignments?course_id=${course.id}`)
-      .then((data) => setAssignments(data.items.filter((item) => item.id)))
-      .catch(() => setAssignments([]));
+    pa<Overview>(`/integrity/overview?course=${encodeURIComponent(course)}`)
+      .then(setOverview)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open integrity"));
   }, [course]);
 
   useEffect(() => {
-    const id = params.get("id");
-    if (!id) return;
-    pa<Report>(`/assignments/${id}/similarity`)
-      .then(setReport)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "No similarity report"));
-  }, [params]);
+    if (!assignment) {
+      setMatrix(null);
+      return;
+    }
+    pa<Matrix>(`/integrity/matrix?course=${encodeURIComponent(course)}&number=${assignment}`)
+      .then(setMatrix)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that assignment"));
+  }, [course, assignment]);
+
+  useEffect(() => {
+    if (!assignment || !pair) {
+      setDetail(null);
+      return;
+    }
+    const [left, right] = pair.split("-");
+    pa<PairDetail>(`/integrity/pair?course=${encodeURIComponent(course)}&number=${assignment}&left=${left}&right=${right}`)
+      .then(setDetail)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that pair"));
+  }, [course, assignment, pair]);
+
+  const pairs = useMemo(() => {
+    const rows = matrix?.pairs ? [...matrix.pairs] : [];
+    rows.sort((a, b) => (sort === "shared" ? b.shared - a.shared : b.percent - a.percent));
+    return rows;
+  }, [matrix, sort]);
+
+  function go(next: { course?: string; assignment?: string; pair?: string }) {
+    const query = new URLSearchParams();
+    const chosen = next.course ?? course;
+    if (chosen && chosen !== "all") query.set("course", chosen);
+    if (next.assignment) query.set("assignment", next.assignment);
+    if (next.pair) query.set("pair", next.pair);
+    router.push(`/integrity${query.toString() ? `?${query}` : ""}`);
+  }
+
+  async function act(action: "ok" | "flag" | "note") {
+    if (!detail) return;
+    const result = await run(
+      () =>
+        pa<{ message: string }>("/integrity/pair", {
+          method: "POST",
+          body: JSON.stringify({
+            course: detail.slug,
+            number: detail.assignment,
+            left: detail.left,
+            right: detail.right,
+            action,
+            note,
+          }),
+        }),
+      setError,
+    );
+    if (result) setSaved(result.message);
+  }
+
+  const courseItems = [{ code: "All courses", slug: "all", title: "" }, ...(overview?.courses || [])];
 
   return (
-    <Grid>
-      {error && (
-        <Column lg={16}>
-          <InlineNotification kind="error" title="Integrity" subtitle={error} hideCloseButton />
-        </Column>
-      )}
-      <Column lg={16}>
-        <Tabs
-          selectedIndex={tab}
-          onChange={({ selectedIndex }) => {
-            router.replace(selectedIndex === 0 ? "/integrity?tab=similarity" : "/integrity?tab=flags");
-          }}
-        >
-          <TabList aria-label="Integrity">
-            <Tab>Similarity</Tab>
-            <Tab>AI & policy flags</Tab>
-          </TabList>
-          <TabPanels>
-            <TabPanel>
-              <h2 style={{ margin: "0 0 8px", fontSize: "1.25rem", fontWeight: 400 }}>Possible matches</h2>
-              <div className="pa-todo">
-                <button type="button" onClick={() => setShowPair(true)}>
-                  <span>Group A and Group B — very similar</span><strong>Compare</strong>
-                </button>
-              </div>
-              {showPair && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-                  <p>Group A kept a weekly review with facilities. <mark>The shared draft still contains the typo sustanability.</mark></p>
-                  <p>Group B stays cautious about a campus-wide claim. <mark>The shared draft still contains the typo sustanability.</mark></p>
-                </div>
-              )}
-              <details style={{ marginTop: 16 }}>
-                <summary>See all</summary>
-                <table className="pa-matrix" aria-label="Similarity heatmap">
-                  <tbody>
-                    {HEAT.map((row, index) => (
-                      <tr key={index}>
-                        {row.map((cell, cellIndex) => (
-                          <td key={cellIndex} style={{ background: heatColor(cell) }}>{cell}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="pa-legend"><i style={{ background: "#f4f4f4" }} /> under 0.4 <i style={{ background: "#d0e2ff" }} /> 0.4–0.8 <i style={{ background: "#e8daff" }} /> 0.8 and above</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <p>A: The pipeline versions the dataset before training and records the threshold.</p>
-                  <p>B: The pipeline versions the dataset before training and records the same threshold.</p>
-                </div>
-              </details>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
-                {assignments.map((item) => (
-                  <Button key={item.id} kind="tertiary" size="sm" onClick={() => router.replace(`/integrity?tab=similarity&id=${item.id}`)}>
-                    {item.number} {item.title}
-                  </Button>
-                ))}
-                {assignments.length === 0 && <p>Open an assignment and add ideas before running similarity.</p>}
-              </div>
-              {report && (
-                <div>
-                  <p>
-                    {report.model} · threshold {report.threshold} · {report.trained ? "trained" : "baseline, not a trained model"}
-                  </p>
-                  <p>{report.note}</p>
-                  {report.pairs.length === 0 && <p>No pair is over the threshold.</p>}
-                  {report.pairs.map((pair) => (
-                    <Tile key={`${pair.left_group}-${pair.right_group}`}>
-                      <strong>
-                        {pair.left_group} and {pair.right_group}
-                      </strong>
-                      <span> · {pair.score} · {pair.same_idea ? "same idea" : "different ideas"}</span>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                        <p>{pair.left_excerpt}</p>
-                        <p>{pair.right_excerpt}</p>
-                      </div>
-                    </Tile>
-                  ))}
-                </div>
-              )}
-            </TabPanel>
-            <TabPanel>
-              <p>{course?.code}. A flag is evidence for a conversation. AI-text detection is not used.</p>
-              <Button
-                kind="primary"
-                disabled={!course}
-                onClick={async () => {
-                  if (!course) return;
-                  const data = await run(() => pa<{ items: Flag[] }>(`/courses/${course.id}/integrity/scan`, { method: "POST" }), setError);
-                  if (data) setFlags(data.items);
-                }}
+    <div className="pa-dash">
+      <nav className="pa-crumb" aria-label="Integrity">
+        <button type="button" className="pa-why" onClick={() => go({ course, assignment: "", pair: "" })}>Course</button>
+        {assignment && (
+          <>
+            {" / "}
+            <button type="button" className="pa-why" onClick={() => go({ course, assignment, pair: "" })}>
+              Assignment {assignment}
+            </button>
+          </>
+        )}
+        {detail && <> / Group {detail.left} and Group {detail.right}</>}
+      </nav>
+      {error && <p role="alert">{error}</p>}
+      {!assignment && (
+        <>
+          <div style={{ maxWidth: 320 }}>
+            <Dropdown
+              id="integrity-course"
+              titleText="Course"
+              label="All courses"
+              items={courseItems}
+              itemToString={(item) => (item ? (item.slug === "all" ? "All courses" : `${item.code} · ${item.title}`) : "")}
+              selectedItem={courseItems.find((item) => item.slug === course) || courseItems[0]}
+              onChange={({ selectedItem }) => go({ course: selectedItem?.slug || "all" })}
+            />
+          </div>
+          {overview && (
+            <div className="pa-kpi-row">
+              <Tile><p className="pa-step-kicker">Assignments</p><strong style={{ fontSize: "2rem" }}>{overview.summary.assignments}</strong></Tile>
+              <Tile><p className="pa-step-kicker">Groups</p><strong style={{ fontSize: "2rem" }}>{overview.summary.groups}</strong></Tile>
+              <Tile><p className="pa-step-kicker">Needs a look</p><strong style={{ fontSize: "2rem" }}>{overview.summary.review}</strong></Tile>
+              <Tile><p className="pa-step-kicker">Concern</p><strong style={{ fontSize: "2rem" }}>{overview.summary.concern}</strong></Tile>
+            </div>
+          )}
+          {overview && overview.items.length === 0 && <p>No assignments in this course yet.</p>}
+          <div style={{ display: "grid", gap: 12 }}>
+            {(overview?.items || []).map((item) => (
+              <button
+                key={`${item.slug}-${item.number}`}
+                type="button"
+                className="pa-panel"
+                style={{ textAlign: "left", cursor: "pointer" }}
+                onClick={() => go({ course: item.slug, assignment: item.number })}
               >
-                Scan submissions
-              </Button>
-              {flags.length === 0 && <p>No flags yet.</p>}
-              {flags.map((flag) => (
-                <Tile key={flag.id}>
-                  <strong>
-                    {flag.section} · {flag.kind.replaceAll("_", " ")}
-                  </strong>
-                  <span> · {flag.status} · overlap {flag.score}</span>
-                  <p>{flag.note}</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                    <p>{flag.passage_a}</p>
-                    <p>{flag.passage_b}</p>
-                  </div>
-                  {flag.rare_details.length > 0 && <p>Shared details: {flag.rare_details.join(", ")}</p>}
-                  <ol>
-                    {flag.viva.map((question) => (
-                      <li key={question}>{question}</li>
-                    ))}
-                  </ol>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Button
-                      kind="danger--ghost"
-                      size="sm"
-                      onClick={async () => {
-                        if (!course) return;
-                        await run(() => pa(`/integrity/${flag.id}`, { method: "POST", body: JSON.stringify({ status: "confirmed" }) }), setError);
-                        const data = await pa<{ items: Flag[] }>(`/courses/${course.id}/integrity`);
-                        setFlags(data.items);
-                      }}
-                    >
-                      Confirm as worth a viva
-                    </Button>
-                    <Button
-                      kind="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        if (!course) return;
-                        await run(() => pa(`/integrity/${flag.id}`, { method: "POST", body: JSON.stringify({ status: "dismissed" }) }), setError);
-                        const data = await pa<{ items: Flag[] }>(`/courses/${course.id}/integrity`);
-                        setFlags(data.items);
-                      }}
-                    >
-                      Dismiss
-                    </Button>
-                  </div>
-                </Tile>
+                <strong>{item.course} · Assignment {item.number}</strong>
+                <span> {item.name}</span>
+                <p style={{ margin: "8px 0" }}>
+                  {item.groups} groups · {item.flagged_pairs} pairs to read · highest {item.highest}% · {item.writing_flags} writing flags
+                </p>
+                <Tag type={statusType(item.status)} size="sm">{item.status}</Tag>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {assignment && !pair && matrix && (
+        <>
+          <h2 style={{ margin: 0, fontWeight: 400 }}>{matrix.course} · Assignment {matrix.assignment} {matrix.name}</h2>
+          <table className="pa-matrix" aria-label="Similarity between groups">
+            <thead>
+              <tr>
+                <th />
+                {matrix.groups.map((group) => <th key={group}>Group {group}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.groups.map((left, row) => (
+                <tr key={left}>
+                  <th>Group {left}</th>
+                  {matrix.groups.map((right, column) => (
+                    <td key={right} style={{ background: heat(matrix.matrix[row][column]) }}>
+                      {left === right ? "—" : (
+                        <button type="button" className="pa-why" onClick={() => go({ course: matrix.slug, assignment, pair: `${left}-${right}` })}>
+                          {matrix.matrix[row][column]}%
+                        </button>
+                      )}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </TabPanel>
-          </TabPanels>
-        </Tabs>
-      </Column>
-    </Grid>
+            </tbody>
+          </table>
+          <table className="pa-matrix">
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th><button type="button" className="pa-why" onClick={() => setSort("percent")}>Similar</button></th>
+                <th><button type="button" className="pa-why" onClick={() => setSort("shared")}>Shared passages</button></th>
+                <th>Writing</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pairs.map((item) => (
+                <tr key={`${item.left}-${item.right}`} onClick={() => go({ course: matrix.slug, assignment, pair: `${item.left}-${item.right}` })} style={{ cursor: "pointer" }}>
+                  <td>Group {item.left} vs Group {item.right}</td>
+                  <td>{item.percent}%</td>
+                  <td>{item.shared}</td>
+                  <td>{item.writing ? "Unusual" : "Ordinary"}</td>
+                  <td><Tag type={statusType(item.status)} size="sm">{item.status}</Tag></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {detail && (
+        <>
+          <h2 style={{ margin: 0, fontWeight: 400 }}>Group {detail.left} and Group {detail.right}</h2>
+          <p>{detail.percent}% similar · <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag></p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <article id="left-submission">
+              {detail.left_text.map((block, index) => (
+                <p key={`${block.id}-${index}`} id={block.id ? `left-${block.id}` : undefined}>
+                  {block.id ? (
+                    <a href={`#right-${block.id}`}><mark>{block.text}</mark></a>
+                  ) : block.text}
+                </p>
+              ))}
+            </article>
+            <article id="right-submission">
+              {detail.right_text.map((block, index) => (
+                <p key={`${block.id}-${index}`} id={block.id ? `right-${block.id}` : undefined}>
+                  {block.id ? <mark>{block.text}</mark> : block.text}
+                </p>
+              ))}
+            </article>
+          </div>
+          <h3 style={{ fontWeight: 600 }}>Shared passages</h3>
+          {detail.passages.length === 0 && <p>No shared sentences. This looks like separate work.</p>}
+          <ul>
+            {detail.passages.map((item) => (
+              <li key={item.id}>
+                {item.percent}% · {item.common ? "Also in the assignment brief, so it is not counted as copying" : "Not in the brief or the readings"} · writing {item.writing}
+              </li>
+            ))}
+          </ul>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button kind="primary" onClick={() => act("ok")}>Mark as OK</Button>
+            <Button kind="danger--tertiary" onClick={() => act("flag")}>Flag for follow-up</Button>
+          </div>
+          <TextArea id="integrity-note" labelText="Add a note" value={note} onChange={(event) => setNote(event.target.value)} />
+          <Button kind="tertiary" onClick={() => act("note")}>Save note</Button>
+          {saved && <p>{saved}</p>}
+          <button type="button" className="pa-why" onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
+          {why && <p className="pa-why-body">{detail.why}</p>}
+        </>
+      )}
+    </div>
   );
 }

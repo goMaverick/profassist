@@ -86,6 +86,12 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "summary": "Show advisory dropout risk for the demo roster.",
     },
     {
+        "name": "integrity_concerns",
+        "confirm": False,
+        "admin": False,
+        "summary": "Show integrity concerns for a course and assignment.",
+    },
+    {
         "name": "suggest_assessments",
         "confirm": False,
         "admin": False,
@@ -154,6 +160,20 @@ def _assignment_args(text: str) -> dict[str, Any]:
     return {"number": number, "code": code, "due": due, "title": f"Assignment {number[1:]}"}
 
 
+def _integrity_args(text: str) -> dict[str, Any]:
+    import re
+
+    code = "MAAI903"
+    coded = re.search(r"maai\s*(\d+)", text)
+    if coded:
+        code = f"MAAI{coded.group(1)}"
+    number = ""
+    numbered = re.search(r"assignment\s+(\d+)", text)
+    if numbered:
+        number = numbered.group(1)
+    return {"code": code, "assignment": number}
+
+
 def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
     """Demo router. A model key is not required."""
     text = (message or "").lower()
@@ -171,8 +191,8 @@ def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
         return "create_assignment", _assignment_args(text)
     if "dropout" in text or "at risk" in text or "at-risk" in text:
         return "dropout_risk", {}
-    if "similar" in text:
-        return "list_courses", {}
+    if "integrit" in text or "copying" in text or "similar" in text:
+        return "integrity_concerns", _integrity_args(text)
     if "group" in text:
         return "list_courses", {}
     if "assessment" in text and ("suggest" in text or "generat" in text):
@@ -312,6 +332,13 @@ async def _create_assignment(db, current, args):
     }
 
 
+async def _integrity(db, current, args):
+    del db, current
+    from app.profassist.integrity_board import concerns
+
+    return concerns(str(args.get("code") or "MAAI903"), str(args.get("assignment") or ""))
+
+
 async def _dropout(db, current, _args):
     del db
     from app.profassist.ml.dropout import predict
@@ -442,6 +469,7 @@ _HANDLERS = {
     "assist_outline": _assist_outline,
     "create_assignment": _create_assignment,
     "dropout_risk": _dropout,
+    "integrity_concerns": _integrity,
     "suggest_assessments": _suggest,
     "accept_assessments": _accept,
     "generate_slides": _slides,
@@ -589,6 +617,8 @@ def _reply(name: str, result: Any) -> str:
         )
     if name == "dropout_risk" and isinstance(result, dict):
         return result.get("message") or "Risk scores are advisory."
+    if name == "integrity_concerns" and isinstance(result, dict):
+        return result.get("message") or "Nothing needs a look."
     if name == "suggest_assessments" and isinstance(result, dict):
         titles = [item.get("name") for item in result.get("suggestions") or []]
         return "Suggested assessments: " + ", ".join(titles)
