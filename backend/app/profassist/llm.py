@@ -67,7 +67,9 @@ def demo_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
             if len(sentence.strip()) > 40
         ][:3]
         clos = []
-        for index, sentence in enumerate(sentences or ["State one outcome the assessment will evidence."], start=1):
+        for index, sentence in enumerate(
+            sentences or ["State one outcome the assessment will evidence."], start=1
+        ):
             clos.append({"code": f"CLO{index}", "text": sentence[:220]})
         if not clos:
             clos = [
