@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend dependencies
+        run: uv sync --directory backend --dev
+
+      - name: Lint
+        run: uv run --directory backend ruff check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py
+
+      - name: Format
+        run: uv run --directory backend ruff format --check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py alembic/versions/0028_profassist.py
+
+      - name: Unit tests
+        run: uv run --directory backend pytest tests/test_profassist.py -q
