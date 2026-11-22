@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.profassist.models import AgentToolSetting, AiSettings, PromptAudit, PromptVersion
+from app.profassist.providers import AGENTS
+from app.profassist.providers import catalog as provider_catalog
 from app.profassist.runtime import DEFAULT_PROMPTS, DEFAULT_TOOLS, bind_runtime, catalog
 
 
@@ -40,7 +42,17 @@ async def load_runtime(
     bind_runtime(
         prompts,
         tools,
-        {"model": settings.model, "base_url": settings.base_url, "provider": settings.provider},
+        {
+            "model": settings.model,
+            "base_url": settings.base_url,
+            "provider": settings.provider,
+            "agents": settings.agent_models or {},
+            "debate": {
+                "enabled": settings.debate_enabled,
+                "threshold": settings.debate_threshold,
+                "max_rounds": settings.debate_max_rounds,
+            },
+        },
     )
 
 
@@ -85,6 +97,12 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         "provider": settings.provider,
         "model": settings.model,
         "base_url": settings.base_url,
+        "debate_enabled": settings.debate_enabled,
+        "debate_threshold": settings.debate_threshold,
+        "debate_max_rounds": settings.debate_max_rounds,
+        "providers": provider_catalog(),
+        "agents": AGENTS,
+        "agent_models": settings.agent_models or {},
         "prompts": [
             {
                 "agent": row.agent_key,
@@ -118,6 +136,10 @@ async def save_model_settings(
     provider: str,
     model: str,
     base_url: str,
+    debate_enabled: bool = True,
+    debate_threshold: int = 0,
+    debate_max_rounds: int = 1,
+    agent_models: dict | None = None,
 ) -> dict[str, Any]:
     row = await _settings(db, org_id)
     before = f"{row.provider} {row.model} chat={row.chat_enabled}"
@@ -125,6 +147,10 @@ async def save_model_settings(
     row.provider = provider or "openai"
     row.model = model or "gpt-4o-mini"
     row.base_url = base_url or ""
+    row.debate_enabled = debate_enabled
+    row.debate_threshold = max(0, int(debate_threshold))
+    row.debate_max_rounds = max(0, min(3, int(debate_max_rounds)))
+    row.agent_models = agent_models or {}
     db.add(
         PromptAudit(
             organization_id=org_id,

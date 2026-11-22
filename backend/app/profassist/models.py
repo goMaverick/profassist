@@ -274,6 +274,10 @@ class AiSettings(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(64), nullable=False, default="openai")
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="gpt-4o-mini")
     base_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    debate_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    debate_threshold: Mapped[int] = mapped_column(nullable=False, default=0)
+    debate_max_rounds: Mapped[int] = mapped_column(nullable=False, default=1)
+    agent_models: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class PromptVersion(Base, TimestampMixin):

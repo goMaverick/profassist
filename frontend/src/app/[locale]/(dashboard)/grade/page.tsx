@@ -30,6 +30,7 @@ interface Draft {
     feedback: string;
     votes: Array<{ persona: string; level: string | null; quotes: string[] }>;
     judge: { level: string | null; why: string; vote_split: Array<string | null>; quotes: string[]; evidence_status: string };
+    debate_rounds?: Array<{ round: number; votes: Array<{ persona: string; level: string }> }>;
     calibrator: { status: string; message: string; applied: boolean };
   }>;
 }
@@ -163,6 +164,11 @@ export default function GradePage() {
                       ))}
                     </ul>
                     <p className="text-foreground/60 mt-2">{result.calibrator.message}</p>
+                    {(result.debate_rounds || []).map((round) => (
+                      <p key={round.round} className="mt-1">
+                        Debate round {round.round}: {round.votes.map((vote) => `${vote.persona} ${vote.level}`).join(" · ")}
+                      </p>
+                    ))}
                     <label className="mt-3 block">
                       Your level
                       <select

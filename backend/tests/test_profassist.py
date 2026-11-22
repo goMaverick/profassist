@@ -241,6 +241,30 @@ def test_mlflow_empty_state_when_server_is_down(monkeypatch: pytest.MonkeyPatch)
     assert payload["models"][0]["status"] == "not_trained"
 
 
+def test_debate_starts_only_past_the_threshold() -> None:
+    from app.profassist.grading import level_spread, needs_debate
+
+    close = [{"level": "proficient"}, {"level": "developing"}]
+    far = [{"level": "advanced"}, {"level": "beginning"}]
+    assert level_spread(close) == 1
+    assert needs_debate(close, threshold=0) is True
+    assert needs_debate(close, threshold=1) is False
+    assert needs_debate(far, threshold=1) is True
+
+
+def test_provider_keys_are_detected_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.providers import key_configured, litellm_model
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert key_configured("anthropic") is False
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    assert key_configured("anthropic") is True
+    assert (
+        litellm_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    )
+    assert litellm_model("openai", "openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
 def test_trace_link_uses_the_public_langfuse_host(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGFUSE_PUBLIC_BASE_URL", "http://localhost:3100")
     monkeypatch.setenv("LANGFUSE_PROJECT_ID", "profassist-project")
