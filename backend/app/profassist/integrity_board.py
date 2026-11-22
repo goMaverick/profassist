@@ -333,23 +333,37 @@ def _counted(passages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for item in passages if not item.get("common")]
 
 
+def _pair_status(course: dict[str, Any], item: dict[str, Any], pair: dict[str, Any]) -> str:
+    from app.profassist.integrity_docs import decision_status, load_decisions, pair_matches
+
+    matches = pair_matches(course["slug"], str(item["number"]), pair["left"], pair["right"])
+    decided = decision_status(
+        matches,
+        load_decisions().get(
+            _pair_id(course["slug"], str(item["number"]), pair["left"], pair["right"]), {}
+        ),
+    )
+    if decided:
+        return decided
+    return _status(int(pair["percent"]), len(_counted(pair["passages"])))
+
+
 def assignment_card(course: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     flagged = 0
     highest = 0
     writing = 0
+    statuses = []
     for pair in item["pairs"]:
         counted = _counted(pair["passages"])
-        status = _status(int(pair["percent"]), len(counted))
+        status = _pair_status(course, item, pair)
+        statuses.append(status)
         if status != "Clear":
             flagged += 1
         highest = max(highest, int(pair["percent"]) if counted or not pair["passages"] else 0)
         if _writing_flag(pair["passages"]):
             writing += 1
     overall = "Clear"
-    if any(
-        _status(int(pair["percent"]), len(_counted(pair["passages"]))) == "Concern"
-        for pair in item["pairs"]
-    ):
+    if "Concern" in statuses:
         overall = "Concern"
     elif flagged:
         overall = "Review"
@@ -454,6 +468,12 @@ def pair_detail(course: str, number: str, left: str, right: str) -> dict[str, An
     percent = _cell(item, left, right)
     left_body = _submission(item["title"], left, passages, side="left")
     right_body = _submission(item["title"], right, passages, side="right")
+    from app.profassist.integrity_docs import document_side, load_decisions, pair_matches, summarise
+
+    matches = pair_matches(found["slug"], str(item["number"]), left, right)
+    decisions = load_decisions().get(_pair_id(found["slug"], str(item["number"]), left, right), {})
+    for match in matches:
+        match["decision"] = decisions.get(match["id"], "pending")
     return {
         "course": found["code"],
         "slug": found["slug"],
@@ -468,6 +488,12 @@ def pair_detail(course: str, number: str, left: str, right: str) -> dict[str, An
         "left_meta": _group_meta(left, item["number"]),
         "right_meta": _group_meta(right, item["number"]),
         "passages": passages,
+        "matches": matches,
+        "decisions": summarise(matches, decisions),
+        "documents": {
+            "left": document_side(found["slug"], str(item["number"]), left),
+            "right": document_side(found["slug"], str(item["number"]), right),
+        },
         "why": (
             "The highlight is the wording that appears in both submissions. "
             "A line that also appears in the assignment brief or the readings is marked "
@@ -532,15 +558,37 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
     href = "/integrity"
     if first:
         href = f"/integrity?course={first['slug']}&assignment={first['number']}"
-    lines = [
-        f"{item['course']} assignment {item['number']} ({item['name']}): {item['status']}, "
-        f"highest {item['highest']}% across {_count(item['flagged_pairs'], 'pair', 'pairs')} to read."
-        for item in picked
-    ]
+    from app.profassist.integrity_docs import pair_matches
+
+    lines = []
+    match_rows: list[dict[str, Any]] = []
+    for item in picked:
+        detail = ""
+        if first and item is first:
+            rows = pair_matches(item["slug"], str(item["number"]), "A", "B") or pair_matches(
+                item["slug"], str(item["number"]), "A", "C"
+            )
+            match_rows = [
+                {
+                    "n": index + 1,
+                    "percent": row["percent"],
+                    "page": row["page_left"],
+                    "quote": row["quote"],
+                    "source": row["tag"],
+                }
+                for index, row in enumerate(rows[:8])
+            ]
+            if match_rows:
+                detail = f" First match is on page {match_rows[0]['page']}."
+        lines.append(
+            f"{item['course']} assignment {item['number']} ({item['name']}): {item['status']}, "
+            f"highest {item['highest']}% across {_count(item['flagged_pairs'], 'pair', 'pairs')} to read.{detail}"
+        )
     return {
         "course": code,
         "assignment": number,
         "items": picked,
+        "matches": match_rows,
         "href": href,
         "message": " ".join(lines) or "Nothing needs a look on that assignment.",
     }

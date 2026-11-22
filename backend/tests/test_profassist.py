@@ -202,6 +202,8 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     )
     assert "Concern" in answered["message"]
     assert "86" in answered["message"]
+    assert "page" in answered["message"]
+    assert answered["matches"][0]["page"] >= 1
     assert "1 pairs" not in answered["message"]
     assert answered["href"].startswith("/integrity?course=MAAI903")
     from app.profassist.integrity_board import concerns, pair_detail
@@ -212,12 +214,75 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     assert len(detail["left_text"]) >= 3
     assert detail["left_meta"]["members"].startswith("Sara")
     assert any(item["common"] for item in detail["passages"])
+    assert len(detail["matches"]) >= 7
+    assert detail["documents"]["left"]["origin"] == "pdf"
+    assert detail["documents"]["right"]["origin"] == "docx"
+    assert detail["documents"]["right"]["converter"] == "libreoffice"
+    assert {"shared", "brief", "readings"} <= {item["source"] for item in detail["matches"]}
+    assert len({item["page_left"] for item in detail["matches"]}) >= 2
+    assert detail["matches"][0]["left_box"]["w"] > 0
     assert "1 pair to read" in next(
         item["line"] for item in overview("MAAI903")["items"] if item["number"] == "2"
     )
     assert "1 writing flag" in next(
         item["line"] for item in overview("MAAI903")["items"] if item["number"] == "3"
     )
+
+
+def test_integrity_gate_and_match_decisions(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from app.core.config import settings
+    from app.profassist.integrity_board import COURSES, _pair_id, assignment_card
+    from app.profassist.integrity_docs import gate_for_model, pair_matches, save_decision
+
+    cleaned = gate_for_model("Write to ada@university.edu about the typo sustanability.")
+    assert "ada@university.edu" not in cleaned
+    assert "sustanability" in cleaned
+    with pytest.raises(RuntimeError):
+        from app.profassist.pii import assert_prompt_is_clean
+
+        assert_prompt_is_clean("ada@university.edu")
+
+    monkeypatch.setattr(settings, "MEDIA_DIR", tmp_path)
+    course = COURSES[0]
+    item = course["assignments"][0]
+    before = assignment_card(course, item)["flagged_pairs"]
+    shared = [row for row in pair_matches("MAAI903", "1", "A", "B") if row["source"] == "shared"]
+    for row in shared:
+        save_decision(_pair_id("MAAI903", "1", "A", "B"), row["id"], "ok")
+    after = assignment_card(course, item)["flagged_pairs"]
+    assert after < before
+
+
+def test_grade_feedback_stays_private_until_push_is_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from app.core.config import settings
+    from app.profassist.grade_notes import load_feedback, release_feedback, save_feedback
+
+    monkeypatch.setattr(settings, "MEDIA_DIR", tmp_path)
+    monkeypatch.delenv("MOODLE_PUSH_ENABLED", raising=False)
+    saved = save_feedback(
+        "professor",
+        "Group A",
+        {
+            "comments": [
+                {"id": "c1", "page": 1, "text": "Fix the spelling.", "quote": "sustanability"}
+            ],
+            "rubric": [{"criterion": "Problem definition", "comment": "Name the user."}],
+            "overall": "A solid draft.",
+            "bank": ["Add the missing citation."],
+        },
+    )
+    assert saved["release"] == "draft"
+    held = release_feedback("professor", "Group A")
+    assert held["pushed"] is False
+    assert "not contacted" in held["message"]
+    monkeypatch.setenv("MOODLE_PUSH_ENABLED", "true")
+    pushed = release_feedback("professor", "Group A")
+    assert pushed["pushed"] is True
+    assert "not contacted" in pushed["receipt"]["moodle_response"]
+    assert pushed["receipt"]["item"]["comments"][0]["text"] == "Fix the spelling."
+    assert load_feedback("professor", "Group A")["release"] == "pushed"
 
 
 def test_create_assignment_phrase_picks_the_course_tool() -> None:
