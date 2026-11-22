@@ -199,7 +199,11 @@ def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwa
         except Exception as exc:
             last = exc
             text = str(exc)
-            if "not supported" in text and "thinking" in text.lower() and "reasoning_effort" in call:
+            if (
+                "not supported" in text
+                and "thinking" in text.lower()
+                and "reasoning_effort" in call
+            ):
                 call.pop("reasoning_effort", None)
                 continue
             if "high demand" in text.lower() or "unavailable" in text.lower() or "503" in text:

@@ -469,7 +469,9 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
     if task in {"grade_persona", "grade_revise"} and isinstance(parsed, dict):
         parsed.setdefault("persona", payload.get("persona") or "evidence")
     if task == "outline_assist":
-        suggestion = parsed.get("suggestion") if isinstance(parsed.get("suggestion"), dict) else None
+        suggestion = (
+            parsed.get("suggestion") if isinstance(parsed.get("suggestion"), dict) else None
+        )
         if suggestion is None and any(
             key in parsed for key in ("clos", "plos", "weeks", "description", "tasks", "policies")
         ):

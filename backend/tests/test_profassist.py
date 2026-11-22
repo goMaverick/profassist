@@ -780,7 +780,13 @@ def test_chat_tools_require_a_professor_and_a_confirm() -> None:
 
 
 def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY", "OLLAMA_API_BASE"):
+    for name in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "LLM_API_KEY",
+        "OLLAMA_API_BASE",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
