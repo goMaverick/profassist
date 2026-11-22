@@ -64,6 +64,20 @@ def test_demo_quotes_are_in_the_submission() -> None:
     assert rejected == []
 
 
+def test_judge_keeps_a_quote_when_only_the_spacing_differs() -> None:
+    submission = "The meter on level two reads 42.7 during the Thursday class change."
+    verdict = reconcile(
+        [
+            {"level": "proficient", "quotes": ["The meter on level two reads 42.7"], "checks": []},
+            {"level": None, "quotes": ["The meter on level two reads 42.7"], "checks": []},
+            {"level": "proficient", "quotes": ["not in the text"], "checks": []},
+        ],
+        submission,
+    )
+    assert verdict["level"] == "proficient"
+    assert verdict["evidence_status"] == "ok"
+
+
 def test_judge_rejects_invented_quotes() -> None:
     submission = "The student wrote one careful paragraph about the meter."
     verdict = reconcile(

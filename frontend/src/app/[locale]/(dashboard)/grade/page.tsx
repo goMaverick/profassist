@@ -182,7 +182,7 @@ export default function GradePage() {
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
       <section id="council-result" className="pa-panel">
         <h2 style={{ marginTop: 0, fontWeight: 400 }}>Council</h2>
-        <p>Three graders read one submission, then the chair picks a band. With no model server, the offline drafter is used.</p>
+        <p>Three graders read one submission, then the chair picks a band. With no model configured, the offline drafter is used.</p>
         <Button kind="primary" disabled={grading} onClick={() => void runCouncil()}>
           {grading ? "The council is reading…" : "Run the council"}
         </Button>
