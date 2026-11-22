@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Button, FileUploaderDropContainer, Tag, TextArea } from "@carbon/react";
+import { Add, TrashCan } from "@carbon/icons-react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 import type { Box, MarginNote } from "@/components/profassist/document-viewer";
 
@@ -162,16 +163,25 @@ export default function GradePage() {
   return (
     <div className="pa-dash">
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
-      {feedbackFor && <FeedbackDesk group={feedbackFor} onClose={() => setFeedbackFor("")} />}
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      {feedbackFor && (
+        <FeedbackDesk
+          group={feedbackFor}
+          onClose={() => setFeedbackFor("")}
+          onApprove={() => {
+            const row = rows.find((item) => item.group_name === feedbackFor);
+            if (row?.draft_id) void approve(row.draft_id);
+          }}
+        />
+      )}
+      {!feedbackFor && <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button kind="primary" onClick={async () => {
           for (const row of rows) {
             if (row.draft_id && row.draft_status === "draft") await approve(row.draft_id);
           }
         }}>Approve all high-confidence</Button>
-      </div>
-      {cards.length === 0 && <p>No submissions yet. Sync from Moodle or upload a zip.</p>}
-      {cards.map((row, index) => {
+      </div>}
+      {!feedbackFor && cards.length === 0 && <p>No submissions yet. Sync from Moodle or upload a zip.</p>}
+      {!feedbackFor && cards.map((row, index) => {
         const people = GROUP_PEOPLE[row.group_name] || "Sara Al Maktoum";
         const mark = index % 2 === 0 ? 78 : 64;
         const confidence = mark >= 75 ? "High" : "Medium";
@@ -197,6 +207,7 @@ export default function GradePage() {
         </article>
         );
       })}
+      {!feedbackFor && (
       <details>
         <summary>Get more submissions</summary>
         <div className="pa-sync-strip">
@@ -220,6 +231,7 @@ export default function GradePage() {
           />
         </div>
       </details>
+      )}
     </div>
   );
 }
@@ -233,7 +245,7 @@ interface FeedbackNotes {
   document: { origin: string; view: string; original: string };
 }
 
-function FeedbackDesk({ group, onClose }: { group: string; onClose: () => void }) {
+function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: () => void; onApprove: () => void }) {
   const [notes, setNotes] = useState<FeedbackNotes | null>(null);
   const [pick, setPick] = useState<{ page: number; quote: string; box: Box } | null>(null);
   const [comment, setComment] = useState("");
@@ -282,7 +294,7 @@ function FeedbackDesk({ group, onClose }: { group: string; onClose: () => void }
       <DocumentPane
         url={fileUrl(notes.document.view)}
         title={group}
-        subtitle={notes.document.origin === "docx" ? "Word document, shown as PDF" : "PDF"}
+        kind={notes.document.origin === "docx" ? "docx" : "pdf"}
         downloadUrl={fileUrl(notes.document.original)}
         notes={notes.comments}
         allowSelection
@@ -302,7 +314,7 @@ function FeedbackDesk({ group, onClose }: { group: string; onClose: () => void }
       />
       <aside className="pa-panel">
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <h2 style={{ margin: 0 }}>Feedback for {group}</h2>
+          <h2 className="pa-section">Feedback for {group}</h2>
           <Button kind="ghost" size="sm" onClick={onClose}>Close</Button>
         </div>
         <p style={{ color: "#525252" }}>Private until you approve the grade. Nothing is sent to a student.</p>
@@ -322,7 +334,7 @@ function FeedbackDesk({ group, onClose }: { group: string; onClose: () => void }
             }}>Pin comment</Button>
           </div>
         )}
-        <h3>Rubric comments</h3>
+        <h2 className="pa-section">Rubric comments</h2>
         {notes.rubric.map((row, index) => (
           <TextArea
             key={row.criterion}
@@ -345,24 +357,29 @@ function FeedbackDesk({ group, onClose }: { group: string; onClose: () => void }
           onBlur={() => void persist(notes)}
           onChange={(event) => setNotes({ ...notes, overall: event.target.value })}
         />
-        <Button kind="tertiary" size="sm" onClick={() => setBankOpen((open) => !open)}>{bankOpen ? "Hide comment bank" : "Comment bank"}</Button>
+        <div className="pa-approve-row">
+          <Button kind="primary" onClick={onApprove}>Approve this grade</Button>
+        </div>
+        <h2 className="pa-section">Comment bank</h2>
+        <Button kind="ghost" size="sm" onClick={() => setBankOpen((open) => !open)}>{bankOpen ? "Hide comment bank" : "Show comment bank"}</Button>
         {bankOpen && (
-          <div className="pa-bank">
+          <ul className="pa-bank">
             {notes.bank.map((item) => (
-              <div key={item} style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Button kind="ghost" size="sm" onClick={() => insert(item)}>{item}</Button>
-                <Button kind="danger--ghost" size="sm" onClick={() => void persist({ ...notes, bank: notes.bank.filter((row) => row !== item) })}>Remove</Button>
-              </div>
+              <li key={item}>
+                <Tag type="gray" size="sm">{item}</Tag>
+                <Button kind="ghost" size="sm" hasIconOnly renderIcon={Add} iconDescription="Insert" onClick={() => insert(item)} />
+                <Button kind="ghost" size="sm" hasIconOnly renderIcon={TrashCan} iconDescription="Remove" onClick={() => void persist({ ...notes, bank: notes.bank.filter((row) => row !== item) })} />
+              </li>
             ))}
-            <TextArea id="bank-new" labelText="Add a reusable comment" value={fresh} onChange={(event) => setFresh(event.target.value)} />
-            <Button kind="tertiary" size="sm" onClick={() => {
-              if (!fresh.trim()) return;
-              const next = { ...notes, bank: [...notes.bank, fresh.trim()] };
-              setFresh("");
-              void persist(next);
-            }}>Save to bank</Button>
-          </div>
+          </ul>
         )}
+        <TextArea id="bank-new" labelText="Add a reusable comment" value={fresh} onChange={(event) => setFresh(event.target.value)} />
+        <Button kind="tertiary" size="sm" onClick={() => {
+          if (!fresh.trim()) return;
+          const next = { ...notes, bank: [...notes.bank, fresh.trim()] };
+          setFresh("");
+          void persist(next);
+        }}>Save to bank</Button>
       </aside>
     </section>
   );

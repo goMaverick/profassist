@@ -3,8 +3,8 @@
 import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Dropdown, Tag, TextArea, Tile } from "@carbon/react";
-import { ChevronRight } from "@carbon/icons-react";
+import { Button, Dropdown, StructuredListBody, StructuredListCell, StructuredListHead, StructuredListRow, StructuredListWrapper, Tag, TextArea, Tile } from "@carbon/react";
+import { ChevronLeft, ChevronRight } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
 import type { Hit } from "@/components/profassist/document-viewer";
 
@@ -454,26 +454,44 @@ function IntegrityDrill() {
             <Button kind="secondary" size="sm" onClick={() => setViewer(true)}>See in document</Button>
           </div>
           {visible.length === 0 && <p>No shared sentences in this view.</p>}
-          <div>
-            {visible.map((item) => (
-              <article key={item.id} className={`pa-passage${item.n === cursor + 1 ? " is-current" : ""}`}>
-                <button type="button" onClick={() => { setCursor(item.n - 1); setViewer(true); }}>
-                  <strong>#{item.n}</strong>
-                  <span> {item.percent}% · page {item.page_left}</span>
-                  <span> “{item.context || item.quote}”</span>
-                </button>
-                <Tag type={item.source === "shared" ? "purple" : "gray"} size="sm">{item.tag}</Tag>
-                <span>{item.decision === "ok" ? "OK" : item.decision === "flag" ? "Flagged" : "Pending"}</span>
-                <Button kind="tertiary" size="sm" onClick={() => decide(item.id, "ok")}>Mark OK</Button>
-                <Button kind="danger--tertiary" size="sm" onClick={() => decide(item.id, "flag")}>Flag</Button>
-              </article>
-            ))}
-          </div>
+          {visible.length > 0 && (
+            <StructuredListWrapper aria-label="Matches">
+              <StructuredListHead>
+                <StructuredListRow head>
+                  <StructuredListCell head>#</StructuredListCell>
+                  <StructuredListCell head>%</StructuredListCell>
+                  <StructuredListCell head>Page</StructuredListCell>
+                  <StructuredListCell head>Quote</StructuredListCell>
+                  <StructuredListCell head>Source</StructuredListCell>
+                  <StructuredListCell head>Status</StructuredListCell>
+                  <StructuredListCell head> </StructuredListCell>
+                </StructuredListRow>
+              </StructuredListHead>
+              <StructuredListBody>
+                {visible.map((item) => (
+                  <StructuredListRow key={item.id} className={item.n === cursor + 1 ? "is-current" : ""} onClick={() => { setCursor(item.n - 1); setViewer(true); }}>
+                    <StructuredListCell>{item.n}</StructuredListCell>
+                    <StructuredListCell>{item.percent}%</StructuredListCell>
+                    <StructuredListCell>{item.page_left}</StructuredListCell>
+                    <StructuredListCell><span className="pa-quote">{item.quote}</span></StructuredListCell>
+                    <StructuredListCell><Tag type={item.source === "shared" ? "purple" : "gray"} size="sm">{item.tag}</Tag></StructuredListCell>
+                    <StructuredListCell><Tag type={item.decision === "flag" ? "red" : item.decision === "ok" ? "green" : "gray"} size="sm">{item.decision === "ok" ? "OK" : item.decision === "flag" ? "Flagged" : "Pending"}</Tag></StructuredListCell>
+                    <StructuredListCell>
+                      <span className="pa-row-actions">
+                        <Button kind="ghost" size="sm" onClick={(event) => { event.stopPropagation(); void decide(item.id, "ok"); }}>Mark OK</Button>
+                        <Button kind="ghost" size="sm" onClick={(event) => { event.stopPropagation(); void decide(item.id, "flag"); }}>Flag</Button>
+                      </span>
+                    </StructuredListCell>
+                  </StructuredListRow>
+                ))}
+              </StructuredListBody>
+            </StructuredListWrapper>
+          )}
           {visible.length > 0 && (
             <div className="pa-stepper">
               <span>Match {cursor + 1} of {visible.length}</span>
-              <Button kind="tertiary" size="sm" disabled={cursor === 0} onClick={() => { setCursor((value) => Math.max(0, value - 1)); setViewer(true); }}>Prev</Button>
-              <Button kind="tertiary" size="sm" disabled={cursor >= visible.length - 1} onClick={() => { setCursor((value) => Math.min(visible.length - 1, value + 1)); setViewer(true); }}>Next</Button>
+              <Button kind="ghost" size="sm" renderIcon={ChevronLeft} disabled={cursor === 0} onClick={() => { setCursor((value) => Math.max(0, value - 1)); setViewer(true); }}>Prev</Button>
+              <Button kind="ghost" size="sm" renderIcon={ChevronRight} disabled={cursor >= visible.length - 1} onClick={() => { setCursor((value) => Math.min(visible.length - 1, value + 1)); setViewer(true); }}>Next</Button>
             </div>
           )}
           {viewer && visible[cursor] && (
@@ -481,7 +499,7 @@ function IntegrityDrill() {
               <DocumentPane
                 url={fileUrl(detail.documents.left.view)}
                 title={`Group ${detail.left}`}
-                subtitle={detail.documents.left.origin === "docx" ? "Word document, shown as PDF" : "PDF"}
+                kind={detail.documents.left.origin === "docx" ? "docx" : "pdf"}
                 downloadUrl={fileUrl(detail.documents.left.original)}
                 hits={hitsFor(detail.matches || [], visible, "left")}
                 activeId={visible[cursor].id}
@@ -489,7 +507,7 @@ function IntegrityDrill() {
               <DocumentPane
                 url={fileUrl(detail.documents.right.view)}
                 title={`Group ${detail.right}`}
-                subtitle={detail.documents.right.origin === "docx" ? "Word document, shown as PDF" : "PDF"}
+                kind={detail.documents.right.origin === "docx" ? "docx" : "pdf"}
                 downloadUrl={fileUrl(detail.documents.right.original)}
                 hits={hitsFor(detail.matches || [], visible, "right")}
                 activeId={visible[cursor].id}

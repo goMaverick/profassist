@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Button, Tag, TextArea } from "@carbon/react";
+import { Download, Edit, TrashCan, ZoomIn, ZoomOut } from "@carbon/icons-react";
 import { getDocument, GlobalWorkerOptions, TextLayer } from "pdfjs-dist";
 
 GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
@@ -35,7 +37,7 @@ export function fileUrl(path: string) {
 export function DocumentPane({
   url,
   title,
-  subtitle,
+  kind = "pdf",
   downloadUrl,
   hits = [],
   activeId,
@@ -47,7 +49,7 @@ export function DocumentPane({
 }: {
   url: string;
   title: string;
-  subtitle?: string;
+  kind?: "pdf" | "docx";
   downloadUrl?: string;
   hits?: Hit[];
   activeId?: string;
@@ -57,10 +59,12 @@ export function DocumentPane({
   onEditNote?: (id: string, text: string) => void;
   onDeleteNote?: (id: string) => void;
 }) {
+  const frame = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<Awaited<ReturnType<typeof loadPdf>> | null>(null);
   const [pages, setPages] = useState(0);
-  const [scale, setScale] = useState(0.9);
+  const [scale, setScale] = useState(1.27);
   const [failed, setFailed] = useState("");
+  const fitted = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +86,17 @@ export function DocumentPane({
   }, [url]);
 
   const pane = title.replace(/\s+/g, "-");
+  const activePage = hits.find((hit) => hit.id === activeId)?.page || notes[0]?.page || 1;
+
+  useEffect(() => {
+    const node = frame.current;
+    if (!node || !pages || fitted.current) return;
+    const styles = getComputedStyle(node);
+    const pad = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+    const fit = (node.clientWidth - pad - 8) / 595;
+    setScale(Math.min(1.45, Math.max(0.9, fit)));
+    fitted.current = true;
+  }, [pages]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -91,26 +106,26 @@ export function DocumentPane({
   return (
     <section className="pa-doc">
       <header className="pa-doc-head">
-        <div>
+        <div className="pa-doc-title">
           <strong>{title}</strong>
-          {subtitle && <span>{subtitle}</span>}
+          <Tag size="sm" type={kind === "docx" ? "blue" : "gray"}>{kind === "docx" ? "Word, shown as PDF" : "PDF"}</Tag>
         </div>
         <div className="pa-doc-tools">
-          <button type="button" onClick={() => setScale((value) => Math.max(0.8, value - 0.15))}>Smaller</button>
-          <button type="button" onClick={() => setScale((value) => Math.min(1.6, value + 0.15))}>Larger</button>
-          {downloadUrl && <a href={downloadUrl}>Download original</a>}
+          <Button kind="ghost" size="sm" hasIconOnly renderIcon={ZoomOut} iconDescription="Zoom out" onClick={() => setScale((value) => Math.max(0.9, Number((value - 0.15).toFixed(2))))} />
+          <Button kind="ghost" size="sm" hasIconOnly renderIcon={ZoomIn} iconDescription="Zoom in" onClick={() => setScale((value) => Math.min(1.9, Number((value + 0.15).toFixed(2))))} />
+          {downloadUrl && <Button kind="ghost" size="sm" hasIconOnly renderIcon={Download} iconDescription="Download original" href={downloadUrl} />}
         </div>
       </header>
       {failed && <p role="alert">{failed}</p>}
       <div className="pa-thumbs" aria-label="Pages">
         {Array.from({ length: pages }, (_, index) => (
-          <button key={index} type="button" onClick={() => document.getElementById(`page-${title}-${index + 1}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+          <button key={index} type="button" className={index + 1 === activePage ? "is-active" : ""} onClick={() => document.getElementById(`page-${title}-${index + 1}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
             {pdf && <Thumb pdf={pdf} page={index + 1} pane={pane} />}
-            <span>Page {index + 1}</span>
+            <span>{index + 1}</span>
           </button>
         ))}
       </div>
-      <div className="pa-doc-scroll">
+      <div className={`pa-doc-scroll${notes.length ? " has-notes" : ""}`} ref={frame}>
         {Array.from({ length: pages }, (_, index) => (
           <PageView
             key={`${url}-${index}-${scale}`}
@@ -145,7 +160,7 @@ function Thumb({ pdf, page, pane }: { pdf: Awaited<ReturnType<typeof loadPdf>>; 
     if (!canvas) return;
     pdf.getPage(page).then(async (sheet) => {
       if (cancelled) return;
-      const viewport = sheet.getViewport({ scale: 0.16 });
+      const viewport = sheet.getViewport({ scale: 0.08 });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await sheet.render({ canvas, viewport }).promise;
@@ -261,11 +276,54 @@ function PageView({
         />
       ))}
       {notes.map((note) => (
-        <aside key={note.id} className="pa-bubble" style={{ top: `${note.box.y * 100}%` }}>
-          <textarea aria-label="Comment" value={note.text} onChange={(event) => onEditNote?.(note.id, event.target.value)} />
-          <button type="button" onClick={() => onDeleteNote?.(note.id)}>Delete</button>
-        </aside>
+        <CommentCard key={note.id} note={note} onEdit={onEditNote} onDelete={onDeleteNote} />
       ))}
     </article>
+  );
+}
+
+function CommentCard({
+  note,
+  onEdit,
+  onDelete,
+}: {
+  note: MarginNote;
+  onEdit?: (id: string, text: string) => void;
+  onDelete?: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(note.text);
+  return (
+    <aside className="pa-comment" style={{ top: `${note.box.y * 100}%` }}>
+      <span className="pa-comment-line" />
+      <div className="pa-comment-card">
+        <span className="pa-avatar" aria-hidden="true">LH</span>
+        <div>
+          <div className="pa-comment-meta">
+            <strong>You</strong>
+            <time>22 Nov 2026</time>
+          </div>
+          {editing ? (
+            <TextArea id={`comment-${note.id}`} labelText="Comment" hideLabel value={text} onChange={(event) => setText(event.target.value)} />
+          ) : (
+            <p>{note.text}</p>
+          )}
+          <div className="pa-comment-actions">
+            <Button
+              kind="ghost"
+              size="sm"
+              hasIconOnly
+              renderIcon={Edit}
+              iconDescription={editing ? "Save comment" : "Edit comment"}
+              onClick={() => {
+                if (editing) onEdit?.(note.id, text);
+                setEditing((open) => !open);
+              }}
+            />
+            <Button kind="ghost" size="sm" hasIconOnly renderIcon={TrashCan} iconDescription="Delete comment" onClick={() => onDelete?.(note.id)} />
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }
