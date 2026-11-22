@@ -195,6 +195,14 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     assert name == "integrity_concerns"
     assert args["code"] == "MAAI903"
     assert args["assignment"] == "1"
+    from app.profassist.mcp_server import answer_tool
+
+    answered = answer_tool(
+        name, "Look up shared work", "show integrity concerns for MAAI 903 assignment 1"
+    )
+    assert "Concern" in answered["message"]
+    assert "86" in answered["message"]
+    assert answered["href"].startswith("/integrity?course=MAAI903")
 
 
 def test_create_assignment_phrase_picks_the_course_tool() -> None:

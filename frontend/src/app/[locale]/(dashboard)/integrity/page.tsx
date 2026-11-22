@@ -83,9 +83,9 @@ function statusType(status: string): "green" | "blue" | "red" | "gray" {
 }
 
 function heat(percent: number) {
+  if (percent >= 100) return "#e0e0e0";
   if (percent >= 75) return "#ffd7d9";
   if (percent >= 40) return "#d0e2ff";
-  if (percent === 100) return "#e0e0e0";
   return "#defbe6";
 }
 
@@ -240,7 +240,7 @@ function IntegrityDrill() {
                 <tr key={left}>
                   <th>Group {left}</th>
                   {matrix.groups.map((right, column) => (
-                    <td key={right} style={{ background: heat(matrix.matrix[row][column]) }}>
+                    <td key={right} style={{ background: left === right ? "#e0e0e0" : heat(matrix.matrix[row][column]) }}>
                       {left === right ? "—" : (
                         <button type="button" className="pa-why" onClick={() => go({ course: matrix.slug, assignment, pair: `${left}-${right}` })}>
                           {matrix.matrix[row][column]}%
@@ -258,7 +258,7 @@ function IntegrityDrill() {
                 <th>Pair</th>
                 <th><button type="button" className="pa-why" onClick={() => setSort("percent")}>Similar</button></th>
                 <th><button type="button" className="pa-why" onClick={() => setSort("shared")}>Shared passages</button></th>
-                <th>Writing</th>
+                <th>AI flag</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -268,7 +268,7 @@ function IntegrityDrill() {
                   <td>Group {item.left} vs Group {item.right}</td>
                   <td>{item.percent}%</td>
                   <td>{item.shared}</td>
-                  <td>{item.writing ? "Unusual" : "Ordinary"}</td>
+                  <td>{item.writing ? "Yes" : "No"}</td>
                   <td><Tag type={statusType(item.status)} size="sm">{item.status}</Tag></td>
                 </tr>
               ))}
@@ -279,7 +279,10 @@ function IntegrityDrill() {
       {detail && (
         <>
           <h2 style={{ margin: 0, fontWeight: 400 }}>Group {detail.left} and Group {detail.right}</h2>
-          <p>{detail.percent}% similar · <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag></p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{detail.percent}% similar</span>
+            <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <article id="left-submission">
               {detail.left_text.map((block, index) => (
@@ -307,15 +310,15 @@ function IntegrityDrill() {
               </li>
             ))}
           </ul>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="pa-why" style={{ display: "block", margin: "12px 0", textAlign: "left" }} onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
+          {why && <p id="integrity-why" className="pa-why-body">{detail.why}</p>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
             <Button kind="primary" onClick={() => act("ok")}>Mark as OK</Button>
             <Button kind="danger--tertiary" onClick={() => act("flag")}>Flag for follow-up</Button>
           </div>
-          <TextArea id="integrity-note" labelText="Add a note" value={note} onChange={(event) => setNote(event.target.value)} />
+          <TextArea id="integrity-note" labelText="Add a note" rows={3} value={note} onChange={(event) => setNote(event.target.value)} />
           <Button kind="tertiary" onClick={() => act("note")}>Save note</Button>
           {saved && <p>{saved}</p>}
-          <button type="button" className="pa-why" onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
-          {why && <p className="pa-why-body">{detail.why}</p>}
         </>
       )}
     </div>
