@@ -36,8 +36,8 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | Prompt management | Done | Langfuse `production` prompts, then the database, then the code default. `/admin/ai` does not edit prompt text. |
 | Langfuse traces | Done | Nested spans after the privacy gate, with the About section labelled on the prompt. |
 | Grade calibrator | Stubbed | The page and the endpoint return `not_trained` and no score. |
-| At-risk early warning | Stubbed | The students page returns `not_trained` and no score. |
-| Fake Moodle | Done | Assignments with pdf, docx, zip, and image files, plus a workshop with peer reviews. Sync records the time. |
+| At-risk early warning | Stubbed | The page lists the 14 upstream course-withdrawal features. The public model repo has no training CSV or saved model in git, so no score is shown. A score would stay advisory. |
+| Fake Moodle | Done | Assignments with files and a workshop. A Prefect job is the main pull, every 30 minutes unless the university pauses it or picks another interval. A separate nightly full sync is on by default. Sync now is the backup. |
 | Real Moodle | Partial | Reads courses, people, assignments, submission files, rubrics, and workshops through the web service. Grade push calls `mod_assign_save_grade` only when `MOODLE_PUSH_ENABLED=true`. |
 | Manual submission upload | Done | A zip of files can be attached to an assignment when Moodle is not available. |
 | Tenant isolation | Partial | A university is an organization. Professor-owned rows are filtered in the app. Postgres RLS exists, but the compose database role is a superuser, so the app filter is what holds. |
@@ -45,7 +45,11 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | MLflow | Partial | The server is in compose. No training run is registered. |
 | python-pptx | Done | Title, agenda, sections, content, two columns, quote, chart or table, summary, references, notes, slide numbers, image placeholder, and an optional master file. |
 | Blind sample | Done | One group in twenty is hidden until she chooses or reveals it. |
-| IBM Carbon | Not done | The template layout is still the interface. |
+| IBM Carbon | Partial | Professor shell, home, outline, assessments, and login use Carbon, IBM Plex, and Carbon icons. Other template screens keep their layout inside that shell. |
+| Subject outline wizard | Done | Steps follow the faculty template, then a PDF and DOCX. Files are indexed per professor and course. |
+| Outline review | Done | One reviewer or the council. Findings have a severity, a section, and a one-click fix. High findings do not block approval. |
+| Council animation | Done | Marking, debate, judge, and feedback play as avatar cards. Demo mode replays a timed script. |
+| University logo | Done | The UOW logotype is the default org logo in the header, on login, and on the subject outline. |
 | Kafka | Not done | The app does not publish events to Kafka. |
 | DVC | Not done | No dataset versioning. |
 | Evidently | Not done | No drift reports. |

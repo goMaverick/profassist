@@ -3,6 +3,8 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 
+import "@carbon/styles/css/styles.css";
+
 import { CookieBanner } from "@/components/marketing/cookie-banner";
 import { locales, type Locale } from "@/i18n";
 import { OG_LOCALE, SITE } from "@/lib/seo";

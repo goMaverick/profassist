@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Banner } from "@/components/profassist/bits";
+import { ClickableTile, Column, Grid, InlineNotification, Tag, Tile } from "@carbon/react";
+import {
+  Document,
+  Education,
+  Flag,
+  GraduationCap,
+  PresentationFile,
+  Report,
+  User,
+  Watson,
+} from "@carbon/icons-react";
 import { pa } from "@/lib/profassist";
 
 interface Home {
@@ -16,8 +26,18 @@ interface Home {
   llm_mode: string;
   principle: string;
   calibrator: { status: string; message: string };
-  early_warning: { status: string };
 }
+
+const CARDS = [
+  { href: "/outline", title: "Subject outline", text: "Walk the faculty template and download the PDF.", icon: Document },
+  { href: "/generate", title: "Assessments", text: "Pick outcomes. The council suggests a task and a rubric.", icon: Report },
+  { href: "/studio", title: "Course studio", text: "Notes, objectives, and the materials the agents read.", icon: Education },
+  { href: "/slides", title: "Slides", text: "A cited deck for the week you choose.", icon: PresentationFile },
+  { href: "/grade", title: "Review and grade", text: "Council, your edit, then a recorded push.", icon: GraduationCap },
+  { href: "/integrity", title: "Integrity", text: "Shared passages and viva questions. Not a verdict.", icon: Flag },
+  { href: "/students", title: "Students", text: "The roster. Early warning is not trained.", icon: User },
+  { href: "/style", title: "My style", text: "Your voice and the About this professor note.", icon: Watson },
+];
 
 export default function HomePage() {
   const [home, setHome] = useState<Home | null>(null);
@@ -32,63 +52,56 @@ export default function HomePage() {
   const course = home?.courses[0];
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">ProfAssist</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Good to see you, Professor.</h1>
-        <p className="text-foreground/70 mt-2 max-w-2xl text-sm">
-          Drafts for slides, rubrics, grades and feedback. You stay in charge.
+    <Grid>
+      <Column sm={4} md={8} lg={16}>
+        <p style={{ letterSpacing: "0.12em", textTransform: "uppercase", color: "#6f6f6f", fontSize: "0.75rem" }}>
+          University workspace
         </p>
-      </div>
-      {error && <Banner>{error}</Banner>}
-      {home && <Banner>{home.principle}</Banner>}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          ["Course", course ? `${course.code}` : "—"],
-          ["Submissions", String(home?.submissions ?? "—")],
-          ["Open flags", String(home?.open_flags ?? "—")],
-          ["Pushed", String(home?.pushed ?? "—")],
-        ].map(([label, value]) => (
-          <div key={label} className="border-foreground/10 rounded-xl border p-4">
-            <p className="text-foreground/50 text-xs tracking-wide uppercase">{label}</p>
-            <p className="mt-2 text-2xl font-semibold">{value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <Link href="/studio" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">Course studio</h2>
-          <p className="text-foreground/65 mt-1 text-sm">Upload notes, approve objectives, draft slides and a rubric.</p>
-        </Link>
-        <Link href="/grade" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">Review and grade</h2>
-          <p className="text-foreground/65 mt-1 text-sm">
-            Council, judge, and your edit. {home?.drafts ?? 0} drafts, {home?.approved ?? 0} approved.
-          </p>
-        </Link>
-        <Link href="/integrity" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">Integrity</h2>
-          <p className="text-foreground/65 mt-1 text-sm">Same-topic passages side by side, with viva questions. Not a verdict.</p>
-        </Link>
-        <Link href="/students" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">Students</h2>
-          <p className="text-foreground/65 mt-1 text-sm">Roster from the fake Moodle connector. Early warning is not trained yet.</p>
-        </Link>
-        <Link href="/style" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">My style</h2>
-          <p className="text-foreground/65 mt-1 text-sm">soul.md. Feedback is written in this voice, and only you can change it.</p>
-        </Link>
-        <Link href="/quality" className="border-foreground/10 hover:bg-foreground/[0.03] rounded-xl border p-5">
-          <h2 className="font-medium">Quality</h2>
-          <p className="text-foreground/65 mt-1 text-sm">{home?.calibrator.message ?? "Grade calibrator is not trained yet."}</p>
-        </Link>
-      </div>
-      {home && (
-        <p className="text-foreground/50 text-xs">
-          Workspace {course?.title ?? "not seeded"} · Moodle {home.moodle_mode} · model {home.llm_mode}
-          {home.llm_mode === "demo" ? " (add an LLM key in .env for a live model)" : ""}
+        <h1 style={{ fontSize: "2.5rem", fontWeight: 400, margin: "0.25rem 0 0.5rem" }}>Good to see you, Professor.</h1>
+        <p style={{ maxWidth: "40rem", color: "#525252" }}>
+          Drafts stay drafts. You approve the outline, the assessment, and the grade.
         </p>
+      </Column>
+      {error && (
+        <Column sm={4} md={8} lg={16}>
+          <InlineNotification kind="error" title="Could not load" subtitle={error} hideCloseButton />
+        </Column>
       )}
-    </div>
+      {home && (
+        <Column sm={4} md={8} lg={16}>
+          <InlineNotification kind="info" title="How this works" subtitle={home.principle} hideCloseButton lowContrast />
+        </Column>
+      )}
+      {[
+        ["Course", course?.code || "None yet"],
+        ["Submissions", String(home?.submissions ?? "0")],
+        ["Open flags", String(home?.open_flags ?? "0")],
+        ["Pushed", String(home?.pushed ?? "0")],
+      ].map(([label, value]) => (
+        <Column key={label} sm={2} md={2} lg={4}>
+          <Tile>
+            <div style={{ color: "#6f6f6f", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+            <div style={{ fontSize: "2rem", marginTop: "0.5rem" }}>{value}</div>
+          </Tile>
+        </Column>
+      ))}
+      {CARDS.map((card) => (
+        <Column key={card.href} sm={4} md={4} lg={4}>
+          <ClickableTile href={card.href} style={{ minHeight: "9rem" }}>
+            <card.icon size={24} />
+            <h2 style={{ fontSize: "1.1rem", margin: "0.75rem 0 0.25rem" }}>{card.title}</h2>
+            <p style={{ margin: 0, color: "#525252" }}>{card.text}</p>
+          </ClickableTile>
+        </Column>
+      ))}
+      <Column sm={4} md={8} lg={16}>
+        <Tag type="blue">Moodle {home?.moodle_mode || "…"}</Tag>
+        <Tag type={home?.llm_mode === "demo" ? "gray" : "green"}>Model {home?.llm_mode || "…"}</Tag>
+        <Tag type="teal">{course?.title || "Course not seeded"}</Tag>
+        <Link href="/outline" style={{ marginLeft: "0.5rem" }}>
+          Open the subject outline
+        </Link>
+      </Column>
+    </Grid>
   );
 }

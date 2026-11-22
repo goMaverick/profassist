@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
+import { CouncilStage } from "@/components/profassist/council-stage";
 
 interface SubmissionRow {
   id: string;
@@ -53,6 +54,16 @@ export default function GradePage() {
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
   const [syncStatus, setSyncStatus] = useState("");
+  const [moodle, setMoodle] = useState<{
+    mode: string;
+    paused: boolean;
+    interval_minutes: number;
+    next_run: string;
+    next_nightly: string;
+    last_sync: string;
+    last_status: string;
+    last_error: string;
+  } | null>(null);
   const [files, setFiles] = useState<Array<{ filename: string; extracted_text: string }>>([]);
   const [peers, setPeers] = useState<Array<{ reviewer?: string; text?: string }>>([]);
   const [rubricReady, setRubricReady] = useState(false);
@@ -73,6 +84,8 @@ export default function GradePage() {
     setRows(queue.submissions);
     setAssessments(queue.assessments || []);
     setSyncStatus(queue.course?.last_sync_status || "");
+    const panel = await pa<NonNullable<typeof moodle>>("/moodle/status");
+    setMoodle(panel);
     setRubricReady((queue.assessments || []).some((item) => item.status === "approved") || (queue.assessment?.status === "approved" && (queue.assessment.criteria?.length ?? 0) > 0));
   }
 
@@ -127,8 +140,16 @@ export default function GradePage() {
             }
           }}
         >
-          Sync from Moodle
+          Sync now
         </button>
+        {moodle && (
+          <p className="text-foreground/60 text-sm">
+            {moodle.mode} mode · every {moodle.interval_minutes} min
+            {moodle.paused ? " · paused" : ""} · next run {moodle.next_run || "paused"} · nightly {moodle.next_nightly || "off"}
+            {moodle.last_sync ? ` · last ${moodle.last_status} ${moodle.last_sync}` : ""}
+            {moodle.last_error ? ` · ${moodle.last_error}` : ""}
+          </p>
+        )}
         {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}
         {assessments.filter((item) => item.status === "approved").map((item) => (
           <button
@@ -217,6 +238,7 @@ export default function GradePage() {
                 ))}
               </div>
             )}
+            {busy && <CouncilStage scene="grade" />}
             <button
               className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
               disabled={busy || !rubricReady}

@@ -29,3 +29,14 @@ async def grade_batch_flow(organization_id: str, assessment_id: str, user_id: st
                 skipped += 1
                 print(f"skipped {submission.id}: {exc}")
     return {"graded": graded, "skipped": skipped}
+
+
+@flow(name="profassist-moodle-sync", log_prints=True)
+async def moodle_sync_flow(full: bool = False) -> dict:
+    """Primary Moodle pull. full=True is the nightly pass."""
+    from app.integrations.moodle.gateway import sync_scheduled
+
+    async with get_db_context() as db:
+        result = await sync_scheduled(db, full=full)
+    print(result)
+    return result

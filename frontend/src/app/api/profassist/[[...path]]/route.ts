@@ -20,9 +20,15 @@ async function proxy(request: NextRequest, path: string[]) {
     init.body = Buffer.from(await request.arrayBuffer());
   }
   const response = await fetch(url, init);
+  const type = response.headers.get("content-type") || "";
+  if (type.includes("text/event-stream") && response.body) {
+    return new NextResponse(response.body, {
+      status: response.status,
+      headers: { "content-type": type, "cache-control": "no-cache" },
+    });
+  }
   const body = await response.arrayBuffer();
   const outgoing = new NextResponse(body, { status: response.status });
-  const type = response.headers.get("content-type");
   if (type) outgoing.headers.set("content-type", type);
   const disposition = response.headers.get("content-disposition");
   if (disposition) outgoing.headers.set("content-disposition", disposition);

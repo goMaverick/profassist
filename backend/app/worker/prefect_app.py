@@ -14,7 +14,7 @@ import logging
 from prefect import aserve
 from prefect.client.schemas.schedules import IntervalSchedule
 
-from app.worker.tasks.profassist_tasks import grade_batch_flow
+from app.worker.tasks.profassist_tasks import grade_batch_flow, moodle_sync_flow
 from app.worker.tasks.rag_tasks import (
     check_scheduled_syncs_flow,
     ingest_document_flow,
@@ -33,6 +33,22 @@ async def main() -> None:
     deployments.append(await sync_single_source_flow.ato_deployment(name="sync-single-source"))
     deployments.append(await sync_collection_flow.ato_deployment(name="sync-collection"))
     deployments.append(await grade_batch_flow.ato_deployment(name="profassist-grade-batch"))
+    # Primary Moodle pull. Each org's interval and pause are checked inside the flow.
+    deployments.append(
+        await moodle_sync_flow.ato_deployment(
+            name="profassist-moodle-sync",
+            schedules=[IntervalSchedule(interval=300)],
+            parameters={"full": False},
+        )
+    )
+    # Separate nightly full sync. The flow applies each org's hour.
+    deployments.append(
+        await moodle_sync_flow.ato_deployment(
+            name="profassist-moodle-nightly",
+            schedules=[IntervalSchedule(interval=3600)],
+            parameters={"full": True},
+        )
+    )
     # Scheduled: check connector sources every minute
     deployments.append(
         await check_scheduled_syncs_flow.ato_deployment(

@@ -30,6 +30,26 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "Say when the notes do not cover an objective."
     ),
     "chat": "Help the professor. Do not publish anything to Moodle.",
+    "reviewer_curriculum": (
+        "You are the curriculum reviewer. Check Bloom verb level and whether the weekly "
+        "schedule names the same learning outcomes as the course."
+    ),
+    "reviewer_alignment": (
+        "You are the accreditation reviewer. Check that every course outcome maps to a "
+        "program outcome and that every program outcome is covered."
+    ),
+    "reviewer_balance": (
+        "You are the assessment balance reviewer. Check that weights sum to 100 and that "
+        "summative tasks are not piled onto one week."
+    ),
+    "reviewer_student": (
+        "You are the student-perspective reviewer. Check that policies a student needs are "
+        "present and that readings are recent enough to use."
+    ),
+    "reviewer_judge": (
+        "You are the judge. Summarise the reviewers. Keep a finding only when it names "
+        "a real gap. Do not invent a section."
+    ),
 }
 
 DEFAULT_TOOLS: dict[str, list[str]] = {
@@ -40,6 +60,23 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
     "reflection": ["compare_edits"],
     "slide_studio": ["plan", "retrieve", "cite", "critique", "pptx"],
     "chat": ["rag_search"],
+    "outline_review": ["curriculum", "alignment", "balance", "student", "judge", "debate"],
+    "mcp": [
+        "list_courses",
+        "get_course",
+        "list_outlines",
+        "start_outline",
+        "assist_outline",
+        "suggest_assessments",
+        "accept_assessments",
+        "generate_slides",
+        "moodle_sync",
+        "moodle_push",
+        "start_grade",
+        "list_memories",
+        "delete_memory",
+        "admin_ai_settings",
+    ],
 }
 
 _about: ContextVar[str | None] = ContextVar("pa_about", default=None)

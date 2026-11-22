@@ -31,6 +31,10 @@ interface View {
   agent_models: Record<string, { provider: string; model: string }>;
   defaults: Record<string, string>;
   prompt_sources?: Source[];
+  moodle_sync_paused: boolean;
+  moodle_sync_minutes: number;
+  moodle_nightly_enabled: boolean;
+  moodle_nightly_hour: number;
   tools: Array<{ agent: string; tool: string; enabled: boolean }>;
   audit: Array<{ agent: string; version: number; action: string; before: string; after: string }>;
 }
@@ -112,6 +116,10 @@ export default function AiAdminPage() {
                         debate_threshold: view.debate_threshold,
                         debate_max_rounds: view.debate_max_rounds,
                         agent_models: view.agent_models,
+                        moodle_sync_paused: view.moodle_sync_paused,
+                        moodle_sync_minutes: view.moodle_sync_minutes,
+                        moodle_nightly_enabled: view.moodle_nightly_enabled,
+                        moodle_nightly_hour: view.moodle_nightly_hour,
                       }),
                     }),
                   setError,
@@ -124,6 +132,53 @@ export default function AiAdminPage() {
             <p className="text-foreground/60">
               The API key stays in the environment (`LLM_API_KEY` or `OPENAI_API_KEY`). This page does not store secrets.
             </p>
+          </section>
+          <section className="border-foreground/10 flex flex-col gap-3 rounded-xl border p-4">
+            <h2 className="text-lg font-medium">Moodle sync schedule</h2>
+            <p className="text-foreground/60">
+              The scheduled pull is the main path. Sync now on the grade screen is only a backup.
+            </p>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={view.moodle_sync_paused}
+                onChange={(event) => setView({ ...view, moodle_sync_paused: event.target.checked })}
+              />
+              Pause the regular sync
+            </label>
+            <label>
+              Regular sync every
+              <select
+                className="border-foreground/15 mt-1 block rounded-md border bg-transparent px-2 py-1"
+                value={view.moodle_sync_minutes}
+                onChange={(event) => setView({ ...view, moodle_sync_minutes: Number(event.target.value) })}
+              >
+                {[15, 30, 60, 120].map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} minutes
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={view.moodle_nightly_enabled}
+                onChange={(event) => setView({ ...view, moodle_nightly_enabled: event.target.checked })}
+              />
+              Nightly full sync
+            </label>
+            <label>
+              Nightly hour (UTC)
+              <input
+                type="number"
+                min={0}
+                max={23}
+                className="border-foreground/15 mt-1 block w-24 rounded-md border bg-transparent px-2 py-1"
+                value={view.moodle_nightly_hour}
+                onChange={(event) => setView({ ...view, moodle_nightly_hour: Number(event.target.value) })}
+              />
+            </label>
           </section>
           <section className="border-foreground/10 flex flex-col gap-3 rounded-xl border p-4">
             <h2 className="text-lg font-medium">Providers</h2>

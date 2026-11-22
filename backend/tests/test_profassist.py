@@ -146,6 +146,47 @@ def test_similarity_flags_the_copied_method_only() -> None:
     assert "sustanability" in copied["rare_details"] or copied["kind"] == "fingerprint"
 
 
+def test_moodle_schedule_respects_pause_interval_and_nightly_hour() -> None:
+    from datetime import UTC, datetime
+
+    from app.profassist.moodle_schedule import (
+        incremental_due,
+        next_incremental,
+        next_nightly,
+        nightly_due,
+    )
+
+    now = datetime(2026, 11, 22, 10, 0, tzinfo=UTC)
+    last = datetime(2026, 11, 22, 9, 40, tzinfo=UTC)
+    assert incremental_due(last, 30, False, now) is False
+    assert incremental_due(last, 15, False, now) is True
+    assert incremental_due(last, 30, True, now) is False
+    assert next_incremental(last, 30, True, now) is None
+    assert next_nightly(2, False, now) is None
+    assert next_nightly(2, True, now).hour == 2
+    assert nightly_due(None, 10, True, now) is True
+    assert nightly_due(now, 10, True, now) is False
+
+
+def test_dropout_adapter_names_upstream_features_and_does_not_score() -> None:
+    from app.profassist.ml.dropout import FEATURE_COLUMNS, predict
+
+    payload = predict(
+        [{"display_name": "Sara Al Maktoum", "external_id": "stu-1"}],
+        course_code="MAAI903",
+    )
+    assert payload["trained"] is False
+    assert payload["automatic_actions"] is False
+    assert payload["status"] == "not_trained"
+    assert "active_days_14d" in FEATURE_COLUMNS
+    assert "mean_score_pct_to_date" in FEATURE_COLUMNS
+    assert len(FEATURE_COLUMNS) == 14
+    assert payload["students"][0]["score"] is None
+    assert payload["students"][0]["band"] is None
+    assert payload["course_code"] == "MAAI903"
+    assert "DVC" in payload["data_needed"]
+
+
 def test_calibrator_and_risk_are_untrained() -> None:
     calibrator = grade_calibrator({"judge_level": "proficient"})
     assert calibrator["trained"] is False
@@ -457,6 +498,75 @@ def test_real_grade_push_stays_off_until_the_flag(monkeypatch: pytest.MonkeyPatc
         RealMoodleConnector().push({"type": "grade", "feedback": "You quoted the meter."})
     assert caught.value.status == 501
     assert "MOODLE_PUSH_ENABLED" in caught.value.detail
+
+
+def test_subject_outline_document_and_catalogue() -> None:
+    from app.profassist.outline_data import demo_outline
+    from app.profassist.outline_doc import render_docx, render_pdf
+
+    body = demo_outline()
+    assert len(body["clos"]) == 6
+    assert len(body["plos"]) == 6
+    assert [item["number"] for item in body["tasks"]] == ["A1", "A2", "A3", "A4"]
+    assert sum(item["weight"] for item in body["tasks"]) == 100
+    assert body["clos"][0]["plos"]
+    assert render_pdf(body)[:4] == b"%PDF"
+    assert render_docx(body)[:2] == b"PK"
+
+
+def test_chat_tools_require_a_professor_and_a_confirm() -> None:
+    import asyncio
+    import uuid
+
+    from app.profassist.platform_tools import choose_tool, invoke_tool, set_tool_actor
+
+    assert choose_tool("Please sync Moodle")[0] == "moodle_sync"
+    assert choose_tool("Suggest an assessment for LO1")[0] == "suggest_assessments"
+
+    async def run() -> None:
+        set_tool_actor(uuid.uuid4(), uuid.uuid4(), is_admin=False)
+        pending = await invoke_tool(None, "moodle_push", {"draft_id": "x"}, confirmed=False)
+        assert pending["needs_confirm"] is True
+        with pytest.raises(ProfassistError):
+            await invoke_tool(None, "admin_ai_settings", {}, confirmed=False)
+
+    asyncio.run(run())
+
+
+def test_outline_assist_suggests_outcomes() -> None:
+    from app.profassist.llm import complete
+
+    drafted = complete("outline_assist", {"step": "outcomes", "message": "Suggest outcomes"})
+    assert drafted["suggestion"]["clos"]
+    assert drafted["suggestion"]["plos"]
+
+
+def test_outline_review_names_a_missing_policy_and_a_weight_gap() -> None:
+    from app.profassist.outline_data import demo_outline
+    from app.profassist.outline_review import apply_fix, review_outline, score_of
+
+    body = demo_outline()
+    body["policies"] = [item for item in body["policies"] if item["key"] != "attendance"]
+    body["tasks"][0]["weight"] = 10
+    findings = review_outline(body, "focus on healthcare cases")
+    assert any(
+        item["object_id"] == "attendance" and item["severity"] == "high" for item in findings
+    )
+    assert any(item["object_id"] == "weights" for item in findings)
+    fixed = apply_fix(body, next(item for item in findings if item["object_id"] == "attendance"))
+    assert any(item["key"] == "attendance" for item in fixed["policies"])
+    assert score_of(findings) < 100
+
+
+def test_council_script_walks_marking_debate_judge_and_verdict() -> None:
+    from app.profassist.council_script import script_for
+
+    events = script_for("grade")
+    kinds = [event["type"] for event in events]
+    assert kinds[0] == "step"
+    assert "debate" in [event.get("step") for event in events]
+    assert events[-1]["type"] == "verdict"
+    assert any(event["type"] == "arrow" for event in events)
 
 
 def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) -> None:

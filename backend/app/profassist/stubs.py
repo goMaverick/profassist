@@ -20,29 +20,8 @@ def grade_calibrator(features: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def at_risk_snapshot(students: list[dict[str, Any]]) -> dict[str, Any]:
-    """Early-warning page data. Scores are placeholders, not predictions."""
-    rows = []
-    for index, student in enumerate(students):
-        rows.append(
-            {
-                "student_token": f"STUDENT_{index + 1}",
-                "display_name": student.get("display_name"),
-                "external_id": student.get("external_id"),
-                "risk": None,
-                "score": None,
-                "factors": [],
-                "note": "No prediction. The early-warning model is not trained yet.",
-            }
-        )
-    return {
-        "model": "at_risk_classifier",
-        "status": "not_trained",
-        "trained": False,
-        "message": (
-            "The at-risk early-warning model is not trained yet. The roster below is "
-            "real demo data from the fake Moodle connector. The risk column is empty "
-            "on purpose."
-        ),
-        "students": rows,
-    }
+def at_risk_snapshot(students: list[dict[str, Any]], *, course_code: str = "") -> dict[str, Any]:
+    """Early-warning page data. The dropout adapter decides whether a model is loaded."""
+    from app.profassist.ml.dropout import predict
+
+    return predict(students, course_code=course_code)

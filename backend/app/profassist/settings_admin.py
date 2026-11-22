@@ -138,6 +138,10 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         "providers": provider_catalog(),
         "agents": AGENTS,
         "agent_models": settings.agent_models or {},
+        "moodle_sync_paused": settings.moodle_sync_paused,
+        "moodle_sync_minutes": settings.moodle_sync_minutes,
+        "moodle_nightly_enabled": settings.moodle_nightly_enabled,
+        "moodle_nightly_hour": settings.moodle_nightly_hour,
         "prompts": [
             {
                 "agent": row.agent_key,
@@ -175,7 +179,13 @@ async def save_model_settings(
     debate_threshold: int = 0,
     debate_max_rounds: int = 1,
     agent_models: dict | None = None,
+    moodle_sync_paused: bool = False,
+    moodle_sync_minutes: int = 30,
+    moodle_nightly_enabled: bool = True,
+    moodle_nightly_hour: int = 2,
 ) -> dict[str, Any]:
+    from app.profassist.moodle_schedule import normalize_hour, normalize_minutes
+
     row = await _settings(db, org_id)
     before = f"{row.provider} {row.model} chat={row.chat_enabled}"
     row.chat_enabled = chat_enabled
@@ -186,6 +196,10 @@ async def save_model_settings(
     row.debate_threshold = max(0, int(debate_threshold))
     row.debate_max_rounds = max(0, min(3, int(debate_max_rounds)))
     row.agent_models = agent_models or {}
+    row.moodle_sync_paused = moodle_sync_paused
+    row.moodle_sync_minutes = normalize_minutes(int(moodle_sync_minutes))
+    row.moodle_nightly_enabled = moodle_nightly_enabled
+    row.moodle_nightly_hour = normalize_hour(int(moodle_nightly_hour))
     db.add(
         PromptAudit(
             organization_id=org_id,

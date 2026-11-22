@@ -205,6 +205,9 @@ ProfAssist — an AI assistant for university professors. Drafts stay drafts unt
         setup_admin(app)
 
     app.include_router(api_router, prefix=settings.API_V1_STR)
+    from app.profassist.mcp_server import mount_mcp
+
+    mount_mcp(app)
 
     add_pagination(app)
 
