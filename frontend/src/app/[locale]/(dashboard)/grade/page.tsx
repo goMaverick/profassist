@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { Button, FileUploaderDropContainer, Tag, TextArea } from "@carbon/react";
+import { Button, FileUploaderDropContainer, Modal, Tag, TextArea } from "@carbon/react";
 import { Add, TrashCan } from "@carbon/icons-react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
-import type { Box, MarginNote } from "@/components/profassist/document-viewer";
+import type { Box, Hit, MarginNote } from "@/components/profassist/document-viewer";
 
 function fileUrl(path: string) {
   return `/api/profassist${path}`;
@@ -97,11 +97,7 @@ export default function GradePage() {
   const [feedback, setFeedback] = useState("");
   const [levels, setLevels] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [feedbackFor, setFeedbackFor] = useState("");
-
-  useEffect(() => {
-    if (window.location.search.includes("feedback=open")) setFeedbackFor("Group A");
-  }, []);
+  const [feedbackFor, setFeedbackFor] = useState("Group A");
 
   async function loadQueue(courseId: string) {
     const queue = await pa<{
@@ -236,25 +232,80 @@ export default function GradePage() {
   );
 }
 
+interface Band {
+  name: string;
+  low: number;
+  high: number;
+  points: number;
+}
+interface Grader {
+  name: string;
+  band: string;
+  reason: string;
+}
+interface Criterion {
+  id: string;
+  name: string;
+  weight: number;
+  band: string;
+  score: number;
+  reason: string;
+  evidence: string;
+  agreed: boolean;
+  page: number;
+  box: Box;
+  bands: Band[];
+  graders: Grader[];
+}
+interface AiGrade {
+  rubric: string;
+  source: string;
+  total: number;
+  out_of: number;
+  letter: string;
+  confidence: "High" | "Medium" | "Low";
+  council: Array<{ name: string; initials: string; color: string }>;
+  criteria: Criterion[];
+}
 interface FeedbackNotes {
   group: string;
   comments: MarginNote[];
   rubric: Array<{ criterion: string; comment: string }>;
   overall: string;
   bank: string[];
+  overrides?: Record<string, string>;
+  ai_grade?: AiGrade;
   document: { origin: string; view: string; original: string };
+}
+
+function letterOf(score: number) {
+  if (score >= 85) return "A";
+  if (score >= 75) return "B";
+  if (score >= 65) return "C";
+  if (score >= 50) return "D";
+  return "F";
 }
 
 function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: () => void; onApprove: () => void }) {
   const [notes, setNotes] = useState<FeedbackNotes | null>(null);
   const [pick, setPick] = useState<{ page: number; quote: string; box: Box } | null>(null);
   const [comment, setComment] = useState("");
-  const [bankOpen, setBankOpen] = useState(true);
+  const [bankOpen, setBankOpen] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [why, setWhy] = useState("");
+  const [rubricOpen, setRubricOpen] = useState(false);
+  const [activeHit, setActiveHit] = useState("");
+  const [step, setStep] = useState(0);
   const [focus, setFocus] = useState<"overall" | number>("overall");
   const [fresh, setFresh] = useState("");
 
   useEffect(() => {
-    pa<FeedbackNotes>(`/grade/feedback?group=${encodeURIComponent(group)}`).then(setNotes).catch(() => setNotes(null));
+    pa<FeedbackNotes>(`/grade/feedback?group=${encodeURIComponent(group)}`)
+      .then((data) => {
+        setNotes(data);
+        setOverrides(data.overrides || {});
+      })
+      .catch(() => setNotes(null));
   }, [group]);
 
   async function persist(next: FeedbackNotes) {
@@ -266,6 +317,7 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
         rubric: next.rubric,
         overall: next.overall,
         bank: next.bank,
+        overrides: next.overrides || {},
       }),
     });
     setNotes(saved);
@@ -288,6 +340,35 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
   }
 
   if (!notes) return null;
+  const grade = notes.ai_grade;
+  const criteria = grade?.criteria || [];
+
+  function chosenBand(row: Criterion) {
+    return overrides[row.id] || row.band;
+  }
+
+  function chosenScore(row: Criterion) {
+    const name = chosenBand(row);
+    if (name === row.band) return row.score;
+    return row.bands.find((band) => band.name === name)?.points ?? row.score;
+  }
+
+  const total = criteria.reduce((sum, row) => sum + chosenScore(row), 0) || grade?.total || 0;
+  const letter = letterOf(total);
+  const hits: Hit[] = criteria.filter((row) => row.box).map((row, index) => ({
+    id: row.id,
+    n: index + 1,
+    page: row.page,
+    box: row.box,
+    tone: "shared",
+  }));
+
+  function choose(row: Criterion, band: string) {
+    const next = { ...overrides, [row.id]: band };
+    setOverrides(next);
+    setStep(1);
+    void persist({ ...notes, overrides: next });
+  }
 
   return (
     <section className="pa-feedback" aria-label="Feedback">
@@ -297,6 +378,8 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
         kind={notes.document.origin === "docx" ? "docx" : "pdf"}
         downloadUrl={fileUrl(notes.document.original)}
         notes={notes.comments}
+        hits={hits}
+        activeId={activeHit}
         allowSelection
         onSelectText={(chosen) => {
           setPick(chosen);
@@ -312,12 +395,82 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
           void persist(next);
         }}
       />
-      <aside className="pa-panel">
+      <aside className="pa-panel pa-grade-panel">
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <h2 className="pa-section">Feedback for {group}</h2>
           <Button kind="ghost" size="sm" onClick={onClose}>Close</Button>
         </div>
-        <p style={{ color: "#525252" }}>Private until you approve the grade. Nothing is sent to a student.</p>
+        <ol className="pa-steps" aria-label="Grade status">
+          {["AI drafted", "You reviewed", "Approved", "Sent to Moodle"].map((label, index) => (
+            <li key={label} className={index === step ? "is-now" : index < step ? "is-done" : ""}>{label}</li>
+          ))}
+        </ol>
+        {grade && (
+          <article className="pa-ai-grade">
+            <p className="pa-step-kicker">AI draft grade</p>
+            <p className="pa-grade-total">{total}<span>/{grade.out_of}</span> <strong>{letter}</strong></p>
+            <Tag type={grade.confidence === "High" ? "green" : grade.confidence === "Low" ? "red" : "blue"} size="sm">{grade.confidence} confidence</Tag>
+            <p>Drafted by AI council: 3 graders + chair, using rubric {grade.rubric}.</p>
+            <div className="pa-council" aria-label="Council">
+              {grade.council.map((person) => (
+                <span key={person.name} title={person.name} style={{ background: person.color }}>{person.initials}</span>
+              ))}
+            </div>
+            <button type="button" className="pa-why" onClick={() => setRubricOpen(true)}>Rubric from {grade.source}</button>
+          </article>
+        )}
+        {criteria.map((row, index) => {
+          const band = chosenBand(row);
+          const changed = band !== row.band;
+          return (
+            <article key={row.id} className="pa-criterion" id={`criterion-${row.id}`}>
+              <header>
+                <strong>{row.name}</strong>
+                <span>{row.weight} points</span>
+              </header>
+              {!row.agreed && <Tag type="red" size="sm">Graders disagreed - please check</Tag>}
+              <div className="pa-bands" role="group" aria-label={row.name}>
+                {row.bands.map((item) => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    className={band === item.name ? "is-on" : ""}
+                    aria-pressed={band === item.name}
+                    onClick={() => choose(row, item.name)}
+                  >
+                    <strong>{item.name}</strong>
+                    <span>{item.low}-{item.high}</span>
+                  </button>
+                ))}
+              </div>
+              <p>{chosenScore(row)}/{row.weight}. {row.reason}</p>
+              {changed && <Tag type="purple" size="sm">Changed by you</Tag>}
+              <div className="pa-row-links">
+                <button type="button" className="pa-why" onClick={() => setActiveHit(row.id)}>Evidence {index + 1}</button>
+                <button type="button" className="pa-why" onClick={() => setWhy((open) => open === row.id ? "" : row.id)}>{why === row.id ? "Hide why" : "Why?"}</button>
+              </div>
+              {why === row.id && (
+                <div className="pa-why-body">
+                  {row.graders.map((person) => (
+                    <p key={person.name}><strong>{person.name}</strong> chose {person.band}. {person.reason}</p>
+                  ))}
+                  <p>{row.agreed ? "The three graders agreed." : "The three graders did not agree. The chair kept the highlighted band and asked you to check."}</p>
+                </div>
+              )}
+              <TextArea
+                id={`rubric-${index}`}
+                labelText="Your comment"
+                value={notes.rubric[index]?.comment || ""}
+                onFocus={() => setFocus(index)}
+                onBlur={() => void persist(notes)}
+                onChange={(event) => {
+                  const rubric = notes.rubric.map((item, itemIndex) => itemIndex === index ? { ...item, comment: event.target.value } : item);
+                  setNotes({ ...notes, rubric });
+                }}
+              />
+            </article>
+          );
+        })}
         {pick && (
           <div>
             <p>Selected: “{pick.quote.slice(0, 120)}”</p>
@@ -334,21 +487,6 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
             }}>Pin comment</Button>
           </div>
         )}
-        <h2 className="pa-section">Rubric comments</h2>
-        {notes.rubric.map((row, index) => (
-          <TextArea
-            key={row.criterion}
-            id={`rubric-${index}`}
-            labelText={row.criterion}
-            value={row.comment}
-            onFocus={() => setFocus(index)}
-            onBlur={() => void persist(notes)}
-            onChange={(event) => {
-              const rubric = notes.rubric.map((item, itemIndex) => itemIndex === index ? { ...item, comment: event.target.value } : item);
-              setNotes({ ...notes, rubric });
-            }}
-          />
-        ))}
         <TextArea
           id="overall-feedback"
           labelText="Overall feedback"
@@ -358,8 +496,14 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
           onChange={(event) => setNotes({ ...notes, overall: event.target.value })}
         />
         <div className="pa-approve-row">
-          <Button kind="primary" onClick={onApprove}>Approve this grade</Button>
+          <Button kind="primary" onClick={() => { setStep(2); onApprove(); }}>Approve this grade</Button>
         </div>
+        <Modal open={rubricOpen} passiveModal modalHeading={grade?.rubric || "Rubric"} onRequestClose={() => setRubricOpen(false)}>
+          <p>This rubric comes from {grade?.source}. The council used these bands.</p>
+          {criteria.map((row) => (
+            <p key={row.id}><strong>{row.name}</strong> ({row.weight} points): {row.bands.map((band) => `${band.name} ${band.low}-${band.high}`).join(", ")}.</p>
+          ))}
+        </Modal>
         <h2 className="pa-section">Comment bank</h2>
         <Button kind="ghost" size="sm" onClick={() => setBankOpen((open) => !open)}>{bankOpen ? "Hide comment bank" : "Show comment bank"}</Button>
         {bankOpen && (
