@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button, FileUploaderDropContainer, Tag } from "@carbon/react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 import { CouncilStage } from "@/components/profassist/council-stage";
 import { AiLive } from "@/components/profassist/ai-live";
@@ -130,81 +131,78 @@ export default function GradePage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <p className="text-foreground/60 text-sm">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="bg-foreground text-background rounded-lg px-3 py-2 text-sm"
-          onClick={async () => {
-            const result = await run(() => pa<{ last_sync_status?: string }>("/moodle/sync", { method: "POST" }), setError);
-            if (result) {
-              setSyncStatus(result.last_sync_status || "Synced.");
-              await loadQueue(course.id);
-            }
-          }}
-        >
-          Sync now
-        </button>
+      <div className="pa-sync-strip">
+        <Button kind="tertiary" size="sm" onClick={async () => {
+          const result = await run(() => pa<{ last_sync_status?: string }>("/moodle/sync", { method: "POST" }), setError);
+          if (result) {
+            setSyncStatus(result.last_sync_status || "Synced.");
+            await loadQueue(course.id);
+          }
+        }}>Sync now</Button>
         {moodle && (
-          <p className="w-full text-sm text-[#525252]">
-            Moodle is in {moodle.mode} mode and syncs every {moodle.interval_minutes} minutes
-            {moodle.paused ? " (paused)" : ""}. Next run {shortWhen(moodle.next_run)}. Nightly full sync{" "}
-            {shortWhen(moodle.next_nightly)}.
-            {moodle.last_sync ? ` Last sync ${moodle.last_status || "done"} ${shortWhen(moodle.last_sync)}.` : ""}
-            {moodle.last_error ? ` ${moodle.last_error}` : ""}
-          </p>
+          <span>
+            {moodle.mode} Moodle · every {moodle.interval_minutes} min{moodle.paused ? " · paused" : ""} · next {shortWhen(moodle.next_run)} · nightly {shortWhen(moodle.next_nightly)}
+          </span>
         )}
-        {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}
-        {assessments.filter((item) => item.status === "approved").map((item) => (
-          <button
-            key={item.id}
-            className="rounded-lg border px-3 py-2 text-sm"
-            onClick={async () => {
-              setBusy(true);
-              const result = await run(
-                () => pa<{ graded: number; skipped: number }>(`/assessments/${item.id}/grade-batch`, { method: "POST" }),
-                setError,
-              );
-              if (result) await loadQueue(course.id);
-              setBusy(false);
-            }}
-          >
-            Batch grade {item.title}
-          </button>
-        ))}
-        <label className="text-sm">
-          Upload a zip of submissions
-          <input
-            className="mt-1 block"
-            type="file"
-            accept=".zip"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              const target = assessments[0];
-              if (!file || !target) return;
-              const body = new FormData();
-              body.append("file", file);
-              body.append("assessment_id", target.id);
-              const ok = await run(() => pa(`/courses/${course.id}/submissions/upload`, { method: "POST", body }), setError);
-              if (ok) await loadQueue(course.id);
-            }}
-          />
-        </label>
+        {syncStatus && <span>{syncStatus}</span>}
+        <FileUploaderDropContainer
+          accept={[".zip"]}
+          labelText="Upload a zip of submissions"
+          onAddFiles={async (_event, content) => {
+            const file = content.addedFiles[0];
+            const target = assessments[0];
+            if (!file || !target || !(file instanceof File)) return;
+            const body = new FormData();
+            body.append("file", file);
+            body.append("assessment_id", target.id);
+            const ok = await run(() => pa(`/courses/${course.id}/submissions/upload`, { method: "POST", body }), setError);
+            if (ok) await loadQueue(course.id);
+          }}
+        />
       </div>
       <AiLive
         title="Council grade"
-        reasoning="Evidence quotes the submission. Strict keeps the level when a limitation is stated. Supportive agrees if the quote stays in the feedback. Confidence is moderate until you approve."
+        reasoning="Evidence quotes the submission. Strict keeps the level when a limitation is stated. Supportive agrees if the quote stays in the feedback."
         sources={[{ href: "/grade", title: "Submission text" }, { href: "/assignments", title: "Idea brief" }]}
         tasks={["Match the work to its idea", "Score each rubric row", "Hold the mark for your edit"]}
       >
-        <div className="pa-fields">
-          {[
-            ["Problem definition", "proficient", "0.72"],
-            ["Solution design", "proficient", "0.68"],
-            ["Ethical risk", "developing", "0.61"],
-          ].map(([name, level, confidence]) => (
-            <p key={name} style={{ margin: 0 }}>{name}: {level} · confidence {confidence}</p>
-          ))}
-        </div>
-        <p>Approve keeps this draft. Edit changes a level before anything is pushed.</p>
+        <Button kind="primary" size="sm" onClick={async () => {
+          for (const row of rows) {
+            if (!row.draft_id || row.draft_status !== "draft") continue;
+            await run(() => pa(`/drafts/${row.draft_id}/approve`, { method: "POST" }), setError);
+          }
+          await loadQueue(course.id);
+        }}>Approve all high-confidence</Button>
+        <table className="pa-matrix">
+          <thead>
+            <tr>
+              <th>Criterion</th>
+              <th>Level</th>
+              <th>Score</th>
+              <th>Confidence</th>
+              <th>Evidence</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              ["Problem definition", "proficient", "78", 72, "The problem names the clinic and the constraint."],
+              ["Solution design", "proficient", "74", 68, "The diagram shows the model, the store, and the API."],
+              ["Ethical risk", "developing", "61", 61, "Risk is named. The mitigation is one sentence."],
+            ].map(([name, level, score, confidence, quote]) => (
+              <tr key={String(name)}>
+                <td>{name}</td>
+                <td><Tag type={level === "proficient" ? "blue" : "magenta"} size="sm">{level}</Tag></td>
+                <td>{score}</td>
+                <td><span className="pa-meter" style={{ width: 80 }}><span style={{ width: `${confidence}%`, background: "#8a3ffc" }} /></span></td>
+                <td>{quote}</td>
+                <td>
+                  <Button kind="ghost" size="sm" onClick={() => setSelected(rows[0]?.id || null)}>Edit</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </AiLive>
       {!rubricReady && (
         <Banner>Approve a rubric on the assignment before the council can mark.</Banner>

@@ -170,7 +170,6 @@ export default function OutlineWizardPage() {
       )}
       {!outline && !error && <p>Loading the wizard…</p>}
       {error && <InlineNotification kind="error" title="Check this step" subtitle={error} hideCloseButton />}
-      {note && <InlineNotification kind="success" title="Assistant" subtitle={note} hideCloseButton lowContrast />}
         <div className="pa-wizard">
         <div>
         <ProgressIndicator vertical currentIndex={step} onChange={(index) => setStep(index)}>
@@ -191,6 +190,7 @@ export default function OutlineWizardPage() {
             </div>
           </div>
           <p style={{ color: "#525252" }}>{current?.helper}</p>
+          {note && <InlineNotification kind="info" title="Assistant" subtitle={note} hideCloseButton lowContrast />}
         {outline && current?.id === "basics" && <Basics body={body.basics as Record<string, string>} onChange={queueSave} />}
         {outline && current?.id === "attachments" && (
           <CourseFiles

@@ -1,6 +1,6 @@
 "use client";
 
-import { AILabel, Button, Tag } from "@carbon/react";
+import { AILabel, Button } from "@carbon/react";
 import { MagicWand } from "@carbon/icons-react";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Sources, SourcesContent, SourcesTrigger, Source } from "@/components/ai-elements/sources";
@@ -71,7 +71,6 @@ export function AiLive({
         </div>
       )}
       {children}
-      <Tag type="purple" size="sm">Demo drafter · purple AI accent</Tag>
     </section>
   );
 }

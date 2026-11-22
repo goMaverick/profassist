@@ -43,6 +43,64 @@ const ICONS: Record<string, typeof Education> = {
   gavel: WarningAlt,
 };
 
+const CAST = [
+  { name: "Curriculum reviewer", color: "#6929c4", line: "I am checking the weekly outcomes against the course outcomes." },
+  { name: "Assessment expert", color: "#8a3ffc", line: "The weights need to land on 100, and week 7 is carrying a summative task." },
+  { name: "Integrity officer", color: "#007d79", line: "Write the integrity rule where a student can find it. A flag is not a verdict." },
+  { name: "Student voice", color: "#b28600", line: "A student would ask where attendance and integrity are written down." },
+  { name: "Chair", color: "#da1e28", line: "The council agrees on the evidence that is actually in the text." },
+];
+
+function CouncilCast() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((value) => value + 1), 650);
+    return () => window.clearInterval(timer);
+  }, []);
+  const speaker = Math.min(CAST.length - 1, Math.floor(tick / 5));
+  const typed = Math.min(CAST[speaker].line.length, (tick % 5) * 18 + 8);
+  const finished = tick > CAST.length * 5;
+  const consensus = finished ? 100 : Math.round(((speaker + (tick % 5) / 5) / CAST.length) * 100);
+  return (
+    <div className="council-cast">
+      <div className="council-avatars">
+        {CAST.map((agent, index) => (
+          <div key={agent.name} className={index === speaker && !finished ? "is-speaking" : ""}>
+            <span className="council-avatar" style={{ background: agent.color }}>{agent.name.slice(0, 1)}</span>
+            <strong>{agent.name}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="council-bubbles">
+        {CAST.slice(0, speaker).map((agent) => (
+          <p key={agent.name}><b>{agent.name}.</b> {agent.line}</p>
+        ))}
+        {!finished && (
+          <p className="is-live">
+            <b>{CAST[speaker].name}.</b> {CAST[speaker].line.slice(0, typed)}
+            <i className="council-caret" />
+          </p>
+        )}
+      </div>
+      <div className="council-meter" aria-label="Consensus">
+        <span style={{ width: `${consensus}%` }} />
+        <em>{finished ? "Consensus" : `${consensus}%`}</em>
+      </div>
+      {finished && (
+        <article className="council-verdict-card">
+          <h3>Chair's verdict</h3>
+          <p>The council agrees on the evidence in the text. Nothing is sent until you approve.</p>
+          <ul>
+            <li>Outcomes: map the thin program outcomes.</li>
+            <li>Assessments: keep the weights on 100.</li>
+            <li>Policies: put integrity next to the tasks.</li>
+          </ul>
+        </article>
+      )}
+    </div>
+  );
+}
+
 export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => void }) {
   const [agents, setAgents] = useState<AgentEvent[]>([]);
   const [step, setStep] = useState("marking");
@@ -80,6 +138,7 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
 
   return (
     <section className="council-stage" aria-live="polite">
+      <CouncilCast />
       <ol className="council-steps">
         {STEPS.map((item) => (
           <li key={item} className={item === step ? "is-active" : ""}>
@@ -121,7 +180,8 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
         </p>
       )}
       <div className="pa-ai council-thread">
-        <Tool defaultOpen>
+        <p className="council-tool-line">Looked up the rubric. Evidence and limitation are the two criteria in play.</p>
+        <Tool>
           <ToolHeader type="dynamic-tool" state="output-available" toolName="rubric_lookup" title="rubric_lookup" />
           <ToolContent>
             <ToolInput input={{ scene, step }} />
@@ -183,7 +243,13 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
         .council-steps .is-active { color: #0f62fe; font-weight: 600; }
         .council-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
         .council-card { display: grid; gap: 0.4rem; }
-        .council-avatar { width: 2rem; height: 2rem; display: grid; place-items: center; color: white; border-radius: 999px; box-shadow: 0 0 0 3px #e8daff; }
+        .council-cast { display: grid; gap: 12px; }
+        .council-avatars { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+        .council-avatars > div { display: grid; justify-items: center; gap: 6px; text-align: center; font-size: 0.75rem; }
+        .council-avatars .is-speaking .council-avatar { animation: pulse 1s ease-in-out infinite; box-shadow: 0 0 0 4px #e8daff, 0 0 0 7px #8a3ffc; }
+        .council-bubbles p { margin: 0 0 6px; padding: 8px 12px; background: #f6f2ff; border-left: 3px solid #8a3ffc; }
+        .council-caret { display: inline-block; width: 8px; height: 1em; margin-left: 2px; background: #8a3ffc; animation: blink 0.8s infinite; vertical-align: text-bottom; }
+        .council-avatar { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; color: white; border-radius: 999px; box-shadow: 0 0 0 3px #e8daff; font-weight: 600; }
         .is-thinking { animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 0 3px #8a3ffc; }
         .council-meter { position: relative; height: 12px; background: #e0e0e0; }
         .council-meter span { display: block; height: 100%; background: linear-gradient(90deg, #6929c4, #8a3ffc); }

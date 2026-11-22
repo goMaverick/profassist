@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Tag } from "@carbon/react";
+import { AILabel, Tag } from "@carbon/react";
 import { Banner, pa, useWorkspace } from "@/components/profassist/bits";
-import { AiLive } from "@/components/profassist/ai-live";
 
 interface Warning {
   status: string;
@@ -51,24 +50,22 @@ export default function StudentsPage() {
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       {!data && !error && <p>Loading the roster…</p>}
       {data && data.students.length === 0 && <p>No students are on this course yet. Sync from Moodle to pull the roster.</p>}
-      <AiLive
-        title="Dropout risk"
-        reasoning="The logistic model scores a day-35 withdrawal risk from synthetic Moodle-shaped activity. The top factors are the largest coefficient contributions. This does not message a student or change a mark."
-        sources={[{ href: "/students", title: "Synthetic activity rows" }]}
-        tasks={["Score the roster", "Name the top three factors", "Keep automatic actions off"]}
-      >
-        <Tag type="purple">Trained on synthetic data, demo only</Tag>
-      </AiLive>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <AILabel size="mini" aiText="AI" aria-label="AI" />
+        <Tag type="gray">Synthetic, demo only</Tag>
+      </div>
       {warning && (
-        <Banner>
-          {warning.trained ? warning.message : `Model not trained. ${warning.message}`}
-          {warning.data_needed ? ` ${warning.data_needed}` : ""}
-        </Banner>
-      )}
-      {warning?.features && (
-        <p className="text-foreground/60 text-xs">
-          Upstream features: {warning.features.join(", ")}.
-        </p>
+        <div className="pa-bars" aria-label="Risk distribution" style={{ height: 72, alignItems: "flex-end" }}>
+          {(["low", "medium", "high"] as const).map((band) => {
+            const count = (warning.students || []).filter((item) => item.band === band).length;
+            return (
+              <div key={band}>
+                <div style={{ height: `${Math.max(8, count * 22)}px`, background: band === "high" ? "#da1e28" : band === "medium" ? "#8a3ffc" : "#24a148" }} />
+                <span>{band} {count}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
       {data && data.students.length > 0 && (
       <table className="w-full text-left text-sm">
@@ -89,8 +86,8 @@ export default function StudentsPage() {
               <tr key={student.id} className="border-foreground/10 border-b">
                 <td className="py-3">{student.display_name}</td>
                 <td className="py-3">{student.student_number}</td>
-                <td className="py-3">{row?.score ?? "—"}</td>
-                <td className="py-3">{row?.band ?? "not trained"}</td>
+                <td className="py-3">{row?.score == null ? "—" : `${Math.round(Number(row.score) * 100)}%`}</td>
+                <td className="py-3">{row?.band ? <Tag type={row.band === "high" ? "red" : row.band === "medium" ? "purple" : "green"} size="sm">{row.band}</Tag> : "—"}</td>
                 <td className="text-foreground/60 py-3">{row?.factors?.slice(0, 3).join(", ") || row?.note}</td>
                 <td className="py-3">
                   <span style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 28 }}>
