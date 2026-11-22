@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Activity, Bot, LayoutDashboard, MessageSquare, Star, Users } from "lucide-react";
 
 import { ROUTES } from "@/lib/constants";
@@ -18,13 +19,17 @@ const ADMIN_TABS: PageTab[] = [
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const path = usePathname() || "";
+  const aiSettings = path === "/admin/ai" || path.endsWith("/admin/ai");
   return (
     <div className="space-y-6 pb-8">
-      <PageHeader
-        eyebrow="Admin"
-        title="Workspace administration"
-        description="Users, conversations, ratings, billing webhooks, and system health."
-      />
+      {!aiSettings && (
+        <PageHeader
+          eyebrow="Admin"
+          title="Workspace administration"
+          description="Users, conversations, ratings, billing webhooks, and system health."
+        />
+      )}
       <PageTabs tabs={ADMIN_TABS} />
       <div className="min-w-0">{children}</div>
     </div>

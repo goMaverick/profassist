@@ -1217,6 +1217,53 @@ mark {
   line-height: 1.4;
 }
 
+.pa-card-title {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.pa-card-sub {
+  margin: 20px 0 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pa-prompt-list,
+.pa-tool-group {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.pa-prompt-list li,
+.pa-tool-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid #e0e0e0;
+}
+
+.pa-prompt-list button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #0f62fe;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.pa-tool-row p,
+.pa-prompt-list p {
+  margin: 4px 0 0;
+  color: #525252;
+}
+
 .pa-bank {
   list-style: none;
   margin: 8px 0;
