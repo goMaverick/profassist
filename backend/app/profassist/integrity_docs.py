@@ -476,6 +476,12 @@ def _page_count(pdf: bytes) -> int:
     return count
 
 
+def reset_library() -> None:
+    """Drop the cached PDFs so a course registered later is included."""
+    global _LIBRARY
+    _LIBRARY = None
+
+
 def library() -> dict[str, Any]:
     global _LIBRARY
     if _LIBRARY is None:

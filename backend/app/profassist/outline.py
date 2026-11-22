@@ -1,5 +1,6 @@
 """Subject outline wizard. Drafts stay on the professor until she finishes the document."""
 
+import json
 import uuid
 from typing import Any
 
@@ -71,10 +72,12 @@ async def start_outline(
 ) -> dict[str, Any]:
     body = demo_outline() if demo else empty_outline()
     basics = body["basics"]
+    # Each blank outline needs its own code. The professor replaces it on Basics.
+    code = str(basics.get("code") or "").strip() or f"NEW-{uuid.uuid4().hex[:6].upper()}"
     row = SubjectOutline(
         organization_id=org_id,
         owner_user_id=user_id,
-        code=basics.get("code") or "NEW",
+        code=code,
         name=basics.get("name") or "New subject",
         body=body,
         status="draft",
@@ -100,15 +103,22 @@ async def save_step(
     outline_id: uuid.UUID,
     step: str,
     payload: dict[str, Any],
+    *,
+    trust_course_text: bool = False,
 ) -> dict[str, Any]:
     if step not in STEPS:
         raise ProfassistError(400, "That is not a step in the subject outline.")
     row = await get_outline(db, org_id, user_id, outline_id)
-    cleaned = scrub(str(payload))
-    if cleaned.quarantined:
-        raise ProfassistError(
-            400, "That step still looks like it names a student. Remove the name."
-        )
+    if trust_course_text:
+        from app.profassist.pii import strip_contacts
+
+        payload = json.loads(strip_contacts(json.dumps(payload)))
+    else:
+        cleaned = scrub(str(payload))
+        if cleaned.quarantined:
+            raise ProfassistError(
+                400, "That step still looks like it names a student. Remove the name."
+            )
     body = dict(row.body or empty_outline())
     body[step if step != "schedule" else "weeks"] = payload.get("value", payload)
     if step == "basics":
@@ -175,7 +185,7 @@ async def assist_step(
     )
     suggestion = drafted.get("suggestion") or {}
     if suggestion:
-        await save_step(db, org_id, user_id, outline_id, step, suggestion)
+        await save_step(db, org_id, user_id, outline_id, step, suggestion, trust_course_text=True)
         row = await get_outline(db, org_id, user_id, outline_id)
     return {"reply": drafted.get("reply") or "Draft ready.", "outline": _public(row)}
 

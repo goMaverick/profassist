@@ -38,6 +38,16 @@ export default defineConfig({
 
   /* Configure projects for major browsers */
   projects: [
+    {
+      name: "journey",
+      testMatch: /journey\.spec\.ts/,
+      timeout: 360_000,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+      },
+    },
+
     /* Authentication setup - runs first */
     {
       name: "setup",
