@@ -59,7 +59,9 @@ def _qdrant():
     return QdrantClient(host=host, port=port, timeout=3.0)
 
 
-def index_chunks(organization_id: str, course_id: str, rows: list[dict[str, str]]) -> bool:
+def index_chunks(
+    organization_id: str, course_id: str, rows: list[dict[str, str]], owner_user_id: str = ""
+) -> bool:
     """Best-effort Qdrant upsert. Returns False when the store is unreachable."""
     try:
         from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -77,6 +79,7 @@ def index_chunks(organization_id: str, course_id: str, rows: list[dict[str, str]
                 payload={
                     "organization_id": organization_id,
                     "course_id": course_id,
+                    "owner_user_id": owner_user_id,
                     "text": row["text"][:500],
                 },
             )
@@ -90,7 +93,13 @@ def index_chunks(organization_id: str, course_id: str, rows: list[dict[str, str]
         return False
 
 
-def search_qdrant(organization_id: str, course_id: str, query: str, limit: int = 4) -> list[str]:
+def search_qdrant(
+    organization_id: str,
+    course_id: str,
+    query: str,
+    limit: int = 4,
+    owner_user_id: str = "",
+) -> list[str]:
     try:
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
@@ -102,6 +111,7 @@ def search_qdrant(organization_id: str, course_id: str, query: str, limit: int =
                 must=[
                     FieldCondition(key="organization_id", match=MatchValue(value=organization_id)),
                     FieldCondition(key="course_id", match=MatchValue(value=course_id)),
+                    FieldCondition(key="owner_user_id", match=MatchValue(value=owner_user_id)),
                 ]
             ),
             limit=limit,

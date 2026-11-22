@@ -6,8 +6,9 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentUser, DBSession
+from app.api.deps import CurrentAppAdmin, CurrentUser, DBSession
 from app.profassist.deps import ProfOrg
+from app.profassist.memory import delete_memory, list_memories
 from app.profassist.moodle import get_connector
 from app.profassist.service import (
     add_material,
@@ -16,6 +17,7 @@ from app.profassist.service import (
     approve_draft,
     approve_objective,
     approve_reflection,
+    build_cited_deck,
     calibrator_page,
     deck_bytes,
     draft_assessment,
@@ -45,6 +47,8 @@ from app.profassist.service import (
     set_flag,
     sync_moodle,
 )
+from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
+from app.profassist.tracking import list_registered_models
 
 router = APIRouter()
 
@@ -68,32 +72,27 @@ class LaunchBody(BaseModel):
 
 @router.get("/home")
 async def home_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await home(db, org.id)
+    return await home(db, org.id, user.id)
 
 
 @router.get("/courses")
 async def courses(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
     return {"items": await list_courses(db, org.id)}
 
 
 @router.post("/moodle/sync")
 async def moodle_sync(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await sync_moodle(db, org.id)
+    return await sync_moodle(db, org.id, user.id)
 
 
 @router.post("/lti/launch")
 async def lti_launch(body: LaunchBody, user: CurrentUser, org: ProfOrg) -> dict:
-    del user, org
     return get_connector().lti_launch(body.claims)
 
 
 @router.get("/courses/{course_id}/materials")
 async def materials(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"items": await list_materials(db, org.id, course_id)}
+    return {"items": await list_materials(db, org.id, course_id, user.id)}
 
 
 @router.post("/courses/{course_id}/materials")
@@ -104,9 +103,8 @@ async def upload_material(
     db: DBSession,
     file: UploadFile = File(...),
 ) -> dict:
-    del user
     data = await file.read()
-    return await add_material(db, org.id, course_id, file.filename or "notes.txt", data)
+    return await add_material(db, org.id, course_id, user.id, file.filename or "notes.txt", data)
 
 
 @router.post("/courses/{course_id}/objectives/draft")
@@ -118,8 +116,7 @@ async def objectives_draft(
 
 @router.get("/courses/{course_id}/objectives")
 async def objectives(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"items": await list_objectives(db, org.id, course_id)}
+    return {"items": await list_objectives(db, org.id, course_id, user.id)}
 
 
 @router.post("/objectives/{objective_id}/approve")
@@ -138,8 +135,7 @@ async def slides_draft(
 
 @router.get("/courses/{course_id}/slides")
 async def slides(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"items": await list_decks(db, org.id, course_id)}
+    return {"items": await list_decks(db, org.id, course_id, user.id)}
 
 
 @router.post("/slides/{deck_id}/approve")
@@ -153,7 +149,6 @@ async def slides_approve(
 async def slides_pptx(
     deck_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> Response:
-    del user
     filename, data = await deck_bytes(db, org.id, deck_id)
     return Response(
         content=data,
@@ -171,8 +166,7 @@ async def assessment_draft(
 
 @router.get("/courses/{course_id}/assessment")
 async def assessment(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"assessment": await get_assessment(db, org.id, course_id)}
+    return {"assessment": await get_assessment(db, org.id, course_id, user.id)}
 
 
 @router.post("/assessments/{assessment_id}/approve")
@@ -207,15 +201,13 @@ async def assessment_push(
 
 @router.get("/courses/{course_id}/grade")
 async def grade(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await grade_queue(db, org.id, course_id)
+    return await grade_queue(db, org.id, course_id, user.id)
 
 
 @router.get("/submissions/{submission_id}")
 async def submission(
     submission_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    del user
     return await get_submission(db, org.id, submission_id)
 
 
@@ -228,8 +220,7 @@ async def grade_one(
 
 @router.get("/drafts/{draft_id}")
 async def draft(draft_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await get_draft(db, org.id, draft_id)
+    return await get_draft(db, org.id, user.id, draft_id)
 
 
 @router.post("/drafts/{draft_id}/reveal")
@@ -241,8 +232,7 @@ async def draft_reveal(draft_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db:
 async def draft_edit(
     draft_id: uuid.UUID, body: EditBody, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    del user
-    return await edit_draft(db, org.id, draft_id, body.overall_feedback, body.levels)
+    return await edit_draft(db, org.id, user.id, draft_id, body.overall_feedback, body.levels)
 
 
 @router.post("/drafts/{draft_id}/approve")
@@ -261,14 +251,12 @@ async def draft_push(draft_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: D
 async def integrity_scan(
     course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    del user
-    return {"items": await scan_integrity(db, org.id, course_id)}
+    return {"items": await scan_integrity(db, org.id, course_id, user.id)}
 
 
 @router.get("/courses/{course_id}/integrity")
 async def integrity(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"items": await list_flags(db, org.id, course_id)}
+    return {"items": await list_flags(db, org.id, course_id, user.id)}
 
 
 @router.post("/integrity/{flag_id}")
@@ -280,7 +268,6 @@ async def integrity_update(
 
 @router.get("/courses/{course_id}/students")
 async def students(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
     return await list_students(db, org.id, course_id)
 
 
@@ -296,14 +283,12 @@ async def style_save(body: TextBody, user: CurrentUser, org: ProfOrg, db: DBSess
 
 @router.get("/reflections")
 async def reflections(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return {"items": await list_reflections(db, org.id)}
+    return {"items": await list_reflections(db, org.id, user.id)}
 
 
 @router.post("/reflections/run")
 async def reflections_run(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await run_reflection(db, org.id)
+    return await run_reflection(db, org.id, user.id)
 
 
 @router.post("/reflections/{reflection_id}/approve")
@@ -315,5 +300,75 @@ async def reflections_approve(
 
 @router.get("/calibrator")
 async def calibrator(user: CurrentUser, org: ProfOrg) -> dict:
-    del user, org
     return calibrator_page()
+
+
+@router.post("/courses/{course_id}/slides/studio")
+async def slides_studio(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await build_cited_deck(db, org.id, course_id, user.id)
+
+
+@router.get("/memories")
+async def memories(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return {"items": await list_memories(db, org.id, user.id)}
+
+
+@router.delete("/memories/{memory_id}")
+async def memory_delete(
+    memory_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    removed = await delete_memory(db, org.id, user.id, memory_id)
+    return {"removed": removed}
+
+
+class SettingsBody(BaseModel):
+    chat_enabled: bool = True
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    base_url: str = ""
+
+
+class PromptBody(BaseModel):
+    agent: str
+    body: str = Field(min_length=1)
+
+
+class ToolBody(BaseModel):
+    agent: str
+    tool: str
+    enabled: bool
+
+
+@router.get("/admin/ai")
+async def ai_admin(user: CurrentAppAdmin, org: ProfOrg, db: DBSession) -> dict:
+    del user
+    return await admin_view(db, org.id)
+
+
+@router.put("/admin/ai")
+async def ai_admin_save(
+    body: SettingsBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_model_settings(
+        db, org.id, user.id, body.chat_enabled, body.provider, body.model, body.base_url
+    )
+
+
+@router.post("/admin/ai/prompts")
+async def ai_prompt_save(
+    body: PromptBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_prompt(db, org.id, user.id, body.agent, body.body)
+
+
+@router.post("/admin/ai/tools")
+async def ai_tool_save(body: ToolBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession) -> dict:
+    return await set_tool(db, org.id, user.id, body.agent, body.tool, body.enabled)
+
+
+@router.get("/admin/models")
+async def models_admin(user: CurrentAppAdmin, org: ProfOrg) -> dict:
+    del user, org
+    return list_registered_models()
