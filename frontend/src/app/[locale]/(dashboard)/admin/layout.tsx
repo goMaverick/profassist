@@ -13,7 +13,7 @@ const ADMIN_TABS: PageTab[] = [
   { label: "Conversations", href: ROUTES.ADMIN_CONVERSATIONS, icon: MessageSquare },
   { label: "Ratings", href: ROUTES.ADMIN_RATINGS, icon: Star },
   { label: "System", href: ROUTES.ADMIN_SYSTEM, icon: Activity },
-  { label: "AI", href: "/admin/ai", icon: Bot },
+  { label: "AI settings", href: "/admin/ai", icon: Bot },
   { label: "Models", href: "/admin/models", icon: Activity },
 ];
 

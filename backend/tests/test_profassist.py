@@ -802,3 +802,23 @@ def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) 
     )
     assert "42.7" in result["feedback"]
     assert "!" not in result["feedback"]
+
+
+def test_ai_settings_never_return_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from app.profassist.settings_admin import connection_status
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-secret-do-not-show")
+    monkeypatch.setenv("MOODLE_WS_TOKEN", "moodle-token-do-not-show")
+    monkeypatch.setenv("MOODLE_MODE", "fake")
+    monkeypatch.delenv("MOODLE_PUSH_ENABLED", raising=False)
+    payload = connection_status()
+    text = json.dumps(payload)
+    assert "sk-live-secret-do-not-show" not in text
+    assert "moodle-token-do-not-show" not in text
+    assert payload["moodle_mode"] == "fake"
+    assert payload["moodle_push_enabled"] is False
+    states = {row["name"]: row["state"] for row in payload["secrets"]}
+    assert states["OPENAI_API_KEY"] == "set, hidden"
+    assert states["MOODLE_WS_TOKEN"] == "set, hidden"

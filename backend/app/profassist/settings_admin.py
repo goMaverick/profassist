@@ -1,5 +1,7 @@
 """Admin-editable AI settings, versioned prompts, and per-agent tools."""
 
+import importlib.util
+import os
 import uuid
 from typing import Any
 
@@ -91,6 +93,61 @@ async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID |
     )
 
 
+def _secret_state(name: str) -> dict[str, str]:
+    """Say whether a secret is set. Never return the value."""
+    present = bool(os.getenv(name, "").strip())
+    return {"name": name, "state": "set, hidden" if present else "not set"}
+
+
+def connection_status() -> dict[str, Any]:
+    """Read-only picture of servers that are configured outside this screen.
+
+    Secrets are reduced to "set, hidden" or "not set". Host names and modes are
+    not secrets, so those are shown in full.
+    """
+    from app.core.config import settings
+    from app.profassist.config import (
+        langfuse_enabled,
+        llm_base_url,
+        llm_model,
+        moodle_mode,
+        moodle_push_enabled,
+    )
+    from app.profassist.observe import public_base
+
+    fastmcp = importlib.util.find_spec("fastmcp") is not None
+    secret_names = (
+        "LLM_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "XAI_API_KEY",
+        "MISTRAL_API_KEY",
+        "AZURE_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "QDRANT_API_KEY",
+        "MOODLE_WS_TOKEN",
+    )
+    return {
+        "moodle_mode": moodle_mode(),
+        "moodle_push_enabled": moodle_push_enabled(),
+        "moodle_base_url": os.getenv("MOODLE_BASE_URL", "").strip() or "not set",
+        "model_from_env": llm_model(),
+        "base_url": llm_base_url() or "not set",
+        "langfuse_enabled": langfuse_enabled(),
+        "langfuse_host": public_base(),
+        "qdrant_host": settings.QDRANT_HOST,
+        "qdrant_port": settings.QDRANT_PORT,
+        "mcp_installed": fastmcp,
+        "mcp_path": "/mcp" if fastmcp else "not mounted",
+        "secrets": [_secret_state(name) for name in secret_names],
+    }
+
+
 async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     settings = await _settings(db, org_id)
     version_rows = list(
@@ -154,6 +211,7 @@ async def admin_view(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         "prompt_sources": sources,
         "defaults": catalog()["prompts"],
         "tools": tools,
+        "connections": connection_status(),
         "audit": [
             {
                 "agent": row.agent_key,

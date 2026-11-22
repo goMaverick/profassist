@@ -23,6 +23,7 @@ import {
   PresentationFile,
   Search,
   Security,
+  Settings,
   Task,
   UserMultiple,
   Watson,
@@ -90,6 +91,11 @@ const PAGES: Record<string, { title: string; section: string; description: strin
     section: "Workspace",
     description: "How you like feedback written. Nothing changes until you save it.",
   },
+  "/admin/ai": {
+    title: "AI settings",
+    section: "Admin",
+    description: "Models, prompts, and the servers the assistant talks to. Keys stay hidden.",
+  },
   "/design": {
     title: "Course design",
     section: "Course",
@@ -138,7 +144,13 @@ const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string;
     ],
   },
   { label: "Students", items: [{ href: "/students", label: "At risk", icon: UserMultiple }] },
-  { label: "Me", items: [{ href: "/style", label: "My style", icon: Watson }] },
+  {
+    label: "Me",
+    items: [
+      { href: "/style", label: "My style", icon: Watson },
+      { href: "/admin/ai", label: "AI settings", icon: Settings },
+    ],
+  },
 ];
 
 export function CarbonShell({ children }: { children: React.ReactNode }) {
