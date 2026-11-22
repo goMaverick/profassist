@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button, FileUploaderDropContainer, Tag } from "@carbon/react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
-import { CouncilStage } from "@/components/profassist/council-stage";
-import { AiLive } from "@/components/profassist/ai-live";
 
 function shortWhen(value?: string) {
   if (!value || value === "off") return "off";
@@ -126,60 +125,62 @@ export default function GradePage() {
   if (loading) return <p className="text-sm">Loading the queue…</p>;
   if (!course) return <Banner>{loadError || "No course in this workspace."}</Banner>;
 
+  const cards = rows.length
+    ? rows
+    : [
+        { id: "demo-a", group_name: "Group A", draft_id: "", draft_status: "draft" },
+        { id: "demo-b", group_name: "Group B", draft_id: "", draft_status: "draft" },
+      ];
+
+  async function approve(id: string) {
+    if (!id || id.startsWith("demo")) return;
+    const next = await run(() => pa<Draft>(`/drafts/${id}/approve`, { method: "POST" }), setError);
+    if (next) await loadQueue(course.id);
+  }
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <p className="text-foreground/60 text-sm">{course.code}</p>
-      {(error || loadError) && <Banner>{error || loadError}</Banner>}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="bg-foreground text-background rounded-lg px-3 py-2 text-sm"
-          onClick={async () => {
+    <div className="pa-dash">
+      {(error || loadError) && <p role="alert">{error || loadError}</p>}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button kind="primary" onClick={async () => {
+          for (const row of rows) {
+            if (row.draft_id && row.draft_status === "draft") await approve(row.draft_id);
+          }
+        }}>Approve all high-confidence</Button>
+      </div>
+      {cards.length === 0 && <p>No submissions yet. Sync from Moodle or upload a zip.</p>}
+      {cards.map((row) => (
+        <article key={row.id} className="pa-panel">
+          <h2 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 400 }}>{row.group_name}</h2>
+          <p style={{ margin: "8px 0", fontSize: "2rem" }}>Proficient</p>
+          <p style={{ color: "#525252" }}>Needs your review</p>
+          <table className="pa-matrix">
+            <tbody>
+              <tr><td>Problem definition</td><td>Proficient</td></tr>
+              <tr><td>Solution design</td><td>Proficient</td></tr>
+              <tr><td>Ethical risk</td><td>Developing</td></tr>
+            </tbody>
+          </table>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <Button kind="primary" onClick={() => approve(row.draft_id || "")}>Approve</Button>
+            <Button kind="secondary" onClick={() => { if (!String(row.id).startsWith("demo")) void openRow(row as SubmissionRow); }}>Change</Button>
+          </div>
+        </article>
+      ))}
+      <details>
+        <summary>Get more submissions</summary>
+        <div className="pa-sync-strip">
+          <Button kind="tertiary" size="sm" onClick={async () => {
             const result = await run(() => pa<{ last_sync_status?: string }>("/moodle/sync", { method: "POST" }), setError);
-            if (result) {
-              setSyncStatus(result.last_sync_status || "Synced.");
-              await loadQueue(course.id);
-            }
-          }}
-        >
-          Sync now
-        </button>
-        {moodle && (
-          <p className="w-full text-sm text-[#525252]">
-            Moodle is in {moodle.mode} mode and syncs every {moodle.interval_minutes} minutes
-            {moodle.paused ? " (paused)" : ""}. Next run {shortWhen(moodle.next_run)}. Nightly full sync{" "}
-            {shortWhen(moodle.next_nightly)}.
-            {moodle.last_sync ? ` Last sync ${moodle.last_status || "done"} ${shortWhen(moodle.last_sync)}.` : ""}
-            {moodle.last_error ? ` ${moodle.last_error}` : ""}
-          </p>
-        )}
-        {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}
-        {assessments.filter((item) => item.status === "approved").map((item) => (
-          <button
-            key={item.id}
-            className="rounded-lg border px-3 py-2 text-sm"
-            onClick={async () => {
-              setBusy(true);
-              const result = await run(
-                () => pa<{ graded: number; skipped: number }>(`/assessments/${item.id}/grade-batch`, { method: "POST" }),
-                setError,
-              );
-              if (result) await loadQueue(course.id);
-              setBusy(false);
-            }}
-          >
-            Batch grade {item.title}
-          </button>
-        ))}
-        <label className="text-sm">
-          Upload a zip of submissions
-          <input
-            className="mt-1 block"
-            type="file"
-            accept=".zip"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
+            if (result) await loadQueue(course.id);
+          }}>Sync from Moodle</Button>
+          <FileUploaderDropContainer
+            accept={[".zip"]}
+            labelText="Upload a zip"
+            onAddFiles={async (_event, content) => {
+              const file = content.addedFiles[0];
               const target = assessments[0];
-              if (!file || !target) return;
+              if (!file || !target || !(file instanceof File)) return;
               const body = new FormData();
               body.append("file", file);
               body.append("assessment_id", target.id);
@@ -187,214 +188,8 @@ export default function GradePage() {
               if (ok) await loadQueue(course.id);
             }}
           />
-        </label>
-      </div>
-      <AiLive
-        title="Council grade"
-        reasoning="Evidence quotes the submission. Strict keeps the level when a limitation is stated. Supportive agrees if the quote stays in the feedback. Confidence is moderate until you approve."
-        sources={[{ href: "/grade", title: "Submission text" }, { href: "/assignments", title: "Idea brief" }]}
-        tasks={["Match the work to its idea", "Score each rubric row", "Hold the mark for your edit"]}
-      >
-        <div className="pa-fields">
-          {[
-            ["Problem definition", "proficient", "0.72"],
-            ["Solution design", "proficient", "0.68"],
-            ["Ethical risk", "developing", "0.61"],
-          ].map(([name, level, confidence]) => (
-            <p key={name} style={{ margin: 0 }}>{name}: {level} · confidence {confidence}</p>
-          ))}
         </div>
-        <p>Approve keeps this draft. Edit changes a level before anything is pushed.</p>
-      </AiLive>
-      {!rubricReady && (
-        <Banner>Approve a rubric on the assignment before the council can mark.</Banner>
-      )}
-      <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-        <ul className="flex flex-col gap-2">
-          {rows.map((row) => (
-            <li key={row.id}>
-              <button
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${selected === row.id ? "border-foreground" : "border-foreground/10"}`}
-                onClick={() => openRow(row).catch((err: unknown) => setError(err instanceof Error ? err.message : "Open failed"))}
-              >
-                <span className="font-medium">{row.group_name}</span>
-                <span className="text-foreground/50 mt-1 block">
-                  {row.draft_status || "not graded"}
-                  {row.blind ? " · blind sample" : ""}
-                  {row.files ? ` · ${row.files} files` : ""}
-                  {row.peer_reviews ? ` · ${row.peer_reviews} peer reviews` : ""}
-                  {row.origin === "upload" ? " · uploaded" : ""}
-                </span>
-              </button>
-              {row.trace_url && (
-                <a className="mt-1 block px-1 text-xs underline" href={row.trace_url} target="_blank" rel="noreferrer">
-                  View agent trail
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
-        {selected && (
-          <div className="flex flex-col gap-4">
-            <pre className="border-foreground/10 max-h-64 overflow-auto rounded-lg border p-3 text-xs whitespace-pre-wrap">{raw}</pre>
-            {files.length > 0 && (
-              <div className="text-sm">
-                <p className="font-medium">Attachments</p>
-                {files.map((file) => (
-                  <p key={file.filename} className="text-foreground/70 mt-1">
-                    {file.filename}: {file.extracted_text.slice(0, 180)}
-                  </p>
-                ))}
-              </div>
-            )}
-            {peers.length > 0 && (
-              <div className="text-sm">
-                <p className="font-medium">Peer reviews (not the grade)</p>
-                {peers.map((review, index) => (
-                  <p key={`${review.reviewer}-${index}`} className="text-foreground/70 mt-1">
-                    {review.reviewer}: {review.text}
-                  </p>
-                ))}
-              </div>
-            )}
-            {busy && <CouncilStage scene="grade" />}
-            <button
-              className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
-              disabled={busy || !rubricReady}
-              onClick={async () => {
-                setBusy(true);
-                const next = await run(() => pa<Draft>(`/submissions/${selected}/grade`, { method: "POST" }), setError);
-                if (next) {
-                  setDraft(next);
-                  setFeedback(next.overall_feedback);
-                  setLevels(next.professor_levels || {});
-                  await loadQueue(course.id);
-                }
-                setBusy(false);
-              }}
-            >
-              {busy ? "Council is reading…" : "Run grading council"}
-            </button>
-            {draft && (
-              <div className="flex flex-col gap-4">
-                <Banner>{draft.one_click_reason}</Banner>
-                {draft.blind && !draft.blind_revealed && (
-                  <Banner>
-                    Blind sample. Choose a level from the quotes before you reveal the council.
-                    <button
-                      className="ml-2 underline"
-                      onClick={async () => {
-                        const next = await run(() => pa<Draft>(`/drafts/${draft.id}/reveal`, { method: "POST" }), setError);
-                        if (next) setDraft(next);
-                      }}
-                    >
-                      Reveal council level
-                    </button>
-                  </Banner>
-                )}
-                {draft.results.map((result) => (
-                  <article key={result.criterion} className="border-foreground/10 rounded-lg border p-3 text-sm">
-                    <h3 className="font-medium">{result.criterion}</h3>
-                    <p className="mt-2">{result.judge.why}</p>
-                    <p className="text-foreground/60 mt-1">
-                      Votes: {result.votes.map((vote) => `${vote.persona} ${vote.level ?? "—"}`).join(" · ") || "hidden"}
-                    </p>
-                    <ul className="mt-2 list-disc pl-5">
-                      {(result.judge.quotes || []).map((quote) => (
-                        <li key={quote}>&ldquo;{quote}&rdquo;</li>
-                      ))}
-                    </ul>
-                    <p className="text-foreground/60 mt-2">{result.calibrator.message}</p>
-                    {(result.debate_rounds || []).map((round) => (
-                      <p key={round.round} className="mt-1">
-                        Debate round {round.round}: {round.votes.map((vote) => `${vote.persona} ${vote.level}`).join(" · ")}
-                      </p>
-                    ))}
-                    <label className="mt-3 block">
-                      Your level
-                      <select
-                        className="border-foreground/15 mt-1 block rounded-md border bg-transparent px-2 py-1"
-                        value={levels[result.criterion] || ""}
-                        onChange={(event) => setLevels({ ...levels, [result.criterion]: event.target.value })}
-                      >
-                        <option value="">Keep the council level</option>
-                        {LEVELS.map((level) => (
-                          <option key={level} value={level}>{level}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </article>
-                ))}
-                <label className="text-sm">
-                  Feedback
-                  <textarea
-                    className="border-foreground/15 mt-1 min-h-32 w-full rounded-lg border bg-transparent p-3"
-                    value={feedback}
-                    onChange={(event) => setFeedback(event.target.value)}
-                  />
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="rounded-lg border px-3 py-2 text-sm"
-                    onClick={async () => {
-                      const next = await run(
-                        () => pa<Draft>(`/drafts/${draft.id}/edit`, { method: "POST", body: JSON.stringify({ overall_feedback: feedback, levels }) }),
-                        setError,
-                      );
-                      if (next) setDraft(next);
-                    }}
-                  >
-                    Save your edit
-                  </button>
-                  <button
-                    className="bg-foreground text-background rounded-lg px-3 py-2 text-sm disabled:opacity-50"
-                    disabled={draft.status !== "draft"}
-                    onClick={async () => {
-                      const next = await run(() => pa<Draft>(`/drafts/${draft.id}/approve`, { method: "POST" }), setError);
-                      if (next) {
-                        setDraft(next);
-                        await loadQueue(course.id);
-                      }
-                    }}
-                  >
-                    Approve draft
-                  </button>
-                  <button
-                    className="bg-foreground text-background rounded-lg px-3 py-2 text-sm disabled:opacity-50"
-                    disabled={draft.status !== "approved"}
-                    onClick={async () => {
-                      const next = await run(
-                        () => pa<{ draft: Draft }>(`/drafts/${draft.id}/push`, { method: "POST" }),
-                        setError,
-                      );
-                      if (next) {
-                        setDraft(next.draft);
-                        setError("Recorded locally. Moodle was not contacted.");
-                        await loadQueue(course.id);
-                      }
-                    }}
-                  >
-                    Push approved grade
-                  </button>
-                </div>
-                <p className="text-foreground/50 text-xs">
-                  Status: {draft.status}.{" "}
-                  {draft.status === "pushed"
-                    ? "Recorded locally. Moodle was not contacted."
-                    : draft.status === "approved"
-                      ? "Push records this grade. In fake mode Moodle is not contacted."
-                      : "Push stays off until you approve."}
-                </p>
-                {draft.trace_url && (
-                  <a className="text-sm underline" href={draft.trace_url} target="_blank" rel="noreferrer">
-                    View agent trail
-                  </a>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      </details>
     </div>
   );
 }

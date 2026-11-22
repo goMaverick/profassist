@@ -330,7 +330,7 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
                 <PromptInputSelectValue placeholder="Model" />
               </PromptInputSelectTrigger>
               <PromptInputSelectContent>
-                <PromptInputSelectItem value="demo">Demo drafter</PromptInputSelectItem>
+                <PromptInputSelectItem value="demo">Practice answers</PromptInputSelectItem>
                 <PromptInputSelectItem value="council">Council</PromptInputSelectItem>
               </PromptInputSelectContent>
             </PromptInputSelect>

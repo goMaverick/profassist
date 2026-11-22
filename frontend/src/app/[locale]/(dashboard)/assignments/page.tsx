@@ -22,11 +22,11 @@ import { pa, run, useWorkspace } from "@/components/profassist/bits";
 import { AiLive } from "@/components/profassist/ai-live";
 
 const COUNCIL_IDEAS = [
-  { title: "Clinic triage assistant", brief: "A group designs an intake model and a rollback plan for a campus clinic." },
-  { title: "Library occupancy forecast", brief: "Predict seat demand and publish the model card with the data version." },
-  { title: "Energy dashboard", brief: "Stream building meters into a monitored pipeline with a drift check." },
-  { title: "Exam integrity review", brief: "Compare submissions after the shared brief is removed. A flag is not a verdict." },
-  { title: "Deployment rehearsal", brief: "Ship a small API, then write the runbook a mixed audience can follow." },
+  { title: "Clinic triage assistant", brief: "A group designs an intake model and a rollback plan for a campus clinic.", exemplar: "Strong work names the data version, the threshold, and one failure mode. Average work describes the model without the rollback. Weak work lists tools and stops." },
+  { title: "Library occupancy forecast", brief: "Predict seat demand and publish the model card with the data version.", exemplar: "Strong work shows a week of forecasts against the actual count. Average work has the chart and no error. Weak work is a screenshot." },
+  { title: "Energy dashboard", brief: "Stream building meters into a monitored pipeline with a drift check.", exemplar: "Strong work states what happens when the meter feed stops. Average work deploys the API. Weak work describes the dashboard only." },
+  { title: "Exam integrity review", brief: "Compare submissions after the shared brief is removed. A flag is not a verdict.", exemplar: "Strong work quotes the shared sentence and the sentence that remains. Average work reports a score. Weak work calls it cheating." },
+  { title: "Deployment rehearsal", brief: "Ship a small API, then write the runbook a mixed audience can follow.", exemplar: "Strong work includes the rollback command and who is called. Average work lists the steps. Weak work says it was deployed." },
 ];
 
 interface CatalogItem {
@@ -208,6 +208,7 @@ function AssignmentsBody() {
                 <Tile key={idea.title}>
                   <strong>{index + 1}. {idea.title}</strong>
                   <p>{idea.brief}</p>
+                  <p><b>Exemplar.</b> {idea.exemplar}</p>
                 </Tile>
               ))}
             </div>

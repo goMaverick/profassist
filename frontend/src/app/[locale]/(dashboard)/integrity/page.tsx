@@ -67,6 +67,7 @@ function IntegrityBody() {
   const [flags, setFlags] = useState<Flag[]>([]);
   const [assignments, setAssignments] = useState<Array<{ id: string; number: string; title: string }>>([]);
   const [report, setReport] = useState<Report | null>(null);
+  const [showPair, setShowPair] = useState(true);
 
   useEffect(() => {
     if (!course) return;
@@ -94,29 +95,6 @@ function IntegrityBody() {
         </Column>
       )}
       <Column lg={16}>
-        <AiLive
-          title="Similarity and writing signal"
-          reasoning="Group A and Group B share a method sentence after the common brief is removed. The writing signal is a demo score, not a verdict and not a detector result you should act on alone."
-          sources={[{ href: "/integrity", title: "Submission pairs" }]}
-          tasks={["Drop the shared idea brief", "Score the remaining solution text", "Show the pair side by side"]}
-        >
-          <table className="pa-matrix" aria-label="Similarity heatmap">
-            <tbody>
-              {HEAT.map((row, index) => (
-                <tr key={index}>
-                  {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} style={{ background: heatColor(cell) }}>{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <p>A: The pipeline versions the dataset before training and records the threshold.</p>
-            <p>B: The pipeline versions the dataset before training and records the same threshold.</p>
-          </div>
-          <p>AI-writing score 0.37 · not a verdict · demo only</p>
-        </AiLive>
         <Tabs
           selectedIndex={tab}
           onChange={({ selectedIndex }) => {
@@ -129,7 +107,37 @@ function IntegrityBody() {
           </TabList>
           <TabPanels>
             <TabPanel>
-              <p>Shared briefs are removed before the comparison. A high score is a reason to read the work, not a verdict.</p>
+              <div className="pa-todo">
+                <button type="button" className="pa-todo" onClick={() => setShowPair((open) => !open)} style={{ textAlign: "left", cursor: "pointer" }}>
+                  <span>Group A and Group B — very similar</span><strong>Compare</strong>
+                </button>
+              </div>
+              {showPair && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+                  <p>The pipeline versions the dataset before training and records the threshold.</p>
+                  <p>The pipeline versions the dataset before training and records the same threshold.</p>
+                </div>
+              )}
+              <details style={{ marginTop: 16 }}>
+                <summary>See all</summary>
+                <table className="pa-matrix" aria-label="Similarity heatmap">
+                  <tbody>
+                    {HEAT.map((row, index) => (
+                      <tr key={index}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={cellIndex} style={{ background: heatColor(cell) }}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="pa-legend"><i style={{ background: "#f4f4f4" }} /> under 0.4 <i style={{ background: "#d0e2ff" }} /> 0.4–0.8 <i style={{ background: "#e8daff" }} /> 0.8 and above</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <p>A: The pipeline versions the dataset before training and records the threshold.</p>
+                  <p>B: The pipeline versions the dataset before training and records the same threshold.</p>
+                </div>
+              </details>
+              <p>No submissions yet? Sync from Moodle, then come back to compare them.</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
                 {assignments.map((item) => (
                   <Button key={item.id} kind="tertiary" size="sm" onClick={() => router.replace(`/integrity?tab=similarity&id=${item.id}`)}>

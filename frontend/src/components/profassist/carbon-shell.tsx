@@ -33,12 +33,12 @@ const PAGES: Record<string, { title: string; section: string; description: strin
   "/dashboard": {
     title: "Home",
     section: "Workspace",
-    description: "Drafts stay drafts. You approve the outline, the assessment, and the grade.",
+    description: "See what needs you, then open it.",
   },
   "/outline": {
     title: "Subject outline",
     section: "Course",
-    description: "Walk the faculty template. Download the PDF or DOCX when it is ready.",
+    description: "Fill in the outline one step at a time. You approve it before anyone else sees it.",
   },
   "/generate": {
     title: "Assessment generator",
@@ -48,7 +48,7 @@ const PAGES: Record<string, { title: string; section: string; description: strin
   "/assignments": {
     title: "Assignments",
     section: "Assess",
-    description: "Numbered tasks for this course. Open one for ideas, groups, exemplars, and submissions.",
+    description: "Open an assignment to see ideas, groups, and student work.",
   },
   "/group-work": {
     title: "Assignments",
@@ -63,32 +63,32 @@ const PAGES: Record<string, { title: string; section: string; description: strin
   "/studio": {
     title: "Course studio",
     section: "Course",
-    description: "Notes, objectives, and the materials the agents read.",
+    description: "Add the notes the course is built from.",
   },
   "/slides": {
     title: "Slides",
     section: "Course",
-    description: "Each bullet stays next to the note it came from.",
+    description: "Make this week's slides from your notes.",
   },
   "/grade": {
     title: "Grading",
     section: "Assess",
-    description: "The council drafts a queue. You edit and approve. Nothing is pushed until you say so.",
+    description: "Read the suggested grade, then approve it or change it.",
   },
   "/integrity": {
     title: "Integrity",
     section: "Assess",
-    description: "Similarity and policy flags. A flag is evidence for a conversation, not a verdict.",
+    description: "Look at work that may be too similar. You decide what to do.",
   },
   "/students": {
     title: "Students at risk",
     section: "Course",
-    description: "A score is advice for you. It does not message a student or change a mark.",
+    description: "Students who may need a check-in. This does not change their mark.",
   },
   "/style": {
     title: "My style",
     section: "Workspace",
-    description: "Agents read this when they write. A reflection is not applied until you approve it.",
+    description: "How you like feedback written. Nothing changes until you save it.",
   },
   "/design": {
     title: "Course design",

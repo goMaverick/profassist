@@ -23,6 +23,18 @@
   border-bottom: 1px solid #e0e0e0;
 }
 
+.pa-sync-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  color: #525252;
+  font-size: 0.75rem;
+}
+
 .pa-brand {
   display: flex;
   align-items: center;
@@ -135,9 +147,51 @@
   text-transform: uppercase;
 }
 
+.pa-why {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #6929c4;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.pa-why-body {
+  margin: 8px 0 0;
+  max-width: 40rem;
+  color: #525252;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.pa-todo {
+  display: grid;
+  gap: 8px;
+}
+
+.pa-todo a,
+.pa-todo button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  color: #161616;
+  font-size: 1rem;
+  text-decoration: none;
+}
+
+.pa-todo a strong {
+  color: #0f62fe;
+  font-weight: 600;
+}
+
 .cds--content.pa-content {
   box-sizing: border-box;
   min-height: 100vh;
+  font-size: 1rem;
   margin-top: 3rem;
   margin-left: 16rem;
   width: calc(100vw - 16rem);
@@ -412,6 +466,22 @@
 .pa-matrix th:first-child,
 .pa-matrix td:first-child {
   text-align: left;
+}
+
+.pa-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: #525252;
+  font-size: 0.75rem;
+}
+
+.pa-legend i {
+  width: 16px;
+  height: 12px;
+  display: inline-block;
+  border: 1px solid #e0e0e0;
 }
 
 .pa-clo {
