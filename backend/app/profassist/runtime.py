@@ -76,6 +76,7 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
         "assist_outline",
         "create_assignment",
         "dropout_risk",
+        "integrity_concerns",
         "suggest_assessments",
         "accept_assessments",
         "generate_slides",

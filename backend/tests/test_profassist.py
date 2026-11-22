@@ -183,6 +183,20 @@ def test_assignment_catalog_keeps_the_outline_number_and_due_date() -> None:
     assert rows[0]["status"] == "draft"
 
 
+def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
+    from app.profassist.integrity_board import overview
+    from app.profassist.platform_tools import choose_tool
+
+    board = overview("all")
+    assert board["summary"]["courses"] == 2
+    statuses = {item["status"] for item in board["items"]}
+    assert {"Clear", "Review", "Concern"} <= statuses
+    name, args = choose_tool("show integrity concerns for MAAI 903 assignment 1")
+    assert name == "integrity_concerns"
+    assert args["code"] == "MAAI903"
+    assert args["assignment"] == "1"
+
+
 def test_create_assignment_phrase_picks_the_course_tool() -> None:
     from app.profassist.platform_tools import choose_tool
 
