@@ -48,6 +48,9 @@ type NavEntry =
 const NAV: NavEntry[] = [
   { kind: "link", label: "Home", href: ROUTES.DASHBOARD, icon: LayoutDashboard },
   { kind: "link", label: "Studio", href: "/studio", icon: BookOpen },
+  { kind: "link", label: "Design", href: "/design", icon: BookOpen },
+  { kind: "link", label: "Rubric", href: "/rubric", icon: PenLine },
+  { kind: "link", label: "Slides", href: "/slides", icon: BookOpen },
   { kind: "link", label: "Grade", href: "/grade", icon: GraduationCap },
   { kind: "link", label: "Integrity", href: "/integrity", icon: ShieldCheck },
   { kind: "link", label: "Students", href: "/students", icon: Users },

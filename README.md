@@ -30,13 +30,15 @@ The first start downloads images and installs Python and Node packages. It can t
 | Workspace | University of Wollongong in Dubai |
 | Course | MAAI903 AI Solutions Design & MLOps |
 
-The database is seeded on startup: the professor, the university workspace, a lecture note, four students, and three fake Moodle group reports. Two of those reports share a method paragraph.
+The database is seeded on startup: the professor, the university workspace, a lecture note, four students, three group reports with files (docx, pdf, zip, image), and a workshop submission with two peer reviews. Two of the reports share a method paragraph.
 
 ### What to click
 
 1. Sign in. Home shows the course and a reminder that drafts stay drafts.
-2. **Studio**. The lecture note is already indexed. Draft objectives, approve one, draft slides, download the PowerPoint, design a rubric, and approve it.
-3. **Grade**. Open Group A and run the council. Read the quotes and the "why this level" note. Edit the feedback if you want, approve, then push. The push is recorded locally. Moodle is not contacted. Group B18 is a blind sample: choose a level, or reveal the council, before you can approve it.
+2. **Design**. Ask for a draft. Edit the weeks, outcomes, and assessment plan, then approve it.
+3. **Rubric**. Open Group report 1, edit a level, check alignment, and approve the rubric. You can also start a blank rubric or import one.
+4. **Slides**. Choose a week and build that week's deck. Thumbnails and sources are on the review screen.
+5. **Grade**. Sync from Moodle. Open Group A and read the extracted attachments. Run the council, approve, then push. Fake mode records the grade and does not contact Moodle. The workshop row shows peer reviews, which the council can see and which do not set the level. Group B18 is a blind sample.
 4. **Integrity**. Scan. The shared method is shown side by side with viva questions. Confirm or dismiss it. A flag is evidence, not a verdict.
 5. **Students** and **Quality**. Both say the model is not trained yet. The roster is real demo data. The risk column is empty on purpose.
 6. **My style**. That is `soul.md`, plus **About me**. About me is rebuilt for the signed-in professor after she approves or edits. Save it, edit it, or reset it. A reflection can propose a style change. It is not applied until she approves it, and it never rewrites the shared prompts.
@@ -66,7 +68,9 @@ cp backend/.env.example backend/.env
 | `LLM_BASE_URL` | Any OpenAI-compatible base URL. Use with `LLM_API_KEY` if that server wants a key. |
 | `LLM_MODEL` | Default model name when an agent has no choice of its own. |
 | `MOODLE_MODE` | `fake` (default) or `real`. |
-| `MOODLE_BASE_URL`, `MOODLE_WS_TOKEN` | Only for `real`. Reads use the Moodle REST API. Grade push stays disabled there. |
+| `MOODLE_BASE_URL` | Moodle site URL, no trailing slash. Only for `real`. |
+| `MOODLE_WS_TOKEN` | Web service token. Only for `real`. |
+| `MOODLE_PUSH_ENABLED` | `false` by default. Set `true` to allow `mod_assign_save_grade` after she approves. |
 | `LANGFUSE_ENABLED` | Off by default. Set `true` plus `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to trace calls. |
 | `DEMO_PROFESSOR_EMAIL` | Demo login email. |
 | `DEMO_PROFESSOR_PASSWORD` | Demo login password. |
@@ -94,7 +98,16 @@ Real in this build:
 - PowerPoint export with a title, agenda, sections, notes, sources, and a references slide. A `.pptx` or `.potx` master can set the page size. Slide review shows thumbnails.
 - A privacy gate that strips names, emails, phones, and IDs before a model call, and quarantines a file when that fails.
 - Approval before any push.
-- A fake Moodle connector (`MOODLE_MODE=fake`) with the same shape as an LTI 1.3 launch and the read-only Moodle REST API. Swap it by setting `MOODLE_MODE=real`.
+- A fake Moodle connector (`MOODLE_MODE=fake`) with assignments, file attachments, and a workshop. `MOODLE_MODE=real` calls the Moodle web service. Grade push stays off until `MOODLE_PUSH_ENABLED=true`.
+
+## Connect a real Moodle
+
+1. On the Moodle site, enable Web services and the REST protocol.
+2. Create an external service that includes these functions: `core_course_get_courses`, `core_enrol_get_enrolled_users`, `mod_assign_get_assignments`, `mod_assign_get_submissions`, `core_grading_get_definitions`, `mod_workshop_get_workshops_by_courses`, `mod_workshop_get_submissions`, `mod_workshop_get_assessments`. Add `mod_assign_save_grade` only if grades should be written back.
+3. The token user needs `webservice/rest:use`, `moodle/course:view`, `moodle/course:viewparticipants`, `mod/assign:view`, and `mod/workshop:view`. Add `mod/assign:grade` only when push is enabled.
+4. Create a token for that user.
+5. Set `MOODLE_MODE=real`, `MOODLE_BASE_URL` to the site URL, and `MOODLE_WS_TOKEN` to the token. Leave `MOODLE_PUSH_ENABLED` unset until a grade write is wanted.
+6. In ProfAssist, open Grade and choose Sync from Moodle. The last sync line shows what was imported. File text is extracted before the privacy gate. Peer reviews are shown to the council and do not set the level.
 - Organization workspaces. Every ProfAssist row is stored against one organization.
 
 Not built, on purpose:

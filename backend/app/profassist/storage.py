@@ -82,6 +82,20 @@ def extract_text(filename: str, data: bytes) -> str:
 
         document = Document(io.BytesIO(data))
         return "\n".join(paragraph.text for paragraph in document.paragraphs)
+    if lower.endswith(".zip"):
+        import io
+        import zipfile
+
+        pieces = []
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for name in archive.namelist():
+                if name.endswith("/"):
+                    continue
+                inner = archive.read(name)
+                pieces.append(f"{name}\n{extract_text(name, inner)}")
+        return "\n".join(pieces)
+    if lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+        return f"[image {filename}]"
     if lower.endswith(".pptx"):
         import io
 

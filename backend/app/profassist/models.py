@@ -1,8 +1,9 @@
 """Tenant-scoped tables. Every row carries organization_id."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +35,8 @@ class Course(Base, TimestampMixin):
     term: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     external_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     clos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_status: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
 
 class Material(Base, TimestampMixin):
@@ -99,6 +102,7 @@ class SlideDeck(Base, TimestampMixin):
     slides: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    week: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
 class Assessment(Base, TimestampMixin):
@@ -115,6 +119,11 @@ class Assessment(Base, TimestampMixin):
     clos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     external_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    weight: Mapped[int] = mapped_column(nullable=False, default=0)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="assignment")
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
+    history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    alignment: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class RubricCriterion(Base, TimestampMixin):
@@ -175,6 +184,47 @@ class Submission(Base, TimestampMixin):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     scrubbed_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     pii_report: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    peer_reviews: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="moodle")
+    author_external_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+
+class SubmissionFile(Base, TimestampMixin):
+    __tablename__ = "pa_submission_files"
+
+    id: Mapped[uuid.UUID] = _uuid()
+    organization_id: Mapped[uuid.UUID] = _org()
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("pa_submissions.id", ondelete="CASCADE"), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class CourseDesign(Base, TimestampMixin):
+    """One course outline per professor. Not shared with other professors."""
+
+    __tablename__ = "pa_course_designs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "course_id", "owner_user_id", name="uq_pa_design_owner"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid()
+    organization_id: Mapped[uuid.UUID] = _org()
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("pa_courses.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
+    history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
 
 class GradeDraft(Base, TimestampMixin):

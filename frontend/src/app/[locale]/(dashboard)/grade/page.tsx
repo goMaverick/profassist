@@ -7,11 +7,21 @@ interface SubmissionRow {
   id: string;
   group_name: string;
   topic: string;
+  assessment_id?: string;
+  origin?: string;
+  files?: number;
+  peer_reviews?: number;
   draft_id: string | null;
   draft_status: string | null;
   blind: boolean;
   quarantined: boolean;
   trace_url?: string;
+}
+interface AssessmentRow {
+  id: string;
+  title: string;
+  status: string;
+  kind?: string;
 }
 interface Draft {
   id: string;
@@ -41,6 +51,10 @@ export default function GradePage() {
   const { course, error: loadError, loading } = useWorkspace();
   const [error, setError] = useState("");
   const [rows, setRows] = useState<SubmissionRow[]>([]);
+  const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
+  const [syncStatus, setSyncStatus] = useState("");
+  const [files, setFiles] = useState<Array<{ filename: string; extracted_text: string }>>([]);
+  const [peers, setPeers] = useState<Array<{ reviewer?: string; text?: string }>>([]);
   const [rubricReady, setRubricReady] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [raw, setRaw] = useState("");
@@ -51,11 +65,15 @@ export default function GradePage() {
 
   async function loadQueue(courseId: string) {
     const queue = await pa<{
+      course: { last_sync_status?: string };
       assessment: { status: string; criteria: unknown[] } | null;
+      assessments?: AssessmentRow[];
       submissions: SubmissionRow[];
     }>(`/courses/${courseId}/grade`);
     setRows(queue.submissions);
-    setRubricReady(queue.assessment?.status === "approved" && (queue.assessment.criteria?.length ?? 0) > 0);
+    setAssessments(queue.assessments || []);
+    setSyncStatus(queue.course?.last_sync_status || "");
+    setRubricReady((queue.assessments || []).some((item) => item.status === "approved") || (queue.assessment?.status === "approved" && (queue.assessment.criteria?.length ?? 0) > 0));
   }
 
   useEffect(() => {
@@ -64,8 +82,14 @@ export default function GradePage() {
 
   async function openRow(row: SubmissionRow) {
     setSelected(row.id);
-    const submission = await pa<{ raw_text: string }>(`/submissions/${row.id}`);
+    const submission = await pa<{
+      raw_text: string;
+      files?: Array<{ filename: string; extracted_text: string }>;
+      peer_reviews?: Array<{ reviewer?: string; text?: string }>;
+    }>(`/submissions/${row.id}`);
     setRaw(submission.raw_text);
+    setFiles(submission.files || []);
+    setPeers(submission.peer_reviews || []);
     if (row.draft_id) {
       const next = await pa<Draft>(`/drafts/${row.draft_id}`);
       setDraft(next);
@@ -92,8 +116,58 @@ export default function GradePage() {
         </p>
       </div>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="bg-foreground text-background rounded-lg px-3 py-2 text-sm"
+          onClick={async () => {
+            const result = await run(() => pa<{ last_sync_status?: string }>("/moodle/sync", { method: "POST" }), setError);
+            if (result) {
+              setSyncStatus(result.last_sync_status || "Synced.");
+              await loadQueue(course.id);
+            }
+          }}
+        >
+          Sync from Moodle
+        </button>
+        {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}
+        {assessments.filter((item) => item.status === "approved").map((item) => (
+          <button
+            key={item.id}
+            className="rounded-lg border px-3 py-2 text-sm"
+            onClick={async () => {
+              setBusy(true);
+              const result = await run(
+                () => pa<{ graded: number; skipped: number }>(`/assessments/${item.id}/grade-batch`, { method: "POST" }),
+                setError,
+              );
+              if (result) await loadQueue(course.id);
+              setBusy(false);
+            }}
+          >
+            Batch grade {item.title}
+          </button>
+        ))}
+        <label className="text-sm">
+          Upload a zip of submissions
+          <input
+            className="mt-1 block"
+            type="file"
+            accept=".zip"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              const target = assessments[0];
+              if (!file || !target) return;
+              const body = new FormData();
+              body.append("file", file);
+              body.append("assessment_id", target.id);
+              const ok = await run(() => pa(`/courses/${course.id}/submissions/upload`, { method: "POST", body }), setError);
+              if (ok) await loadQueue(course.id);
+            }}
+          />
+        </label>
+      </div>
       {!rubricReady && (
-        <Banner>Approve a rubric in Course studio before the council can mark.</Banner>
+        <Banner>Approve a rubric on the assignment before the council can mark.</Banner>
       )}
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
         <ul className="flex flex-col gap-2">
@@ -104,7 +178,13 @@ export default function GradePage() {
                 onClick={() => openRow(row).catch((err: unknown) => setError(err instanceof Error ? err.message : "Open failed"))}
               >
                 <span className="font-medium">{row.group_name}</span>
-                <span className="text-foreground/50 mt-1 block">{row.draft_status || "not graded"}{row.blind ? " · blind sample" : ""}</span>
+                <span className="text-foreground/50 mt-1 block">
+                  {row.draft_status || "not graded"}
+                  {row.blind ? " · blind sample" : ""}
+                  {row.files ? ` · ${row.files} files` : ""}
+                  {row.peer_reviews ? ` · ${row.peer_reviews} peer reviews` : ""}
+                  {row.origin === "upload" ? " · uploaded" : ""}
+                </span>
               </button>
               {row.trace_url && (
                 <a className="mt-1 block px-1 text-xs underline" href={row.trace_url} target="_blank" rel="noreferrer">
@@ -117,6 +197,26 @@ export default function GradePage() {
         {selected && (
           <div className="flex flex-col gap-4">
             <pre className="border-foreground/10 max-h-64 overflow-auto rounded-lg border p-3 text-xs whitespace-pre-wrap">{raw}</pre>
+            {files.length > 0 && (
+              <div className="text-sm">
+                <p className="font-medium">Attachments</p>
+                {files.map((file) => (
+                  <p key={file.filename} className="text-foreground/70 mt-1">
+                    {file.filename}: {file.extracted_text.slice(0, 180)}
+                  </p>
+                ))}
+              </div>
+            )}
+            {peers.length > 0 && (
+              <div className="text-sm">
+                <p className="font-medium">Peer reviews (not the grade)</p>
+                {peers.map((review, index) => (
+                  <p key={`${review.reviewer}-${index}`} className="text-foreground/70 mt-1">
+                    {review.reviewer}: {review.text}
+                  </p>
+                ))}
+              </div>
+            )}
             <button
               className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
               disabled={busy || !rubricReady}
@@ -219,7 +319,7 @@ export default function GradePage() {
                     Approve draft
                   </button>
                   <button
-                    className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50"
+                    className="bg-foreground text-background rounded-lg px-3 py-2 text-sm disabled:opacity-50"
                     disabled={draft.status !== "approved"}
                     onClick={async () => {
                       const next = await run(
@@ -236,7 +336,14 @@ export default function GradePage() {
                     Push approved grade
                   </button>
                 </div>
-                <p className="text-foreground/50 text-xs">Status: {draft.status}. Push stays disabled until you approve.</p>
+                <p className="text-foreground/50 text-xs">
+                  Status: {draft.status}.{" "}
+                  {draft.status === "pushed"
+                    ? "Recorded locally. Moodle was not contacted."
+                    : draft.status === "approved"
+                      ? "Push records this grade. In fake mode Moodle is not contacted."
+                      : "Push stays off until you approve."}
+                </p>
                 {draft.trace_url && (
                   <a className="text-sm underline" href={draft.trace_url} target="_blank" rel="noreferrer">
                     View agent trail

@@ -58,6 +58,61 @@ def _quote(text: str) -> str:
 
 
 def demo_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if task == "course_design":
+        chunks = payload.get("chunks") or []
+        blob = "\n".join(chunk.get("text") or "" for chunk in chunks)
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.])\s+", blob)
+            if len(sentence.strip()) > 40
+        ][:3]
+        clos = []
+        for index, sentence in enumerate(sentences or ["State one outcome the assessment will evidence."], start=1):
+            clos.append({"code": f"CLO{index}", "text": sentence[:220]})
+        if not clos:
+            clos = [
+                {
+                    "code": "CLO1",
+                    "text": "Explain how an LLM agent differs from a trained machine learning model.",
+                }
+            ]
+        weeks = [
+            {
+                "week": index,
+                "topic": item["text"][:80],
+                "clos": [item["code"]],
+                "notes": "Drafted from the uploaded notes.",
+            }
+            for index, item in enumerate(clos, start=1)
+        ]
+        message = (payload.get("message") or "").lower()
+        reply = "Drafted from your notes and the About this professor section. Edit any week, then approve."
+        if "shorter" in message:
+            for week in weeks:
+                week["notes"] = "One idea this week."
+            reply = "I shortened the week notes. The outcomes are unchanged."
+        return {
+            "reply": reply,
+            "clos": clos,
+            "weeks": weeks,
+            "plan": [
+                {
+                    "title": "Group report 1",
+                    "weight": 40,
+                    "clos": [clos[0]["code"]],
+                    "brief": "A short report that evidences the first outcome and quotes the evidence.",
+                    "kind": "assignment",
+                },
+                {
+                    "title": "Peer review of the design brief",
+                    "weight": 20,
+                    "clos": [item["code"] for item in clos[:2]],
+                    "brief": "Review a peer brief against the outcomes. Comments are evidence, not the grade.",
+                    "kind": "workshop",
+                },
+            ],
+        }
+
     if task == "objectives":
         chunks = payload.get("chunks") or []
         objectives = []
@@ -193,6 +248,7 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Run one JSON model call. The payload is scrubbed text plus rubric structure."""
     agent = {
         "objectives": "course_designer",
+        "course_design": "course_designer",
         "slides": "course_designer",
         "rubric": "rubric_designer",
         "grade_persona": "grading_council",

@@ -1,6 +1,7 @@
 """Professor workflows. Models draft. These functions refuse to push early."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -31,6 +32,7 @@ from app.profassist.models import (
     Student,
     StyleProfile,
     Submission,
+    SubmissionFile,
 )
 from app.profassist.moodle import CLOS, get_connector
 from app.profassist.pii import scrub
@@ -129,6 +131,8 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "term": course.term,
         "external_id": course.external_id,
         "clos": course.clos,
+        "last_sync_at": course.last_sync_at.isoformat() if course.last_sync_at else "",
+        "last_sync_status": course.last_sync_status or "",
     }
 
 
@@ -407,6 +411,7 @@ def _deck_dict(row: SlideDeck) -> dict[str, Any]:
         "id": str(row.id),
         "title": row.title,
         "status": row.status,
+        "week": row.week,
         "slides": row.slides,
         "previews": render_thumbnails(plan[:8]),
     }
@@ -546,6 +551,11 @@ async def _assessment_dict(db: AsyncSession, row: Assessment) -> dict[str, Any]:
         "brief": row.brief,
         "status": row.status,
         "external_id": row.external_id,
+        "weight": row.weight,
+        "kind": row.kind,
+        "version": row.version,
+        "alignment": row.alignment or {},
+        "history_count": len(row.history or []),
         "criteria": criteria,
     }
 
@@ -565,6 +575,190 @@ async def get_assessment(
     if row is None:
         return None
     return await _assessment_dict(db, row)
+
+
+async def list_assessments(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    course = await _course(db, org_id, course_id)
+    result = await db.execute(
+        select(Assessment).where(
+            Assessment.organization_id == org_id,
+            Assessment.course_id == course.id,
+            Assessment.owner_user_id == user_id,
+        )
+    )
+    return [await _assessment_dict(db, row) for row in result.scalars().all()]
+
+
+async def create_rubric(
+    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID, title: str
+) -> dict[str, Any]:
+    course = await _course(db, org_id, course_id)
+    row = Assessment(
+        organization_id=org_id,
+        course_id=course.id,
+        owner_user_id=user_id,
+        title=title.strip() or "Untitled rubric",
+        brief="",
+        clos=course.clos or CLOS,
+        status="draft",
+        external_id="",
+        kind="assignment",
+    )
+    db.add(row)
+    await db.flush()
+    blank = {
+        "name": "Evidence",
+        "weight": 1,
+        "levels": {
+            "beginning": "",
+            "developing": "",
+            "proficient": "",
+            "advanced": "",
+        },
+    }
+    await _apply_imported_criteria(db, org_id, row, [blank], "manual")
+    return await _assessment_dict(db, row)
+
+
+async def save_rubric(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    assessment_id: uuid.UUID,
+    criteria: list[dict[str, Any]],
+    brief: str | None = None,
+) -> dict[str, Any]:
+    row = await _owned(db, Assessment, org_id, assessment_id, user_id)
+    if row.status == "approved":
+        raise ProfassistError(
+            409, "Approved rubrics stay as you approved them. Start a new version from a draft."
+        )
+    if brief is not None:
+        row.brief = brief
+    await _apply_imported_criteria(db, org_id, row, criteria, "edit")
+    return await _assessment_dict(db, row)
+
+
+async def import_rubric(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    assessment_id: uuid.UUID,
+    filename: str,
+    data: bytes,
+    pasted: str = "",
+) -> dict[str, Any]:
+    from app.profassist.rubric_build import parse_rubric_file, parse_rubric_text
+
+    row = await _owned(db, Assessment, org_id, assessment_id, user_id)
+    if pasted.strip():
+        criteria = parse_rubric_text(pasted)
+    else:
+        criteria = parse_rubric_file(filename or "rubric.txt", data)
+    if not criteria:
+        raise ProfassistError(
+            400,
+            "No criteria were found. Use lines like 'Criterion: Evidence' and 'Beginning: ...'.",
+        )
+    await _apply_imported_criteria(db, org_id, row, criteria, "import")
+    return await _assessment_dict(db, row)
+
+
+async def check_rubric(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assessment_id: uuid.UUID
+) -> dict[str, Any]:
+    from app.profassist.rubric_build import alignment
+
+    row = await _owned(db, Assessment, org_id, assessment_id, user_id)
+    criteria = (
+        await db.execute(
+            select(RubricCriterion)
+            .where(RubricCriterion.assessment_id == row.id)
+            .order_by(RubricCriterion.ordinal)
+        )
+    ).scalars()
+    payload = alignment(
+        [{"name": item.name, "weight": item.weight, "levels": item.levels} for item in criteria],
+        [str(item) for item in (row.clos or [])],
+    )
+    row.alignment = payload
+    await db.flush()
+    result = await _assessment_dict(db, row)
+    result["alignment"] = payload
+    return result
+
+
+async def upload_submission_zip(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    assessment_id: uuid.UUID,
+    data: bytes,
+) -> dict[str, Any]:
+    import io
+    import zipfile
+
+    course = await _course(db, org_id, course_id)
+    assessment = await _owned(db, Assessment, org_id, assessment_id, user_id)
+    names = await _names(db, org_id, course.id)
+    added = 0
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise ProfassistError(400, "Upload a .zip of submission files.") from exc
+    for name in archive.namelist():
+        if name.endswith("/") or name.startswith("__MACOSX"):
+            continue
+        payload = archive.read(name)
+        filename = name.rsplit("/", 1)[-1]
+        group = (
+            name.rsplit("/", 1)[0].rsplit("/", 1)[-1] if "/" in name else filename.rsplit(".", 1)[0]
+        )
+        external = f"upload-{assessment.id}-{name}"
+        existing = await db.execute(
+            select(Submission).where(
+                Submission.organization_id == org_id, Submission.external_id == external
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            continue
+        text, files = _remote_text(
+            {"text": "", "files": [{"filename": filename, "content_type": "", "data": payload}]}
+        )
+        cleaned = scrub(text, names)
+        row = Submission(
+            organization_id=org_id,
+            course_id=course.id,
+            assessment_id=assessment.id,
+            external_id=external,
+            group_name=group or filename,
+            topic="upload",
+            raw_text=text,
+            scrubbed_text=cleaned.text,
+            origin="upload",
+            pii_report={
+                "replacements": len(cleaned.replacements),
+                "uncertain": cleaned.uncertain,
+                "quarantined": cleaned.quarantined,
+            },
+        )
+        db.add(row)
+        await db.flush()
+        await _store_files(db, org_id, row, files)
+        added += 1
+    return {"added": added}
+
+
+async def grade_assignment_batch(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assessment_id: uuid.UUID
+) -> dict[str, Any]:
+    await _owned(db, Assessment, org_id, assessment_id, user_id)
+    from app.worker.tasks.profassist_tasks import grade_batch_flow
+
+    return await grade_batch_flow(str(org_id), str(assessment_id), str(user_id))
 
 
 async def approve_assessment(
@@ -617,6 +811,110 @@ async def push_record(
         )
     )
     return receipt
+
+
+def _remote_text(submission: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    from app.profassist.storage import extract_text
+
+    parts = [submission.get("text") or ""]
+    files = []
+    for item in submission.get("files") or []:
+        data = item.get("data") or b""
+        filename = item.get("filename") or "attachment"
+        extracted = extract_text(filename, data) if data else ""
+        if extracted.strip() and extracted.strip() not in parts[0]:
+            parts.append(f"Attachment {filename}\n{extracted}")
+        files.append({**item, "extracted_text": extracted})
+    return "\n\n".join(part for part in parts if part.strip()), files
+
+
+async def _fill_missing_files(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    row: Submission,
+    submission: dict[str, Any],
+    names: list[str],
+) -> None:
+    """A later sync can add attachments that were not there the first time."""
+    found = await db.execute(select(SubmissionFile).where(SubmissionFile.submission_id == row.id))
+    if found.scalars().first() is not None:
+        return
+    text, files = _remote_text(submission)
+    if not files:
+        return
+    cleaned = scrub(text, names)
+    row.raw_text = text
+    row.scrubbed_text = cleaned.text
+    if submission.get("peer_reviews"):
+        row.peer_reviews = submission["peer_reviews"]
+    await _store_files(db, org_id, row, files)
+
+
+async def _store_files(
+    db: AsyncSession, org_id: uuid.UUID, row: Submission, files: list[dict[str, Any]]
+) -> None:
+    for item in files:
+        data = item.get("data") or b""
+        key = ""
+        if data:
+            key = save_bytes(
+                f"{org_id}/submissions/{row.id}/{item.get('filename') or 'file'}",
+                data,
+                item.get("content_type") or "application/octet-stream",
+            )
+        db.add(
+            SubmissionFile(
+                organization_id=org_id,
+                submission_id=row.id,
+                filename=item.get("filename") or "attachment",
+                media_type=item.get("content_type") or "",
+                storage_key=key,
+                extracted_text=item.get("extracted_text") or "",
+            )
+        )
+
+
+async def _apply_imported_criteria(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    assessment: Assessment,
+    criteria: list[dict[str, Any]],
+    source: str,
+) -> None:
+    from app.profassist.rubric_build import alignment
+
+    existing = await db.execute(
+        select(RubricCriterion).where(RubricCriterion.assessment_id == assessment.id)
+    )
+    current = [
+        {"name": item.name, "weight": item.weight, "levels": item.levels}
+        for item in existing.scalars().all()
+    ]
+    if current:
+        history = list(assessment.history or [])
+        history.append({"version": assessment.version, "source": source, "criteria": current})
+        assessment.history = history[-12:]
+        assessment.version += 1
+    await db.execute(
+        delete(RubricCriterion).where(
+            RubricCriterion.organization_id == org_id,
+            RubricCriterion.assessment_id == assessment.id,
+        )
+    )
+    for ordinal, criterion in enumerate(criteria, start=1):
+        db.add(
+            RubricCriterion(
+                organization_id=org_id,
+                assessment_id=assessment.id,
+                ordinal=ordinal,
+                name=criterion.get("name") or f"Criterion {ordinal}",
+                weight=int(criterion.get("weight") or 1),
+                levels=criterion.get("levels") or {},
+            )
+        )
+    assessment.alignment = alignment(criteria, [str(item) for item in (assessment.clos or [])])
+    assessment.status = "draft"
+    await db.flush()
 
 
 async def sync_moodle(
@@ -689,13 +987,12 @@ async def sync_moodle(
                         Submission.external_id == str(submission["id"]),
                     )
                 )
-                if found_sub.scalar_one_or_none() is not None:
+                existing_sub = found_sub.scalar_one_or_none()
+                if existing_sub is not None:
+                    await _fill_missing_files(db, org_id, existing_sub, submission, names)
                     continue
-                cleaned = scrub(submission["text"], names)
-                if cleaned.quarantined:
-                    # Still store it, but the model only ever sees scrubbed_text,
-                    # and a quarantined submission cannot be graded.
-                    pass
+                text, files = _remote_text(submission)
+                cleaned = scrub(text, names)
                 row = Submission(
                     organization_id=org_id,
                     course_id=course.id,
@@ -703,8 +1000,11 @@ async def sync_moodle(
                     external_id=str(submission["id"]),
                     group_name=submission["group_name"],
                     topic=submission.get("topic") or "",
-                    raw_text=submission["text"],
+                    raw_text=text,
                     scrubbed_text=cleaned.text,
+                    peer_reviews=submission.get("peer_reviews") or [],
+                    origin="moodle",
+                    author_external_id=str(submission.get("author_id") or ""),
                     pii_report={
                         "replacements": len(cleaned.replacements),
                         "uncertain": cleaned.uncertain,
@@ -713,9 +1013,74 @@ async def sync_moodle(
                 )
                 db.add(row)
                 await db.flush()
+                await _store_files(db, org_id, row, files)
                 await _remember_pii(db, org_id, cleaned.replacements, f"submission:{row.id}")
                 created["submissions"] += 1
-    return {"moodle_mode": connector.mode, **created}
+            if assignment.get("rubric") and assessment.status != "approved":
+                await _apply_imported_criteria(
+                    db, org_id, assessment, assignment["rubric"], "moodle"
+                )
+        for workshop in connector.list_workshops(str(remote["id"])):
+            found = await db.execute(
+                select(Assessment).where(
+                    Assessment.organization_id == org_id,
+                    Assessment.external_id == str(workshop["id"]),
+                )
+            )
+            assessment = found.scalar_one_or_none()
+            if assessment is None:
+                assessment = Assessment(
+                    organization_id=org_id,
+                    course_id=course.id,
+                    owner_user_id=user_id,
+                    title=workshop["name"],
+                    brief="",
+                    clos=course.clos or CLOS,
+                    status="draft",
+                    external_id=str(workshop["id"]),
+                    kind="workshop",
+                )
+                db.add(assessment)
+                await db.flush()
+            for submission in connector.list_workshop_submissions(str(workshop["id"])):
+                found_sub = await db.execute(
+                    select(Submission).where(
+                        Submission.organization_id == org_id,
+                        Submission.external_id == str(submission["id"]),
+                    )
+                )
+                if found_sub.scalar_one_or_none() is not None:
+                    continue
+                text, files = _remote_text(submission)
+                cleaned = scrub(text, names)
+                row = Submission(
+                    organization_id=org_id,
+                    course_id=course.id,
+                    assessment_id=assessment.id,
+                    external_id=str(submission["id"]),
+                    group_name=submission["group_name"],
+                    topic=submission.get("topic") or "",
+                    raw_text=text,
+                    scrubbed_text=cleaned.text,
+                    peer_reviews=submission.get("peer_reviews") or [],
+                    origin="moodle",
+                    author_external_id=str(submission.get("author_id") or ""),
+                    pii_report={
+                        "replacements": len(cleaned.replacements),
+                        "uncertain": cleaned.uncertain,
+                        "quarantined": cleaned.quarantined,
+                    },
+                )
+                db.add(row)
+                await db.flush()
+                await _store_files(db, org_id, row, files)
+                created["submissions"] += 1
+        course.last_sync_at = datetime.now(UTC)
+        course.last_sync_status = (
+            f"Synced from {connector.mode} Moodle. "
+            f"{created['submissions']} new submissions, {created['students']} new students."
+        )
+    return {"moodle_mode": connector.mode, **created, "last_sync_status": course.last_sync_status}
 
 
 async def grade_queue(
@@ -745,6 +1110,20 @@ async def grade_queue(
                 "id": str(submission.id),
                 "group_name": submission.group_name,
                 "topic": submission.topic,
+                "assessment_id": str(submission.assessment_id),
+                "origin": submission.origin,
+                "files": len(
+                    (
+                        await db.execute(
+                            select(SubmissionFile).where(
+                                SubmissionFile.submission_id == submission.id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                ),
+                "peer_reviews": len(submission.peer_reviews or []),
                 "quarantined": bool((submission.pii_report or {}).get("quarantined")),
                 "draft_id": str(draft.id) if draft else None,
                 "draft_status": draft.status if draft else None,
@@ -752,7 +1131,13 @@ async def grade_queue(
                 "trace_url": (draft.trace_url or "") if draft else "",
             }
         )
-    return {"course": _course_dict(course), "assessment": assessment, "submissions": rows}
+    assessments = await list_assessments(db, org_id, course.id, user_id)
+    return {
+        "course": _course_dict(course),
+        "assessment": assessment,
+        "assessments": assessments,
+        "submissions": rows,
+    }
 
 
 async def get_submission(db: AsyncSession, org_id: uuid.UUID, submission_id: uuid.UUID) -> dict:
@@ -764,6 +1149,16 @@ async def get_submission(db: AsyncSession, org_id: uuid.UUID, submission_id: uui
         "raw_text": row.raw_text,
         "model_view": row.scrubbed_text,
         "pii_report": row.pii_report,
+        "peer_reviews": row.peer_reviews or [],
+        "origin": row.origin,
+        "files": [
+            {"filename": item.filename, "extracted_text": item.extracted_text[:500]}
+            for item in (
+                await db.execute(
+                    select(SubmissionFile).where(SubmissionFile.submission_id == row.id)
+                )
+            ).scalars()
+        ],
         "note": "The model only receives the model view. Names and IDs stay in your workspace.",
     }
 
@@ -777,11 +1172,17 @@ async def run_grade(
             422,
             "This submission is quarantined because personal data could not be removed confidently.",
         )
-    course = await _course(db, org_id, submission.course_id)
+    await _course(db, org_id, submission.course_id)
     await load_runtime(db, org_id, user_id)
-    assessment = await _primary_assessment(db, org_id, course, user_id)
+    assessment = await db.get(Assessment, submission.assessment_id)
+    if assessment is None or assessment.organization_id != org_id:
+        raise ProfassistError(404, "This submission has no assignment in this workspace.")
+    if assessment.owner_user_id and assessment.owner_user_id != user_id:
+        raise ProfassistError(404, "This assignment belongs to another professor.")
     if assessment.status != "approved":
-        raise ProfassistError(400, "Approve the rubric before grading. The council will wait.")
+        raise ProfassistError(
+            400, f"Approve the rubric on {assessment.title} before grading. The council will wait."
+        )
     criteria_result = await db.execute(
         select(RubricCriterion)
         .where(RubricCriterion.assessment_id == assessment.id)
@@ -807,11 +1208,24 @@ async def run_grade(
     results = []
     feedback_parts = []
     for criterion in criteria:
+        peer_view = []
+        for review in submission.peer_reviews or []:
+            cleaned = scrub(str(review.get("text") or ""))
+            if cleaned.quarantined:
+                continue
+            peer_view.append(
+                {
+                    "reviewer": review.get("reviewer") or "peer",
+                    "text": cleaned.text,
+                    "scores": review.get("scores") or {},
+                }
+            )
         outcome = agents.run_grading_council(
             submission.scrubbed_text,
             {"name": criterion.name, "levels": criterion.levels},
             soul,
             title=assessment.title,
+            peer_reviews=peer_view,
         )
         judge = outcome["judge"]
         calibrator = stubs.grade_calibrator(
@@ -986,6 +1400,13 @@ async def push_draft(
             "group": submission.group_name,
             "feedback": draft.overall_feedback,
             "levels": draft.professor_levels or {"council": "see draft"},
+            "assignment_external_id": (
+                (await db.get(Assessment, submission.assessment_id)).external_id
+                if await db.get(Assessment, submission.assessment_id)
+                else ""
+            ),
+            "author_external_id": submission.author_external_id,
+            "grade": _grade_number(draft.professor_levels or {}),
         },
     )
     draft.status = "pushed"
@@ -1362,8 +1783,20 @@ def calibrator_page() -> dict[str, Any]:
     return stubs.grade_calibrator()
 
 
+def _grade_number(levels: dict[str, str]) -> float:
+    scale = {"beginning": 50, "developing": 65, "proficient": 80, "advanced": 95}
+    scores = [scale[value] for value in levels.values() if value in scale]
+    if not scores:
+        return 0
+    return round(sum(scores) / len(scores), 1)
+
+
 async def build_cited_deck(
-    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    week: int = 0,
 ) -> dict[str, Any]:
     """Slide-studio skill: multi-hop retrieval, citations, gaps, then pptx."""
     from app.profassist.skills.slide_studio import run_slide_studio
@@ -1377,6 +1810,25 @@ async def build_cited_deck(
     ]
     if not objectives:
         raise ProfassistError(400, "Approve an objective before building a cited deck.")
+    title = f"{course.code} cited deck"
+    if week:
+        from app.profassist.design import get_design
+
+        design = await get_design(db, org_id, course.id, user_id)
+        match = next(
+            (item for item in design.get("weeks") or [] if int(item.get("week") or 0) == week),
+            None,
+        )
+        if match:
+            codes = set(match.get("clos") or [])
+            wanted = [
+                item.get("text")
+                for item in design.get("clos") or []
+                if item.get("code") in codes and item.get("text")
+            ]
+            if wanted:
+                objectives = wanted
+            title = f"Week {week}: {match.get('topic') or course.code}"[:255]
     materials = {
         row.id: row.filename
         for row in (
@@ -1403,14 +1855,13 @@ async def build_cited_deck(
         raise ProfassistError(400, "Upload a course note before building a cited deck.")
     profile = await _style_row(db, org_id, user_id, create=False)
     template = read_bytes(profile.template_key) if profile and profile.template_key else None
-    built = run_slide_studio(
-        objectives, chunks, template=template, title=f"{course.code} cited deck"
-    )
+    built = run_slide_studio(objectives, chunks, template=template, title=title)
     deck = SlideDeck(
         organization_id=org_id,
         course_id=course.id,
         owner_user_id=user_id,
-        title=f"{course.code} cited deck",
+        title=title,
+        week=week,
         slides=built["slides"],
         status="draft",
     )

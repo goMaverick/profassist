@@ -2,12 +2,13 @@
 
 import uuid
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAppAdmin, CurrentUser, DBSession
 from app.profassist.deps import ProfOrg
+from app.profassist.design import approve_design, draft_design, get_design, save_design
 from app.profassist.memory import delete_memory, list_memories
 from app.profassist.moodle import get_connector
 from app.profassist.service import (
@@ -19,6 +20,8 @@ from app.profassist.service import (
     approve_reflection,
     build_cited_deck,
     calibrator_page,
+    check_rubric,
+    create_rubric,
     deck_bytes,
     draft_assessment,
     draft_objectives,
@@ -28,8 +31,11 @@ from app.profassist.service import (
     get_draft,
     get_style,
     get_submission,
+    grade_assignment_batch,
     grade_queue,
     home,
+    import_rubric,
+    list_assessments,
     list_courses,
     list_decks,
     list_flags,
@@ -44,11 +50,13 @@ from app.profassist.service import (
     run_grade,
     run_reflection,
     save_about,
+    save_rubric,
     save_style,
     save_template,
     scan_integrity,
     set_flag,
     sync_moodle,
+    upload_submission_zip,
 )
 from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
 from app.profassist.tracking import list_registered_models
@@ -75,6 +83,30 @@ class FlagBody(BaseModel):
 
 class LaunchBody(BaseModel):
     claims: dict = Field(default_factory=dict)
+
+
+class DesignChatBody(BaseModel):
+    message: str = ""
+
+
+class DesignSaveBody(BaseModel):
+    reply: str = ""
+    weeks: list = Field(default_factory=list)
+    clos: list = Field(default_factory=list)
+    plan: list = Field(default_factory=list)
+
+
+class RubricCreateBody(BaseModel):
+    title: str = "Untitled rubric"
+
+
+class RubricSaveBody(BaseModel):
+    brief: str = ""
+    criteria: list = Field(default_factory=list)
+
+
+class RubricPasteBody(BaseModel):
+    pasted: str = ""
 
 
 @router.get("/home")
@@ -174,6 +206,94 @@ async def assessment_draft(
 @router.get("/courses/{course_id}/assessment")
 async def assessment(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return {"assessment": await get_assessment(db, org.id, course_id, user.id)}
+
+
+@router.get("/courses/{course_id}/design")
+async def design_view(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return await get_design(db, org.id, course_id, user.id)
+
+
+@router.post("/courses/{course_id}/design/draft")
+async def design_draft(
+    course_id: uuid.UUID, body: DesignChatBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await draft_design(db, org.id, course_id, user.id, body.message)
+
+
+@router.put("/courses/{course_id}/design")
+async def design_save(
+    course_id: uuid.UUID, body: DesignSaveBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_design(db, org.id, course_id, user.id, body.model_dump())
+
+
+@router.post("/courses/{course_id}/design/approve")
+async def design_approve(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await approve_design(db, org.id, course_id, user.id)
+
+
+@router.get("/courses/{course_id}/assessments")
+async def assessments(course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return {"items": await list_assessments(db, org.id, course_id, user.id)}
+
+
+@router.post("/courses/{course_id}/rubrics")
+async def rubric_create(
+    course_id: uuid.UUID, body: RubricCreateBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await create_rubric(db, org.id, course_id, user.id, body.title)
+
+
+@router.put("/assessments/{assessment_id}/rubric")
+async def rubric_save(
+    assessment_id: uuid.UUID, body: RubricSaveBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_rubric(db, org.id, user.id, assessment_id, body.criteria, body.brief)
+
+
+@router.post("/assessments/{assessment_id}/import")
+async def rubric_import(
+    assessment_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    file: UploadFile | None = File(default=None),
+    pasted: str = Form(default=""),
+) -> dict:
+    data = await file.read() if file is not None else b""
+    return await import_rubric(
+        db, org.id, user.id, assessment_id, file.filename if file else "", data, pasted
+    )
+
+
+@router.post("/assessments/{assessment_id}/check")
+async def rubric_check(
+    assessment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await check_rubric(db, org.id, user.id, assessment_id)
+
+
+@router.post("/courses/{course_id}/submissions/upload")
+async def submission_upload(
+    course_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    assessment_id: uuid.UUID = Form(...),
+    file: UploadFile = File(...),
+) -> dict:
+    return await upload_submission_zip(
+        db, org.id, course_id, user.id, assessment_id, await file.read()
+    )
+
+
+@router.post("/assessments/{assessment_id}/grade-batch")
+async def grade_batch(
+    assessment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await grade_assignment_batch(db, org.id, user.id, assessment_id)
 
 
 @router.post("/assessments/{assessment_id}/approve")
@@ -334,9 +454,13 @@ async def calibrator(user: CurrentUser, org: ProfOrg) -> dict:
 
 @router.post("/courses/{course_id}/slides/studio")
 async def slides_studio(
-    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+    course_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    week: int = Query(default=0),
 ) -> dict:
-    return await build_cited_deck(db, org.id, course_id, user.id)
+    return await build_cited_deck(db, org.id, course_id, user.id, week)
 
 
 @router.get("/memories")
