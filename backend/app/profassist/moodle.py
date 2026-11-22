@@ -45,7 +45,7 @@ SUBMISSIONS = [
     {
         "id": "sub-b",
         "assignment_id": "asg-901",
-        "group_name": "Group B18",
+        "group_name": "Group B",
         "topic": "campus energy dashboard",
         "text": (
             "Student: Omar Haddad\n"
@@ -196,7 +196,7 @@ WORKSHOP_SUBMISSIONS = [
         ),
         "peer_reviews": [
             {
-                "reviewer": "Group B18",
+                "reviewer": "Group B",
                 "text": "The brief names the audience. The outcome is only partly shown.",
                 "scores": {"CLO 1": "developing"},
             },

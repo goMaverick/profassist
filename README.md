@@ -38,7 +38,7 @@ The database is seeded on startup: the professor, the university workspace, a le
 2. **Design**. Ask for a draft. Edit the weeks, outcomes, and assessment plan, then approve it.
 3. **Rubric**. Open Group report 1, edit a level, check alignment, and approve the rubric. You can also start a blank rubric or import one.
 4. **Slides**. Choose a week and build that week's deck. Thumbnails and sources are on the review screen.
-5. **Grade**. Sync from Moodle. Open Group A and read the extracted attachments. Run the council, approve, then push. Fake mode records the grade and does not contact Moodle. The workshop row shows peer reviews, which the council can see and which do not set the level. Group B18 is a blind sample.
+5. **Grade**. Sync from Moodle. Open Group A and read the extracted attachments. Run the council, approve, then push. Fake mode records the grade and does not contact Moodle. The workshop row shows peer reviews, which the council can see and which do not set the level. Group B is a blind sample.
 4. **Integrity**. Scan. The shared method is shown side by side with viva questions. Confirm or dismiss it. A flag is evidence, not a verdict.
 5. **Students** and **Quality**. Both say the model is not trained yet. The roster is real demo data. The risk column is empty on purpose.
 6. **My style**. That is `soul.md`, plus **About me**. About me is rebuilt for the signed-in professor after she approves or edits. Save it, edit it, or reset it. A reflection can propose a style change. It is not applied until she approves it, and it never rewrites the shared prompts.

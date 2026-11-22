@@ -102,7 +102,7 @@ def page_visuals(page: str, *, live: dict[str, Any] | None = None) -> dict[str, 
     ]
     verdicts = [
         {"group": "Group A", "level": "Proficient"},
-        {"group": "Group B18", "level": "Developing"},
+        {"group": "Group B", "level": "Developing"},
         {"group": "Group C", "level": "Proficient"},
     ]
     agents = [

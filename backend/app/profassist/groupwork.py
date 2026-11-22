@@ -553,8 +553,21 @@ async def assess_summary(
         .all()
     )
     approved = sum(1 for row in drafts if row.status == "approved")
+    names = (
+        (
+            await db.execute(
+                select(Submission.group_name).where(
+                    Submission.organization_id == org_id,
+                    Submission.course_id == course_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    distinct = {"Group B" if name == "Group B18" else name for name in names if name}
     return {
-        "groups": int(groups or 0),
+        "groups": max(int(groups or 0), len(distinct)),
         "submissions": int(submissions or 0),
         "flags": int(flags or 0),
         "approved": approved,

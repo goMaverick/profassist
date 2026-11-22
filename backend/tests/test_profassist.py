@@ -116,6 +116,7 @@ def test_push_requires_approval() -> None:
 
 
 def test_group_b_is_the_blind_sample() -> None:
+    assert is_blind_sample("Group B") is True
     assert is_blind_sample("Group B18") is True
     assert is_blind_sample("Group A") is False
 
