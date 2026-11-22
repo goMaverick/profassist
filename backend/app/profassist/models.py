@@ -139,6 +139,9 @@ class StyleProfile(Base, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = _org()
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     soul_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    about_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    about_history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    template_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
 
 class Student(Base, TimestampMixin):

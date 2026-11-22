@@ -6,10 +6,19 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.profassist.models import AgentToolSetting, AiSettings, PromptAudit, PromptVersion
+from app.profassist.lessons import condense_about
+from app.profassist.memory import list_memories
+from app.profassist.models import (
+    AgentToolSetting,
+    AiSettings,
+    Course,
+    PromptAudit,
+    PromptVersion,
+    StyleProfile,
+)
 from app.profassist.providers import AGENTS
 from app.profassist.providers import catalog as provider_catalog
-from app.profassist.runtime import DEFAULT_PROMPTS, DEFAULT_TOOLS, bind_runtime, catalog
+from app.profassist.runtime import DEFAULT_PROMPTS, DEFAULT_TOOLS, bind_runtime, catalog, set_about
 
 
 async def _settings(db: AsyncSession, org_id: uuid.UUID) -> AiSettings:
@@ -53,6 +62,32 @@ async def load_runtime(
                 "max_rounds": settings.debate_max_rounds,
             },
         },
+    )
+    await _prime_about(db, org_id, user_id)
+
+
+async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
+    """Per professor, per university. Never the global prompt."""
+    if user_id is None:
+        set_about("")
+        return
+    profile = (
+        await db.execute(
+            select(StyleProfile).where(
+                StyleProfile.organization_id == org_id, StyleProfile.user_id == user_id
+            )
+        )
+    ).scalar_one_or_none()
+    courses = [
+        row.code
+        for row in (
+            await db.execute(select(Course).where(Course.organization_id == org_id))
+        ).scalars()
+    ]
+    memories = await list_memories(db, org_id, user_id)
+    saved = profile.about_md if profile else ""
+    set_about(
+        saved.strip() or condense_about(profile.soul_md if profile else "", memories, courses)
     )
 
 

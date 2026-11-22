@@ -6,12 +6,14 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.user import User
 from app.profassist import agents, stubs
 from app.profassist.errors import ProfassistError
 from app.profassist.grading import assert_can_push, is_blind_sample, redact_blind
+from app.profassist.lessons import condense_about, extract_lessons, same_lesson
 from app.profassist.llm import complete as llm_complete
 from app.profassist.llm import mode as llm_mode
-from app.profassist.memory import recall, remember
+from app.profassist.memory import list_memories, recall, remember
 from app.profassist.models import (
     Approval,
     Assessment,
@@ -33,9 +35,10 @@ from app.profassist.models import (
 from app.profassist.moodle import CLOS, get_connector
 from app.profassist.pii import scrub
 from app.profassist.rag import chunk_text, index_chunks, rank_chunks
+from app.profassist.runtime import set_about
 from app.profassist.settings_admin import load_runtime
 from app.profassist.similarity import compare_submissions
-from app.profassist.slides import build_pptx
+from app.profassist.slides import build_pptx, deck_plan, render_thumbnails
 from app.profassist.storage import extract_text, read_bytes, save_bytes
 
 DEFAULT_SOUL = """# My style
@@ -344,6 +347,9 @@ async def approve_objective(
             note="",
         )
     )
+    await reflect_on_change(
+        db, org_id, user_id, "objective", row.text, row.text, "objective-approve"
+    )
     return _objective_dict(row)
 
 
@@ -396,11 +402,13 @@ async def draft_slides(
 
 
 def _deck_dict(row: SlideDeck) -> dict[str, Any]:
+    plan = deck_plan(row.title, row.slides or [])
     return {
         "id": str(row.id),
         "title": row.title,
         "status": row.status,
         "slides": row.slides,
+        "previews": render_thumbnails(plan[:8]),
     }
 
 
@@ -433,6 +441,8 @@ async def approve_deck(
             note="",
         )
     )
+    titles = " ".join(str(slide.get("title", "")) for slide in (row.slides or []))
+    await reflect_on_change(db, org_id, user_id, "slides", titles, titles, "deck-approve")
     return _deck_dict(row)
 
 
@@ -576,6 +586,9 @@ async def approve_assessment(
             action="approved",
             note="",
         )
+    )
+    await reflect_on_change(
+        db, org_id, user_id, "rubric", row.brief or "", row.brief or "", "rubric-approve"
     )
     return await _assessment_dict(db, row)
 
@@ -911,9 +924,13 @@ async def edit_draft(
     draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     if draft.status != "draft":
         raise ProfassistError(409, "Approved drafts stay as you approved them.")
+    before = _grade_view(draft.overall_feedback, draft.professor_levels)
     draft.overall_feedback = feedback
     draft.professor_levels = levels
     submission = await _owned(db, Submission, org_id, draft.submission_id)
+    await reflect_on_change(
+        db, org_id, user_id, "grade", before, _grade_view(feedback, levels), "grade-edit"
+    )
     return _draft_dict(draft, submission)
 
 
@@ -939,7 +956,17 @@ async def approve_draft(
             note="",
         )
     )
+    ai_text = "\n".join(str(item.get("feedback", "")) for item in (draft.results or []))
     submission = await _owned(db, Submission, org_id, draft.submission_id)
+    await reflect_on_change(
+        db,
+        org_id,
+        user_id,
+        "grade",
+        ai_text,
+        _grade_view(draft.overall_feedback, draft.professor_levels),
+        "grade-approve",
+    )
     return _draft_dict(draft, submission)
 
 
@@ -1085,26 +1112,180 @@ async def list_students(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUI
     return {"students": students, "early_warning": stubs.at_risk_snapshot(students)}
 
 
-async def get_style(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, str]:
-    return {"soul_md": await _soul(db, org_id, user_id)}
+def _grade_view(feedback: str, levels: dict | None) -> str:
+    parts = [feedback or ""]
+    for name, level in sorted((levels or {}).items()):
+        parts.append(f"{name}: {level}")
+    return "\n".join(parts)
 
 
-async def save_style(
-    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, soul_md: str
-) -> dict[str, str]:
+async def _style_row(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, create: bool
+) -> StyleProfile | None:
     result = await db.execute(
         select(StyleProfile).where(
             StyleProfile.organization_id == org_id, StyleProfile.user_id == user_id
         )
     )
     row = result.scalar_one_or_none()
-    if row is None:
-        row = StyleProfile(organization_id=org_id, user_id=user_id, soul_md=soul_md)
+    if row is None and create:
+        row = StyleProfile(organization_id=org_id, user_id=user_id, soul_md=DEFAULT_SOUL)
         db.add(row)
-    else:
-        row.soul_md = soul_md
-    await remember(db, org_id, user_id, soul_md[:500], kind="style", source="soul.md")
-    return {"soul_md": soul_md}
+        await db.flush()
+    return row
+
+
+async def _course_codes(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
+    result = await db.execute(select(Course).where(Course.organization_id == org_id))
+    return [row.code for row in result.scalars().all()]
+
+
+async def refresh_about(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, source: str
+) -> str:
+    """Rewrite the portrait from what we know. Older text stays in history."""
+    profile = await _style_row(db, org_id, user_id, create=True)
+    assert profile is not None
+    memories = await list_memories(db, org_id, user_id)
+    drafted = condense_about(profile.soul_md or "", memories, await _course_codes(db, org_id))
+    cleaned = scrub(drafted)
+    text = "" if cleaned.quarantined else cleaned.text.strip()
+    if text == (profile.about_md or "").strip():
+        set_about(text)
+        return text
+    history = list(profile.about_history or [])
+    if (profile.about_md or "").strip():
+        history.append({"version": len(history) + 1, "text": profile.about_md, "source": source})
+    profile.about_history = history[-20:]
+    profile.about_md = text
+    set_about(text)
+    await db.flush()
+    return text
+
+
+async def reflect_on_change(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    kind: str,
+    before: str,
+    after: str,
+    source: str,
+) -> None:
+    """Compare her final version with the draft, then update her private memory."""
+    for lesson in extract_lessons(kind, before, after):
+        await remember(
+            db,
+            org_id,
+            user_id,
+            lesson["text"],
+            kind=lesson["kind"],
+            source=source,
+        )
+    await refresh_about(db, org_id, user_id, source)
+    lessons = extract_lessons(kind, before, after)
+    if not lessons:
+        return
+    seed = "Lessons from her latest edit:\n" + "\n".join(item["text"] for item in lessons)
+    proposal = agents.run_reflection(seed)
+    open_rows = (
+        await db.execute(
+            select(Reflection).where(
+                Reflection.organization_id == org_id,
+                Reflection.owner_user_id == user_id,
+                Reflection.status == "proposed",
+            )
+        )
+    ).scalars()
+    for existing in open_rows:
+        if same_lesson(existing.proposal, proposal) or any(
+            lesson["text"][:80] in existing.proposal for lesson in lessons
+        ):
+            return
+    db.add(
+        Reflection(
+            organization_id=org_id,
+            owner_user_id=user_id,
+            proposal=proposal,
+            status="proposed",
+        )
+    )
+    await db.flush()
+
+
+async def get_style(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
+    profile = await _style_row(db, org_id, user_id, create=False)
+    owner = await db.get(User, user_id)
+    soul = profile.soul_md if profile and profile.soul_md else DEFAULT_SOUL
+    about = profile.about_md if profile and profile.about_md else ""
+    if not about:
+        memories = await list_memories(db, org_id, user_id)
+        about = condense_about(soul, memories, await _course_codes(db, org_id))
+    return {
+        "soul_md": soul,
+        "about_md": about,
+        "about_history": list(profile.about_history or []) if profile else [],
+        "owner_name": owner.full_name if owner and owner.full_name else "",
+        "template_name": (profile.template_key if profile else "").rsplit("/", 1)[-1],
+    }
+
+
+async def save_style(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, soul_md: str
+) -> dict[str, Any]:
+    profile = await _style_row(db, org_id, user_id, create=True)
+    assert profile is not None
+    before = profile.soul_md or ""
+    profile.soul_md = soul_md
+    await db.flush()
+    await reflect_on_change(db, org_id, user_id, "style", before, soul_md, "soul.md")
+    return await get_style(db, org_id, user_id)
+
+
+async def save_about(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, about_md: str
+) -> dict[str, Any]:
+    profile = await _style_row(db, org_id, user_id, create=True)
+    assert profile is not None
+    cleaned = scrub(about_md or "")
+    if cleaned.quarantined:
+        raise ProfassistError(
+            400, "That note still looks like it names a person. Remove the name and save again."
+        )
+    if cleaned.text.strip() == (profile.about_md or "").strip():
+        return await get_style(db, org_id, user_id)
+    history = list(profile.about_history or [])
+    if (profile.about_md or "").strip():
+        history.append({"version": len(history) + 1, "text": profile.about_md, "source": "edit"})
+    profile.about_history = history[-20:]
+    profile.about_md = cleaned.text.strip()
+    set_about(profile.about_md)
+    await db.flush()
+    return await get_style(db, org_id, user_id)
+
+
+async def reset_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
+    await refresh_about(db, org_id, user_id, "reset")
+    return await get_style(db, org_id, user_id)
+
+
+async def save_template(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, filename: str, data: bytes
+) -> dict[str, Any]:
+    name = (filename or "master.pptx").rsplit("/", 1)[-1]
+    if not name.lower().endswith((".pptx", ".potx")):
+        raise ProfassistError(400, "Upload a .pptx or .potx file.")
+    if not data:
+        raise ProfassistError(400, "That file is empty.")
+    profile = await _style_row(db, org_id, user_id, create=True)
+    assert profile is not None
+    profile.template_key = save_bytes(
+        f"{org_id}/{user_id}/template/{name}",
+        data,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+    await db.flush()
+    return await get_style(db, org_id, user_id)
 
 
 async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
@@ -1173,6 +1354,7 @@ async def approve_reflection(
         )
     else:
         profile.soul_md = (profile.soul_md or "") + addition
+    await refresh_about(db, org_id, user_id, "reflection-approve")
     return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
 
 
@@ -1219,7 +1401,11 @@ async def build_cited_deck(
         )
     if not chunks:
         raise ProfassistError(400, "Upload a course note before building a cited deck.")
-    built = run_slide_studio(objectives, chunks)
+    profile = await _style_row(db, org_id, user_id, create=False)
+    template = read_bytes(profile.template_key) if profile and profile.template_key else None
+    built = run_slide_studio(
+        objectives, chunks, template=template, title=f"{course.code} cited deck"
+    )
     deck = SlideDeck(
         organization_id=org_id,
         course_id=course.id,

@@ -81,14 +81,21 @@ def invoke_graph(
     graph: Any, state: dict, *, name: str, metadata: dict[str, Any] | None = None
 ) -> tuple[Any, str | None]:
     """Run a graph and return (result, public trace url)."""
+    from app.profassist.runtime import labelled_about
+
+    about = labelled_about()
     meta = {**actor_metadata(), **(metadata or {})}
+    if about:
+        meta["about_this_professor"] = about
     client = _client()
     if client is None:
         return graph.invoke(state), None
     trace_id = None
     result = None
     try:
-        with client.start_as_current_span(name=name, metadata=meta, input={"run": name}):
+        with client.start_as_current_span(
+            name=name, metadata=meta, input={"run": name, "about_this_professor": about}
+        ):
             client.update_current_trace(
                 name=name, metadata=meta, tags=["profassist", str(meta.get("kind") or "agent")]
             )

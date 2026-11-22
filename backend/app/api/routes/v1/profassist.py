@@ -39,10 +39,13 @@ from app.profassist.service import (
     list_students,
     push_draft,
     push_record,
+    reset_about,
     reveal_draft,
     run_grade,
     run_reflection,
+    save_about,
     save_style,
+    save_template,
     scan_integrity,
     set_flag,
     sync_moodle,
@@ -55,6 +58,10 @@ router = APIRouter()
 
 class TextBody(BaseModel):
     soul_md: str = Field(min_length=1)
+
+
+class AboutBody(BaseModel):
+    about_md: str = ""
 
 
 class EditBody(BaseModel):
@@ -279,6 +286,28 @@ async def style(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
 @router.put("/style")
 async def style_save(body: TextBody, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return await save_style(db, org.id, user.id, body.soul_md)
+
+
+@router.put("/style/about")
+async def style_about(body: AboutBody, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return await save_about(db, org.id, user.id, body.about_md)
+
+
+@router.post("/style/about/reset")
+async def style_about_reset(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return await reset_about(db, org.id, user.id)
+
+
+@router.post("/style/template")
+async def style_template(
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    file: UploadFile = File(...),
+) -> dict:
+    return await save_template(
+        db, org.id, user.id, file.filename or "master.pptx", await file.read()
+    )
 
 
 @router.get("/reflections")

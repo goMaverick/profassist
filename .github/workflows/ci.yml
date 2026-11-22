@@ -26,7 +26,7 @@ jobs:
         run: uv run --directory backend ruff check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py
 
       - name: Format
-        run: uv run --directory backend ruff format --check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py alembic/versions/0028_profassist.py
+        run: uv run --directory backend ruff format --check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py alembic/versions/0028_profassist.py alembic/versions/0032_professor_about.py
 
       - name: Unit tests
         run: uv run --directory backend pytest tests/test_profassist.py -q

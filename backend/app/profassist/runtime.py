@@ -42,6 +42,7 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
     "chat": ["rag_search"],
 }
 
+_about: ContextVar[str | None] = ContextVar("pa_about", default=None)
 _prompts: ContextVar[dict[str, str] | None] = ContextVar("pa_prompts", default=None)
 _tools: ContextVar[dict[str, bool] | None] = ContextVar("pa_tools", default=None)
 _model: ContextVar[dict[str, Any] | None] = ContextVar("pa_model", default=None)
@@ -51,6 +52,30 @@ def bind_runtime(prompts: dict[str, str], tools: dict[str, bool], model: dict[st
     _prompts.set(prompts)
     _tools.set(tools)
     _model.set(model)
+
+
+def set_about(text: str) -> None:
+    _about.set(text or "")
+
+
+def about_section() -> str:
+    text = (_about.get() or "").strip()
+    if not text:
+        return ""
+    return "\n\n## About this professor\n" + text
+
+
+def labelled_about() -> str:
+    """The portrait, after the privacy gate. Empty when a name is still uncertain."""
+    from app.profassist.pii import scrub
+
+    raw = (_about.get() or "").strip()
+    if not raw:
+        return ""
+    cleaned = scrub(raw)
+    if cleaned.quarantined or not cleaned.text.strip():
+        return ""
+    return "\n\n## About this professor\n" + cleaned.text.strip()
 
 
 def prompt_for(agent: str) -> str:
