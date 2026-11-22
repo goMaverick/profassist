@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 import { CouncilStage } from "@/components/profassist/council-stage";
+import { AiLive } from "@/components/profassist/ai-live";
 
 function shortWhen(value?: string) {
   if (!value || value === "off") return "off";
@@ -188,6 +189,23 @@ export default function GradePage() {
           />
         </label>
       </div>
+      <AiLive
+        title="Council grade"
+        reasoning="Evidence quotes the submission. Strict keeps the level when a limitation is stated. Supportive agrees if the quote stays in the feedback. Confidence is moderate until you approve."
+        sources={[{ href: "/grade", title: "Submission text" }, { href: "/assignments", title: "Idea brief" }]}
+        tasks={["Match the work to its idea", "Score each rubric row", "Hold the mark for your edit"]}
+      >
+        <div className="pa-fields">
+          {[
+            ["Problem definition", "proficient", "0.72"],
+            ["Solution design", "proficient", "0.68"],
+            ["Ethical risk", "developing", "0.61"],
+          ].map(([name, level, confidence]) => (
+            <p key={name} style={{ margin: 0 }}>{name}: {level} · confidence {confidence}</p>
+          ))}
+        </div>
+        <p>Approve keeps this draft. Edit changes a level before anything is pushed.</p>
+      </AiLive>
       {!rubricReady && (
         <Banner>Approve a rubric on the assignment before the council can mark.</Banner>
       )}

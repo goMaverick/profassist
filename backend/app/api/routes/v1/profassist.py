@@ -17,6 +17,7 @@ from app.profassist.deps import ProfOrg
 from app.profassist.design import approve_design, draft_design, get_design, save_design
 from app.profassist.groupwork import (
     allocate,
+    assess_summary,
     assignment_view,
     create_from_task,
     draft_text,
@@ -828,7 +829,10 @@ class GroupsBody(BaseModel):
 async def assignments_list(
     course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    return {"items": await list_for_course(db, org.id, user.id, course_id)}
+    return {
+        "items": await list_for_course(db, org.id, user.id, course_id),
+        "summary": await assess_summary(db, org.id, user.id, course_id),
+    }
 
 
 @router.post("/assignments")

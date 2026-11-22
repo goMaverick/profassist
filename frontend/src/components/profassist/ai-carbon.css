@@ -7,7 +7,7 @@
   --color-card-foreground: #161616;
   --color-popover: #ffffff;
   --color-popover-foreground: #161616;
-  --color-primary: #0f62fe;
+  --color-primary: #8a3ffc;
   --color-primary-foreground: #ffffff;
   --color-secondary: #e0e0e0;
   --color-secondary-foreground: #161616;
@@ -19,7 +19,7 @@
   --color-destructive-foreground: #ffffff;
   --color-border: #e0e0e0;
   --color-input: #e0e0e0;
-  --color-ring: #0f62fe;
+  --color-ring: #8a3ffc;
   --radius: 0px;
   color: #161616;
   font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;

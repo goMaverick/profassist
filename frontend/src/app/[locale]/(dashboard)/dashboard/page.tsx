@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CheckmarkFilled, Flag, Incomplete, Send } from "@carbon/icons-react";
 import { pa } from "@/lib/profassist";
 import { HomeChat } from "@/components/profassist/home-chat";
+import { AiLive } from "@/components/profassist/ai-live";
 
 interface Home {
   courses: Array<{ id: string; code: string; title: string; term: string }>;
@@ -69,6 +70,27 @@ export default function HomePage() {
     <div className="pa-dash">
       {error && <p role="alert">{error}</p>}
       <HomeChat courses={home?.courses || []} courseId={course?.id} onCourse={setCourseId} />
+      <div className="pa-split">
+        <AiLive
+          title="AI activity"
+          reasoning="The drafter prepared a subject outline, flagged one similarity pair, and left four grade drafts for you. Nothing was pushed."
+          sources={[{ href: "/outline", title: "MAAI 903 outline" }, { href: "/integrity", title: "Similarity scan" }]}
+          tasks={["Drafted A2 from the outline", "Compared group submissions", "Held grades for approval"]}
+          suggestions={["Open the outline", "Review the grade queue"]}
+        >
+          <ul className="pa-list">
+            <li><span>Outline draft updated</span><Link href="/outline">Open</Link></li>
+            <li><span>Similarity pair waiting</span><Link href="/integrity?tab=similarity">Open</Link></li>
+            <li><span>{waiting} grade draft{waiting === 1 ? "" : "s"}</span><Link href="/grade">Review</Link></li>
+          </ul>
+        </AiLive>
+        <AiLive
+          title="AI insights"
+          reasoning="Week 7 carries a summative task. Two program outcomes are thinly mapped. A student would look for the integrity policy next to the assessments."
+          sources={[{ href: "/outline", title: "Instructions to AI" }]}
+          tasks={["Checked the weight total", "Read the uploaded lecture note"]}
+        />
+      </div>
       <div className="pa-kpi-row">
         <Stat icon={<Incomplete size={16} />} label="Submissions" value={home?.submissions || 0} delta="in the queue" />
         <Stat icon={<CheckmarkFilled size={16} />} label="Awaiting you" value={waiting} delta="drafts not approved" />

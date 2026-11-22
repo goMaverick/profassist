@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Tag } from "@carbon/react";
 import { Banner, pa, useWorkspace } from "@/components/profassist/bits";
+import { AiLive } from "@/components/profassist/ai-live";
 
 interface Warning {
   status: string;
@@ -49,6 +51,14 @@ export default function StudentsPage() {
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       {!data && !error && <p>Loading the roster…</p>}
       {data && data.students.length === 0 && <p>No students are on this course yet. Sync from Moodle to pull the roster.</p>}
+      <AiLive
+        title="Dropout risk"
+        reasoning="The logistic model scores a day-35 withdrawal risk from synthetic Moodle-shaped activity. The top factors are the largest coefficient contributions. This does not message a student or change a mark."
+        sources={[{ href: "/students", title: "Synthetic activity rows" }]}
+        tasks={["Score the roster", "Name the top three factors", "Keep automatic actions off"]}
+      >
+        <Tag type="purple">Trained on synthetic data, demo only</Tag>
+      </AiLive>
       {warning && (
         <Banner>
           {warning.trained ? warning.message : `Model not trained. ${warning.message}`}
@@ -69,6 +79,7 @@ export default function StudentsPage() {
             <th className="py-2 font-medium">Score</th>
             <th className="py-2 font-medium">Band</th>
             <th className="py-2 font-medium">Factors</th>
+            <th className="py-2 font-medium">Trend</th>
           </tr>
         </thead>
         <tbody>
@@ -80,7 +91,14 @@ export default function StudentsPage() {
                 <td className="py-3">{student.student_number}</td>
                 <td className="py-3">{row?.score ?? "—"}</td>
                 <td className="py-3">{row?.band ?? "not trained"}</td>
-                <td className="text-foreground/60 py-3">{row?.factors?.join(", ") || row?.note}</td>
+                <td className="text-foreground/60 py-3">{row?.factors?.slice(0, 3).join(", ") || row?.note}</td>
+                <td className="py-3">
+                  <span style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 28 }}>
+                    {[0.35, 0.5, 0.45, Math.min(1, Number(row?.score ?? 0.2))].map((value, bar) => (
+                      <span key={bar} style={{ width: 6, height: `${Math.max(4, value * 28)}px`, background: "#8a3ffc" }} />
+                    ))}
+                  </span>
+                </td>
               </tr>
             );
           })}

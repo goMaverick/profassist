@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   Button,
   FileUploaderDropContainer,
-  FileUploaderItem,
   ProgressBar,
   Tag,
   TextArea,
@@ -15,6 +14,7 @@ import {
   DocumentPdf,
   DocumentWordProcessor,
   PresentationFile,
+  TrashCan,
 } from "@carbon/icons-react";
 
 export interface CourseFile {
@@ -117,34 +117,26 @@ export function CourseFiles({
       </div>
       <ul className="pa-file-list">
         {shown.map((file) => (
-          <li key={file.id || file.filename}>
-            <span className="pa-file-icon" aria-hidden>
-              <FileIcon name={file.filename} />
-            </span>
-            <div className="pa-file-main">
-              <FileUploaderItem
-                name={`${file.filename}${file.size ? ` · ${formatSize(file.size)}` : ""}`}
-                status={file.phase === "uploading" ? "uploading" : "complete"}
-                invalid={file.phase === "error"}
-                errorSubject="Could not add this file"
-                errorBody={file.error}
-                iconDescription={file.phase === "error" ? "Error" : file.phase === "uploading" ? "Uploading" : "Ready"}
-                onDelete={() => {
-                  setLocal((current) => current.filter((item) => item.id !== file.id));
-                  if (file.id && file.phase !== "uploading" && file.phase !== "error") void onRemove(file);
-                }}
-              />
-              {file.phase === "uploading" && (
-                <ProgressBar label="Uploading" value={file.progress || 35} size="small" />
-              )}
-              <div className="pa-file-tags">
-                {file.phase !== "uploading" && file.phase !== "error" && file.status !== "error" && (
-                  <Tag type="green" size="sm">Ready</Tag>
-                )}
-                {file.scrubbed && <Tag type="blue" size="sm">Personal data removed</Tag>}
-                {file.status === "quarantined" && <Tag type="red" size="sm">Needs another look</Tag>}
-              </div>
-            </div>
+          <li key={file.id || file.filename} className="pa-file-row">
+            <FileIcon name={file.filename} />
+            <span className="pa-file-name">{file.filename}</span>
+            <span className="pa-file-size">{file.size ? formatSize(file.size) : ""}</span>
+            {file.phase === "uploading" && <ProgressBar label="Uploading" value={file.progress || 35} size="small" hideLabel />}
+            {file.phase === "error" && <Tag type="red" size="sm">{file.error || "Error"}</Tag>}
+            {file.phase !== "uploading" && file.phase !== "error" && file.status !== "error" && <Tag type="green" size="sm">Ready</Tag>}
+            {file.scrubbed && <Tag type="blue" size="sm">Personal data removed</Tag>}
+            {file.status === "quarantined" && <Tag type="red" size="sm">Needs another look</Tag>}
+            <Button
+              kind="ghost"
+              size="sm"
+              hasIconOnly
+              renderIcon={TrashCan}
+              iconDescription="Remove"
+              onClick={() => {
+                setLocal((current) => current.filter((item) => item.id !== file.id));
+                if (file.id && file.phase !== "uploading" && file.phase !== "error") void onRemove(file);
+              }}
+            />
           </li>
         ))}
       </ul>

@@ -4,6 +4,15 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Column, Grid, InlineNotification, Tab, TabList, TabPanel, TabPanels, Tabs, Tile } from "@carbon/react";
 import { pa, run, useWorkspace } from "@/components/profassist/bits";
+import { AiLive } from "@/components/profassist/ai-live";
+
+const HEAT = [
+  ["", "A", "B", "C", "D"],
+  ["A", "1", "0.91", "0.22", "0.18"],
+  ["B", "0.91", "1", "0.31", "0.14"],
+  ["C", "0.22", "0.31", "1", "0.44"],
+  ["D", "0.18", "0.14", "0.44", "1"],
+];
 
 interface Flag {
   id: string;
@@ -39,6 +48,14 @@ export default function IntegrityPage() {
       <IntegrityBody />
     </Suspense>
   );
+}
+
+function heatColor(value: string) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return "transparent";
+  if (score >= 0.8) return "#e8daff";
+  if (score >= 0.4) return "#d0e2ff";
+  return "#f4f4f4";
 }
 
 function IntegrityBody() {
@@ -77,6 +94,29 @@ function IntegrityBody() {
         </Column>
       )}
       <Column lg={16}>
+        <AiLive
+          title="Similarity and writing signal"
+          reasoning="Group A and Group B share a method sentence after the common brief is removed. The writing signal is a demo score, not a verdict and not a detector result you should act on alone."
+          sources={[{ href: "/integrity", title: "Submission pairs" }]}
+          tasks={["Drop the shared idea brief", "Score the remaining solution text", "Show the pair side by side"]}
+        >
+          <table className="pa-matrix" aria-label="Similarity heatmap">
+            <tbody>
+              {HEAT.map((row, index) => (
+                <tr key={index}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} style={{ background: heatColor(cell) }}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <p>A: The pipeline versions the dataset before training and records the threshold.</p>
+            <p>B: The pipeline versions the dataset before training and records the same threshold.</p>
+          </div>
+          <p>AI-writing score 0.37 · not a verdict · demo only</p>
+        </AiLive>
         <Tabs
           selectedIndex={tab}
           onChange={({ selectedIndex }) => {

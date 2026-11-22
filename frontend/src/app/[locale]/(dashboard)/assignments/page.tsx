@@ -19,6 +19,15 @@ import {
   Tile,
 } from "@carbon/react";
 import { pa, run, useWorkspace } from "@/components/profassist/bits";
+import { AiLive } from "@/components/profassist/ai-live";
+
+const COUNCIL_IDEAS = [
+  { title: "Clinic triage assistant", brief: "A group designs an intake model and a rollback plan for a campus clinic." },
+  { title: "Library occupancy forecast", brief: "Predict seat demand and publish the model card with the data version." },
+  { title: "Energy dashboard", brief: "Stream building meters into a monitored pipeline with a drift check." },
+  { title: "Exam integrity review", brief: "Compare submissions after the shared brief is removed. A flag is not a verdict." },
+  { title: "Deployment rehearsal", brief: "Ship a small API, then write the runbook a mixed audience can follow." },
+];
 
 interface CatalogItem {
   id: string;
@@ -29,6 +38,14 @@ interface CatalogItem {
   status: string;
   lo_codes: string[];
   brief: string;
+  criteria?: Array<{ name: string; weight: number }>;
+}
+interface Summary {
+  submissions: number;
+  groups: number;
+  flags: number;
+  approved: number;
+  drafts: number;
 }
 interface Idea {
   id: string;
@@ -55,6 +72,27 @@ interface Assignment {
   allocations: Array<{ group_id: string; idea_id: string }>;
 }
 
+function DueChart({ items }: { items: CatalogItem[] }) {
+  const marks = items.map((item) => {
+    const week = /week\s+(\d+)/i.exec(item.due || "");
+    return { ...item, week: week ? Number(week[1]) : 1 };
+  });
+  return (
+    <svg viewBox="0 0 640 110" role="img" aria-label="Assignment due dates across twelve weeks" style={{ width: "100%", height: 110 }}>
+      <line x1="20" y1="64" x2="620" y2="64" stroke="#c6c6c6" />
+      {Array.from({ length: 12 }, (_, index) => (
+        <text key={index} x={20 + index * 52} y="96" fontSize="11" fill="#525252">W{index + 1}</text>
+      ))}
+      {marks.map((item) => (
+        <g key={item.number}>
+          <circle cx={20 + (Math.min(12, Math.max(1, item.week)) - 1) * 52} cy="64" r="8" fill="#0f62fe" />
+          <text x={20 + (Math.min(12, Math.max(1, item.week)) - 1) * 52} y="40" fontSize="12" textAnchor="middle" fill="#161616">{item.number}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 export default function AssignmentsPage() {
   return (
     <Suspense fallback={<p>Loading assignments…</p>}>
@@ -69,6 +107,7 @@ function AssignmentsBody() {
   const params = useSearchParams();
   const selected = params.get("id") || "";
   const [items, setItems] = useState<CatalogItem[]>([]);
+  const [summary, setSummary] = useState<Summary>({ submissions: 0, groups: 0, flags: 0, approved: 0, drafts: 0 });
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [roster, setRoster] = useState<Array<{ id: string; name: string }>>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -80,8 +119,11 @@ function AssignmentsBody() {
 
   useEffect(() => {
     if (!course) return;
-    pa<{ items: CatalogItem[] }>(`/assignments?course_id=${course.id}`)
-      .then((data) => setItems(data.items))
+    pa<{ items: CatalogItem[]; summary?: Summary }>(`/assignments?course_id=${course.id}`)
+      .then((data) => {
+        setItems(data.items);
+        if (data.summary) setSummary(data.summary);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not list assignments"));
     pa<{ items: Array<{ id: string; name: string }> }>(`/courses/${course.id}/roster`)
       .then((data) => setRoster(data.items))
@@ -100,6 +142,9 @@ function AssignmentsBody() {
         const next: Record<string, string> = {};
         for (const pair of data.allocations) next[pair.group_id] = pair.idea_id;
         setIdeaFor(next);
+        pa<{ items: Array<{ id: string; group_name: string; topic: string; excerpt: string }> }>(`/assignments/${selected}/submissions`)
+          .then((rows) => setSubmissions(rows.items))
+          .catch(() => setSubmissions([]));
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that assignment"));
   }, [selected]);
@@ -140,6 +185,34 @@ function AssignmentsBody() {
       )}
       <Column lg={16}>
         {!selected && (
+          <>
+          <div className="pa-kpi-row">
+            <Tile><p className="pa-step-kicker">Submissions</p><strong style={{ fontSize: "2rem" }}>{summary.submissions}</strong></Tile>
+            <Tile><p className="pa-step-kicker">Groups</p><strong style={{ fontSize: "2rem" }}>{summary.groups}</strong></Tile>
+            <Tile><p className="pa-step-kicker">Approved grades</p><strong style={{ fontSize: "2rem" }}>{summary.approved}</strong><p>{summary.drafts} drafts</p></Tile>
+            <Tile><p className="pa-step-kicker">Open flags</p><strong style={{ fontSize: "2rem" }}>{summary.flags}</strong></Tile>
+          </div>
+          <Tile>
+            <h2 style={{ fontWeight: 400, marginTop: 0 }}>Due dates</h2>
+            <DueChart items={items} />
+          </Tile>
+          <AiLive
+            title="Suggest ideas with council"
+            reasoning="Five ideas for the group project. Several groups may share one idea. Each group still submits its own work."
+            sources={[{ href: "/outline", title: "MAAI 903 outcomes" }, { href: "/assignments", title: "A3 Group project" }]}
+            tasks={["Read LO1 to LO6", "Prefer a project a group can build in four weeks", "Auto-suggest groups of two from the roster"]}
+            suggestions={COUNCIL_IDEAS.map((idea) => idea.title)}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {COUNCIL_IDEAS.map((idea, index) => (
+                <Tile key={idea.title}>
+                  <strong>{index + 1}. {idea.title}</strong>
+                  <p>{idea.brief}</p>
+                </Tile>
+              ))}
+            </div>
+            <p>Groups auto-suggest: pair the roster in twos, then give each pair one of these ideas.</p>
+          </AiLive>
           <table className="pa-assign-table">
             <thead>
               <tr>
@@ -166,6 +239,7 @@ function AssignmentsBody() {
               ))}
             </tbody>
           </table>
+          </>
         )}
         {selected && assignment && (
           <div>
@@ -188,12 +262,23 @@ function AssignmentsBody() {
                   <p>
                     Due {assignment.due || "date open"} · {assignment.weight}% · {assignment.status}
                   </p>
-                  <p>{assignment.body}</p>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {(assignment.lo_codes || []).map((code) => (
-                      <Tag key={code} type="blue">{code}</Tag>
-                    ))}
+                  <div className="pa-kpi-row">
+                    <Tile><p className="pa-step-kicker">Ideas</p><strong style={{ fontSize: "2rem" }}>{assignment.ideas.length}</strong></Tile>
+                    <Tile><p className="pa-step-kicker">Groups</p><strong style={{ fontSize: "2rem" }}>{assignment.groups.length}</strong></Tile>
+                    <Tile><p className="pa-step-kicker">Outcomes</p><strong style={{ fontSize: "2rem" }}>{(assignment.lo_codes || []).length}</strong></Tile>
+                    <Tile><p className="pa-step-kicker">Submissions</p><strong style={{ fontSize: "2rem" }}>{submissions.length}</strong></Tile>
                   </div>
+                  <p>{assignment.body}</p>
+                  <p>Maps to {(assignment.lo_codes || []).join(", ") || "no outcomes yet"}.</p>
+                  <div className="pa-meter" aria-label="Submissions received">
+                    <span style={{ width: `${Math.min(100, (submissions.length / Math.max(roster.length, submissions.length, 1)) * 100)}%`, background: "#0f62fe" }} />
+                  </div>
+                  <p>{submissions.length} received · {roster.length} students on the roster</p>
+                  <h3 style={{ fontWeight: 600 }}>Rubric</h3>
+                  {(items.find((item) => item.id === assignment.id)?.criteria || []).map((row) => (
+                    <p key={row.name} style={{ margin: "4px 0" }}>{row.name} · {row.weight}%</p>
+                  ))}
+                  {(items.find((item) => item.id === assignment.id)?.criteria || []).length === 0 && <p>No rubric rows stored on this task yet.</p>}
                 </TabPanel>
                 <TabPanel>
                   <Button
@@ -203,7 +288,7 @@ function AssignmentsBody() {
                       if (next) setAssignment(next);
                     }}
                   >
-                    Generate 4–5 ideas
+                    Suggest ideas with council
                   </Button>
                   <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                     {assignment.ideas.map((idea, index) => (
@@ -291,7 +376,7 @@ function AssignmentsBody() {
                       if (next) setAssignment(next);
                     }}
                   >
-                    Write exemplars
+                    Write exemplar
                   </Button>
                   {assignment.ideas.map((idea) =>
                     idea.exemplar ? (

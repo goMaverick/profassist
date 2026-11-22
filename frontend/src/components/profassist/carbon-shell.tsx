@@ -277,9 +277,12 @@ function PageHead({ pathname, onChat }: { pathname: string; onChat: () => void }
         <h1>{meta.title}</h1>
         {meta.description ? <p>{meta.description}</p> : null}
       </div>
-      <Button kind="primary" size="md" renderIcon={Chat} onClick={onChat}>
-        Ask ProfAssist
-      </Button>
+      <div className="pa-page-actions">
+        <div id="pa-page-tools" />
+        <Button kind="primary" size="md" renderIcon={Chat} onClick={onChat}>
+          Ask ProfAssist
+        </Button>
+      </div>
     </header>
   );
 }

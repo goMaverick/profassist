@@ -426,6 +426,7 @@ def merge_catalog(
                 "status": (existing or {}).get("status") or "in outline",
                 "lo_codes": task.get("lo_codes") or (existing or {}).get("lo_codes") or [],
                 "brief": task.get("brief") or (existing or {}).get("body") or "",
+                "criteria": task.get("criteria") or [],
             }
         )
         seen.add(number)
@@ -443,6 +444,7 @@ def merge_catalog(
                 "status": item.get("status") or "draft",
                 "lo_codes": item.get("lo_codes") or [],
                 "brief": item.get("body") or "",
+                "criteria": [],
             }
         )
     return rows
@@ -506,6 +508,58 @@ async def list_for_course(
             continue
         tasks.extend(body.get("tasks") or [])
     return merge_catalog(tasks, stored)
+
+
+async def assess_summary(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, course_id: uuid.UUID
+) -> dict[str, int]:
+    from sqlalchemy import func
+
+    from app.profassist.models import GradeDraft, IntegrityFlag
+
+    groups = await db.scalar(
+        select(func.count())
+        .select_from(StudentGroup)
+        .where(
+            StudentGroup.organization_id == org_id,
+            StudentGroup.owner_user_id == user_id,
+            StudentGroup.course_id == course_id,
+        )
+    )
+    submissions = await db.scalar(
+        select(func.count())
+        .select_from(Submission)
+        .where(Submission.organization_id == org_id, Submission.course_id == course_id)
+    )
+    flags = await db.scalar(
+        select(func.count())
+        .select_from(IntegrityFlag)
+        .where(
+            IntegrityFlag.organization_id == org_id,
+            IntegrityFlag.course_id == course_id,
+            IntegrityFlag.status == "open",
+        )
+    )
+    drafts = (
+        (
+            await db.execute(
+                select(GradeDraft).where(
+                    GradeDraft.organization_id == org_id,
+                    GradeDraft.owner_user_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    approved = sum(1 for row in drafts if row.status == "approved")
+    return {
+        "groups": int(groups or 0),
+        "submissions": int(submissions or 0),
+        "flags": int(flags or 0),
+        "approved": approved,
+        "drafts": len(drafts),
+    }
 
 
 async def list_submissions(

@@ -161,7 +161,21 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
           </ChainOfThought>
         )}
       </div>
-      {verdict && <p className="council-verdict">{verdict}</p>}
+      <div className="council-meter" aria-label="Consensus">
+        <span style={{ width: `${Math.min(100, agents.filter((agent) => agent.state === "speaking").length * 20)}%` }} />
+        <em>{verdict ? "Consensus" : "Vote in progress"}</em>
+      </div>
+      {verdict && (
+        <article className="council-verdict-card">
+          <h3>Chair's verdict</h3>
+          <p>{verdict} The council can see the evidence. Nothing is sent until you approve.</p>
+          <ul>
+            <li>Outcomes: map the thin program outcomes before accreditation.</li>
+            <li>Assessments: keep the weights on 100, and do not pile week 7.</li>
+            <li>Policies: write attendance and integrity where a student can find them.</li>
+          </ul>
+        </article>
+      )}
       <style>{`
         .council-stage { display: grid; gap: 1rem; }
         .council-steps { display: flex; gap: 0.75rem; list-style: none; padding: 0; margin: 0; text-transform: capitalize; }
@@ -169,8 +183,14 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
         .council-steps .is-active { color: #0f62fe; font-weight: 600; }
         .council-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
         .council-card { display: grid; gap: 0.4rem; }
-        .council-avatar { width: 2rem; height: 2rem; display: grid; place-items: center; color: white; border-radius: 999px; }
-        .is-thinking { animation: pulse 1.2s ease-in-out infinite; }
+        .council-avatar { width: 2rem; height: 2rem; display: grid; place-items: center; color: white; border-radius: 999px; box-shadow: 0 0 0 3px #e8daff; }
+        .is-thinking { animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 0 3px #8a3ffc; }
+        .council-meter { position: relative; height: 12px; background: #e0e0e0; }
+        .council-meter span { display: block; height: 100%; background: linear-gradient(90deg, #6929c4, #8a3ffc); }
+        .council-meter em { position: absolute; right: 0; top: -18px; font-style: normal; font-size: 0.75rem; color: #6929c4; }
+        .council-verdict-card { border: 1px solid #8a3ffc; background: #f6f2ff; padding: 12px 16px; }
+        .council-verdict-card h3 { margin: 0 0 8px; font-weight: 600; }
+        .council-verdict-card ul { margin: 8px 0 0; padding-left: 1.1rem; }
         .council-dots { display: flex; gap: 0.25rem; }
         .council-dots i { width: 0.4rem; height: 0.4rem; border-radius: 999px; background: #0f62fe; animation: blink 1s infinite; }
         .council-dots i:nth-child(2) { animation-delay: 0.15s; }

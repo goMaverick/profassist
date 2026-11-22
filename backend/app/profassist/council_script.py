@@ -3,11 +3,11 @@
 from typing import Any
 
 AGENTS = {
-    "curriculum": {"name": "Curriculum", "color": "#0f62fe", "icon": "education"},
-    "alignment": {"name": "Accreditation", "color": "#8a3ffc", "icon": "checkmark"},
-    "balance": {"name": "Assessment", "color": "#007d79", "icon": "chart"},
-    "student": {"name": "Student view", "color": "#b28600", "icon": "user"},
-    "judge": {"name": "Judge", "color": "#da1e28", "icon": "gavel"},
+    "curriculum": {"name": "Curriculum reviewer", "color": "#6929c4", "icon": "education"},
+    "alignment": {"name": "Assessment expert", "color": "#8a3ffc", "icon": "checkmark"},
+    "balance": {"name": "Integrity officer", "color": "#007d79", "icon": "chart"},
+    "student": {"name": "Student voice", "color": "#b28600", "icon": "user"},
+    "judge": {"name": "Chair", "color": "#da1e28", "icon": "gavel"},
     "evidence": {"name": "Evidence", "color": "#0f62fe", "icon": "document"},
     "strict": {"name": "Strict", "color": "#da1e28", "icon": "warning"},
     "supportive": {"name": "Supportive", "color": "#198038", "icon": "favorite"},
