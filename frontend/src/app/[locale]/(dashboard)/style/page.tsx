@@ -13,10 +13,21 @@ interface Memory {
   kind: string;
   text: string;
   source: string;
+  owner_name?: string;
+  created_at?: string;
+}
+interface StylePayload {
+  soul_md: string;
+  about_md: string;
+  about_history: Array<{ version: number; text: string; source: string }>;
+  owner_name: string;
 }
 
 export default function StylePage() {
   const [soul, setSoul] = useState("");
+  const [about, setAbout] = useState("");
+  const [history, setHistory] = useState<StylePayload["about_history"]>([]);
+  const [owner, setOwner] = useState("");
   const [items, setItems] = useState<Reflection[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [error, setError] = useState("");
@@ -24,11 +35,14 @@ export default function StylePage() {
 
   async function load() {
     const [style, reflections, memory] = await Promise.all([
-      pa<{ soul_md: string }>("/style"),
+      pa<StylePayload>("/style"),
       pa<{ items: Reflection[] }>("/reflections"),
       pa<{ items: Memory[] }>("/memories"),
     ]);
     setSoul(style.soul_md);
+    setAbout(style.about_md || "");
+    setHistory(style.about_history || []);
+    setOwner(style.owner_name || "");
     setItems(reflections.items);
     setMemories(memory.items);
   }
@@ -49,6 +63,54 @@ export default function StylePage() {
       </div>
       {error && <Banner>{error}</Banner>}
       {saved && <Banner>{saved}</Banner>}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-medium">About me</h2>
+        <p className="text-foreground/60 text-sm">
+          {owner ? `${owner}. ` : ""}
+          Every agent reads this portrait for you, in this university only. It is rewritten from your memories after you approve or edit. It does not change the shared prompts.
+        </p>
+        <textarea
+          className="border-foreground/15 min-h-40 w-full rounded-xl border bg-transparent p-4 text-sm"
+          value={about}
+          onChange={(event) => setAbout(event.target.value)}
+        />
+        <div className="flex gap-2">
+          <button
+            className="bg-foreground text-background rounded-lg px-3 py-2 text-sm"
+            onClick={async () => {
+              const next = await run(
+                () => pa<StylePayload>("/style/about", { method: "PUT", body: JSON.stringify({ about_md: about }) }),
+                setError,
+              );
+              if (next) {
+                setAbout(next.about_md || "");
+                setHistory(next.about_history || []);
+                setSaved("About me saved. The next draft will include it.");
+              }
+            }}
+          >
+            Save about me
+          </button>
+          <button
+            className="rounded-lg border px-3 py-2 text-sm"
+            onClick={async () => {
+              const next = await run(() => pa<StylePayload>("/style/about/reset", { method: "POST" }), setError);
+              if (next) {
+                setAbout(next.about_md || "");
+                setHistory(next.about_history || []);
+                setSaved("About me was rebuilt from your style and memories.");
+              }
+            }}
+          >
+            Reset
+          </button>
+        </div>
+        {history.length > 0 && (
+          <div className="text-foreground/60 text-xs">
+            Earlier versions: {history.slice(-5).map((item) => `v${item.version} (${item.source})`).join(", ")}
+          </div>
+        )}
+      </section>
       <textarea
         className="border-foreground/15 min-h-64 w-full rounded-xl border bg-transparent p-4 font-mono text-sm"
         value={soul}
@@ -85,7 +147,12 @@ export default function StylePage() {
         {memories.length === 0 && <p className="text-foreground/60 text-sm">Nothing remembered yet. Saving your style writes the first one.</p>}
         {memories.map((memory) => (
           <div key={memory.id} className="border-foreground/10 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm">
-            <p>{memory.text}</p>
+            <div>
+              <p>{memory.text}</p>
+              <p className="text-foreground/50 mt-1 text-xs">
+                {[memory.owner_name, memory.kind, memory.source, memory.created_at].filter(Boolean).join(" · ")}
+              </p>
+            </div>
             <button
               className="underline"
               onClick={async () => {

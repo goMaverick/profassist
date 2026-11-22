@@ -13,6 +13,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.user import User
+from app.profassist.lessons import same_lesson
 from app.profassist.llm import llm_api_key
 from app.profassist.models import ProfessorMemory
 from app.profassist.pii import scrub
@@ -107,6 +109,27 @@ async def remember(
     cleaned = scrub(text or "", known_names)
     if cleaned.quarantined or not cleaned.text.strip():
         return None
+    existing = await db.execute(
+        select(ProfessorMemory).where(
+            ProfessorMemory.organization_id == organization_id,
+            ProfessorMemory.owner_user_id == user_id,
+            ProfessorMemory.kind == kind,
+        )
+    )
+    for prior in existing.scalars().all():
+        if same_lesson(prior.text, cleaned.text):
+            prior.text = cleaned.text
+            prior.source = source
+            await db.flush()
+            _qdrant_upsert(str(organization_id), str(user_id), str(prior.id), cleaned.text)
+            _mem0_add(str(organization_id), str(user_id), cleaned.text)
+            return {
+                "id": str(prior.id),
+                "kind": prior.kind,
+                "text": prior.text,
+                "source": prior.source,
+                "updated": True,
+            }
     row = ProfessorMemory(
         organization_id=organization_id,
         owner_user_id=user_id,
@@ -118,7 +141,13 @@ async def remember(
     await db.flush()
     _qdrant_upsert(str(organization_id), str(user_id), str(row.id), cleaned.text)
     _mem0_add(str(organization_id), str(user_id), cleaned.text)
-    return {"id": str(row.id), "kind": row.kind, "text": row.text, "source": row.source}
+    return {
+        "id": str(row.id),
+        "kind": row.kind,
+        "text": row.text,
+        "source": row.source,
+        "updated": False,
+    }
 
 
 async def list_memories(
@@ -132,8 +161,17 @@ async def list_memories(
         )
         .order_by(ProfessorMemory.created_at.desc())
     )
+    owner = await db.get(User, user_id)
+    owner_name = owner.full_name if owner and owner.full_name else ""
     return [
-        {"id": str(row.id), "kind": row.kind, "text": row.text, "source": row.source}
+        {
+            "id": str(row.id),
+            "kind": row.kind,
+            "text": row.text,
+            "source": row.source,
+            "owner_name": owner_name,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
         for row in result.scalars().all()
     ]
 

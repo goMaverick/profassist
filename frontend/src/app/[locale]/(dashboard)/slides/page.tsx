@@ -20,6 +20,7 @@ interface Deck {
   status: string;
   slides: Slide[];
   gaps?: string[];
+  previews?: string[];
 }
 
 export default function SlideReviewPage() {
@@ -27,6 +28,7 @@ export default function SlideReviewPage() {
   const [error, setError] = useState("");
   const [decks, setDecks] = useState<Deck[]>([]);
   const [busy, setBusy] = useState(false);
+  const [master, setMaster] = useState("");
 
   async function load(courseId: string) {
     const data = await pa<{ items: Deck[] }>(`/courses/${courseId}/slides`);
@@ -62,11 +64,42 @@ export default function SlideReviewPage() {
       >
         {busy ? "Planning the deck…" : "Build a cited deck"}
       </button>
+      <label className="text-sm">
+        Deck master (.pptx or .potx)
+        <input
+          className="mt-1 block text-sm"
+          type="file"
+          accept=".pptx,.potx"
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const body = new FormData();
+            body.append("file", file);
+            const ok = await run(() => pa("/style/template", { method: "POST", body }), setError);
+            if (ok) setMaster(`${file.name} will be used the next time you build a deck.`);
+          }}
+        />
+        {master && <span className="text-foreground/60 mt-1 block">{master}</span>}
+      </label>
       {decks.map((deck) => (
         <article key={deck.id} className="flex flex-col gap-3">
           <h2 className="font-medium">
             {deck.title} <span className="text-foreground/50 text-sm">{deck.status}</span>
           </h2>
+          {deck.previews && deck.previews.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto">
+              {deck.previews.map((src, previewIndex) => (
+                // Data-URL thumbnails. next/image does not accept them.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={`${deck.id}-preview-${previewIndex}`}
+                  src={src}
+                  alt=""
+                  className="h-28 rounded border"
+                />
+              ))}
+            </div>
+          )}
           {deck.slides.map((slide, index) => (
             <div key={`${deck.id}-${index}`} className="border-foreground/10 grid gap-3 rounded-xl border p-4 md:grid-cols-2">
               <div>

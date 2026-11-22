@@ -132,7 +132,12 @@ def critique(slides: list[dict[str, Any]], chunks: list[dict[str, Any]]) -> list
     return kept
 
 
-def run_slide_studio(objectives: list[str], chunks: list[dict[str, Any]]) -> dict[str, Any]:
+def run_slide_studio(
+    objectives: list[str],
+    chunks: list[dict[str, Any]],
+    template: bytes | None = None,
+    title: str = "Slide studio",
+) -> dict[str, Any]:
     skill = load_skill("slide-studio")
 
     def plan(state: SlideState) -> SlideState:
@@ -176,18 +181,22 @@ def run_slide_studio(objectives: list[str], chunks: list[dict[str, Any]]) -> dic
         for slide in slides:
             if slide.get("gap"):
                 continue
+            citations = []
+            for bullet in slide.get("bullets") or []:
+                if isinstance(bullet, dict):
+                    filename = (bullet.get("citation") or {}).get("filename")
+                    if filename:
+                        citations.append(filename)
             exportable.append(
                 {
                     "title": slide.get("title"),
-                    "bullets": [
-                        bullet["text"] if isinstance(bullet, dict) else bullet
-                        for bullet in slide.get("bullets") or []
-                    ],
+                    "bullets": slide.get("bullets") or [],
                     "notes": slide.get("notes") or "",
+                    "citations": citations,
                 }
             )
         if exportable:
-            pptx = build_pptx("Slide studio", exportable)
+            pptx = build_pptx(title, exportable, template=template)
     llm.trace("slide_studio", {"task": "slide_studio", "mode": llm.mode()})
     return {
         "skill": skill["name"],

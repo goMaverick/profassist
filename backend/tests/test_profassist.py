@@ -291,6 +291,95 @@ def test_pptx_is_a_zip() -> None:
     assert data[:2] == b"PK"
 
 
+def test_lessons_rewrite_the_portrait_instead_of_stacking() -> None:
+    from app.profassist.lessons import condense_about, extract_lessons, same_lesson
+
+    changed = extract_lessons("grade", "Great work! " * 12, "You can tighten the claim. beginning")
+    assert any(item["kind"] == "tone" for item in changed)
+    assert extract_lessons("grade", "same words", "same words") == []
+    portrait = condense_about(
+        "Short sentences.",
+        [{"kind": "tone", "text": "Write feedback without exclamation marks."}],
+        ["MAAI903"],
+    )
+    assert portrait == condense_about(
+        "Short sentences.",
+        [{"kind": "tone", "text": "Write feedback without exclamation marks."}],
+        ["MAAI903"],
+    )
+    assert "MAAI903" in portrait
+    assert len(portrait) <= 900
+    assert same_lesson(portrait, portrait)
+
+
+def test_about_section_is_labelled_and_scrubbed() -> None:
+    from app.profassist.llm import complete
+    from app.profassist.runtime import labelled_about, set_about
+
+    set_about("She prefers short feedback.\nEmail sara@student.uowd.ac.ae")
+    block = labelled_about()
+    assert block.startswith("\n\n## About this professor\n")
+    assert "@" not in block
+    assert "sara" not in block.lower()
+    drafted = complete(
+        "feedback",
+        {
+            "quote": "The baseline load is 42.7 kWh during the teaching day.",
+            "level": "proficient",
+            "soul": "",
+        },
+    )
+    assert "42.7" in drafted["feedback"]
+    set_about("Please ask Jordan Hale about the lab.")
+    assert labelled_about() == ""
+    set_about("")
+
+
+def test_deck_fits_and_cites_every_slide() -> None:
+    import io
+
+    from pptx import Presentation
+
+    from app.profassist.slides import build_pptx, text_fits
+
+    data = build_pptx(
+        "MAAI903",
+        [
+            {
+                "title": "Explain the difference",
+                "bullets": [
+                    {
+                        "text": "An agent differs from a trained model. The load is 42.7 kWh.",
+                        "citation": {"filename": "lecture-note.txt"},
+                    },
+                    "The brief names the audience and the artefact.",
+                ],
+                "notes": "Say this slowly.",
+            }
+        ],
+    )
+    deck = Presentation(io.BytesIO(data))
+    assert len(deck.slides) >= 6
+    saw_image = False
+    for slide in deck.slides:
+        notes = slide.notes_slide.notes_text_frame.text
+        assert notes.strip()
+        assert "lecture-note.txt" in notes
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            text = "\n".join(paragraph.text for paragraph in shape.text_frame.paragraphs)
+            if text.strip() == "Image":
+                saw_image = True
+            size = 14
+            for paragraph in shape.text_frame.paragraphs:
+                if paragraph.font.size is not None:
+                    size = int(paragraph.font.size.pt)
+                    break
+            assert text_fits(text, int(shape.width), int(shape.height), size)
+    assert saw_image
+
+
 def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
