@@ -6,9 +6,11 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | --- | --- | --- |
 | Home | Done | Course, queue, and connector status for the signed-in professor. |
 | Course studio | Done | Upload notes, draft objectives, approve them. |
-| Slide generator | Done | Slide studio plans, retrieves, cites, and exports a deck. |
+| Course design assistant | Done | Weeks, outcomes, and an assessment plan. She edits the draft and approves it. It reads her notes and About section. |
+| Slide generator | Done | Slide studio plans, retrieves, cites, and exports a deck for a chosen week. |
 | Slide review | Done | Sources sit beside each slide, with thumbnails of the deck. |
 | Assessment designer | Done | Draft a rubric, then approve it before grading. |
+| Rubric builder | Done | Blank rubric, AI suggestion, inline edit, versions, alignment check, and import from paste, docx, pdf, or xlsx. |
 | Review and grade | Done | Council draft, professor edit, approve, then push. |
 | Feedback editor | Done | She can rewrite the comment before approval. |
 | Integrity | Done | Winnowing similarity plus viva questions. A flag is not a verdict. |
@@ -35,8 +37,9 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | Langfuse traces | Done | Nested spans after the privacy gate, with the About section labelled on the prompt. |
 | Grade calibrator | Stubbed | The page and the endpoint return `not_trained` and no score. |
 | At-risk early warning | Stubbed | The students page returns `not_trained` and no score. |
-| Fake Moodle | Done | Seeded roster and local push receipts. |
-| Real Moodle | Partial | Read-only REST and an LTI-shaped launch. Grade push returns not enabled. |
+| Fake Moodle | Done | Assignments with pdf, docx, zip, and image files, plus a workshop with peer reviews. Sync records the time. |
+| Real Moodle | Partial | Reads courses, people, assignments, submission files, rubrics, and workshops through the web service. Grade push calls `mod_assign_save_grade` only when `MOODLE_PUSH_ENABLED=true`. |
+| Manual submission upload | Done | A zip of files can be attached to an assignment when Moodle is not available. |
 | Tenant isolation | Partial | A university is an organization. Professor-owned rows are filtered in the app. Postgres RLS exists, but the compose database role is a superuser, so the app filter is what holds. |
 | Qdrant, Postgres, MinIO, Prefect | Done | Notes, memory, files, and the grade batch worker. |
 | MLflow | Partial | The server is in compose. No training run is registered. |

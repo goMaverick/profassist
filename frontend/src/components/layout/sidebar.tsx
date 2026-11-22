@@ -20,6 +20,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose } from "@/comp
 const navigation = [
   { label: "Home", href: ROUTES.DASHBOARD, icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: BookOpen },
+  { label: "Design", href: "/design", icon: BookOpen },
+  { label: "Rubric", href: "/rubric", icon: PenLine },
+  { label: "Slides", href: "/slides", icon: BookOpen },
   { label: "Grade", href: "/grade", icon: GraduationCap },
   { label: "Integrity", href: "/integrity", icon: ShieldCheck },
   { label: "Students", href: "/students", icon: Users },

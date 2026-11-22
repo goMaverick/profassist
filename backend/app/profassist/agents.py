@@ -20,6 +20,7 @@ class CourseState(TypedDict, total=False):
     chunks: list[dict[str, Any]]
     clos: list[str]
     soul: str
+    message: str
     result: dict[str, Any]
 
 
@@ -28,6 +29,7 @@ class GradeState(TypedDict, total=False):
     criterion: dict[str, Any]
     soul: str
     votes: list[dict[str, Any]]
+    peer_reviews: list[dict[str, Any]]
     debate_rounds: list[dict[str, Any]]
     judge: dict[str, Any]
     feedback: str
@@ -60,8 +62,11 @@ def _draft_course(state: CourseState) -> CourseState:
         "chunks": state.get("chunks") or [],
         "clos": state.get("clos") or [],
         "soul": state.get("soul") or "",
+        "message": state.get("message") or "",
     }
     result = llm.complete(task, payload)
+    if task == "course_design":
+        return {"result": result}
     if task == "objectives":
         kept = []
         for objective in result.get("objectives") or []:
@@ -113,6 +118,11 @@ def _grade_persona(persona: str, index: int):
                 "submission": state.get("submission") or "",
                 "criterion": state.get("criterion") or {},
                 "soul": state.get("soul") or "",
+                "peer_reviews": state.get("peer_reviews") or [],
+                "peer_note": (
+                    "Peer reviews are extra evidence only. They do not set the level. "
+                    "Quote the submission, not the review."
+                ),
             },
         )
         votes = list(state.get("votes") or [])
@@ -212,11 +222,22 @@ def build_grading_graph():
 
 
 def run_grading_council(
-    submission: str, criterion: dict[str, Any], soul: str, *, title: str = "assignment"
+    submission: str,
+    criterion: dict[str, Any],
+    soul: str,
+    *,
+    title: str = "assignment",
+    peer_reviews: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     result, url = invoke_graph(
         build_grading_graph(),
-        {"submission": submission, "criterion": criterion, "soul": soul, "votes": []},
+        {
+            "submission": submission,
+            "criterion": criterion,
+            "soul": soul,
+            "votes": [],
+            "peer_reviews": peer_reviews or [],
+        },
         name=f"grade: {title} / {criterion.get('name') or 'criterion'}",
         metadata={"kind": "grade", "criterion": criterion.get("name")},
     )

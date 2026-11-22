@@ -1,0 +1,3 @@
+Group C studied water use in the student hub.
+Sensor counts were taken at morning and evening for five days.
+A limitation is the small sample, therefore we do not generalise beyond the hub.

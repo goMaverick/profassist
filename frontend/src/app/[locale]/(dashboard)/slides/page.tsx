@@ -29,6 +29,7 @@ export default function SlideReviewPage() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [busy, setBusy] = useState(false);
   const [master, setMaster] = useState("");
+  const [week, setWeek] = useState(1);
 
   async function load(courseId: string) {
     const data = await pa<{ items: Deck[] }>(`/courses/${courseId}/slides`);
@@ -52,18 +53,33 @@ export default function SlideReviewPage() {
         </p>
       </div>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
-      <button
-        className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          const deck = await run(() => pa<Deck>(`/courses/${course.id}/slides/studio`, { method: "POST" }), setError);
-          if (deck) await load(course.id);
-          setBusy(false);
-        }}
-      >
-        {busy ? "Planning the deck…" : "Build a cited deck"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm">
+          Week
+          <input
+            className="ml-2 w-16 rounded border px-2 py-1"
+            type="number"
+            min={1}
+            value={week}
+            onChange={(event) => setWeek(Number(event.target.value) || 1)}
+          />
+        </label>
+        <button
+          className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            const deck = await run(
+              () => pa<Deck>(`/courses/${course.id}/slides/studio?week=${week}`, { method: "POST" }),
+              setError,
+            );
+            if (deck) await load(course.id);
+            setBusy(false);
+          }}
+        >
+          {busy ? "Planning the deck…" : "Build this week's deck"}
+        </button>
+      </div>
       <label className="text-sm">
         Deck master (.pptx or .potx)
         <input

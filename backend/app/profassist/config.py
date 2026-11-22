@@ -32,6 +32,11 @@ def council_models() -> list[str]:
     return parts[:3]
 
 
+def moodle_push_enabled() -> bool:
+    """Real grade write stays off until an admin sets this flag."""
+    return _flag("MOODLE_PUSH_ENABLED").lower() in {"1", "true", "yes", "on"}
+
+
 def moodle_mode() -> str:
     mode = (_flag("MOODLE_MODE") or "fake").lower()
     if mode not in {"fake", "real"}:

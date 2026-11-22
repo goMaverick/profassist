@@ -380,6 +380,85 @@ def test_deck_fits_and_cites_every_slide() -> None:
     assert saw_image
 
 
+def test_course_design_uses_notes_and_a_shorter_reply() -> None:
+    from app.profassist.llm import complete
+
+    drafted = complete(
+        "course_design",
+        {
+            "message": "Draft the course",
+            "chunks": [
+                {
+                    "id": "c1",
+                    "text": "Explain how an LLM agent differs from a trained machine learning model.",
+                }
+            ],
+            "soul": "Short sentences.",
+        },
+    )
+    assert drafted["weeks"]
+    assert drafted["clos"][0]["code"] == "CLO1"
+    assert drafted["plan"][0]["weight"] == 40
+    shorter = complete("course_design", {"message": "Make the weeks shorter", "chunks": []})
+    assert "shortened" in shorter["reply"].lower()
+
+
+def test_rubric_import_flags_vague_wording() -> None:
+    from app.profassist.rubric_build import alignment, parse_rubric_text
+
+    text = """
+Criterion: Evidence
+Weight: 2
+Beginning: Names the task
+Developing: Partly shows the outcome
+Proficient: Quotes an example
+Advanced: States a limitation
+
+Criterion: Style
+Weight: 1
+Beginning: A good try
+Developing: Appropriate detail
+Proficient: Various points
+Advanced: Nice work
+"""
+    criteria = parse_rubric_text(text)
+    assert criteria[0]["name"] == "Evidence"
+    assert criteria[0]["levels"]["advanced"].startswith("States")
+    report = alignment(criteria, ["Explain how an LLM agent differs from a trained model."])
+    assert any("vague" in flag for flag in report["flags"])
+
+
+def test_sample_attachments_keep_the_evidence() -> None:
+    from app.profassist.moodle import FakeMoodleConnector
+    from app.profassist.storage import extract_text
+
+    rows = FakeMoodleConnector().list_submissions("asg-901")
+    group_a = next(row for row in rows if row["group_name"] == "Group A")
+    names = {item["filename"] for item in group_a["files"]}
+    assert "group-a-report.docx" in names
+    assert "group-a-code.zip" in names
+    docx = next(item for item in group_a["files"] if item["filename"].endswith(".docx"))
+    assert "42.7" in extract_text(docx["filename"], docx["data"])
+    pdf_row = next(row for row in rows if row["id"] == "sub-b")
+    pdf = pdf_row["files"][0]
+    assert "42.7" in extract_text(pdf["filename"], pdf["data"])
+    workshop = FakeMoodleConnector().list_workshop_submissions("ws-901")
+    assert workshop[0]["peer_reviews"]
+    assert workshop[0]["files"]
+
+
+def test_real_grade_push_stays_off_until_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.moodle import RealMoodleConnector
+
+    monkeypatch.setenv("MOODLE_BASE_URL", "https://moodle.example.edu")
+    monkeypatch.setenv("MOODLE_WS_TOKEN", "token")
+    monkeypatch.delenv("MOODLE_PUSH_ENABLED", raising=False)
+    with pytest.raises(ProfassistError) as caught:
+        RealMoodleConnector().push({"type": "grade", "feedback": "You quoted the meter."})
+    assert caught.value.status == 501
+    assert "MOODLE_PUSH_ENABLED" in caught.value.detail
+
+
 def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

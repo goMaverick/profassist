@@ -32,6 +32,7 @@ services:
       - S3_SECRET_KEY=profassist-secret
       - S3_BUCKET=profassist
       - MOODLE_MODE=fake
+      - MOODLE_PUSH_ENABLED=false
       - PROFASSIST_AUTO_SEED=true
       - LLM_API_KEY=${LLM_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -162,6 +163,7 @@ services:
       - POSTGRES_PASSWORD=postgres
       - PREFECT_API_URL=http://prefect-server:4200/api
       - MOODLE_MODE=fake
+      - MOODLE_PUSH_ENABLED=false
       - PROFASSIST_AUTO_SEED=false
     networks:
       - backend
