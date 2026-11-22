@@ -93,6 +93,74 @@ function agentLabel(agent: string) {
   return AGENT_LABEL[agent] || agent.replaceAll("_", " ");
 }
 
+function toolName(tool: string) {
+  return tool.replaceAll("_", " ");
+}
+
+const TOOL_HELP: Record<string, string> = {
+  retrieve_notes: "Reads the files uploaded for this course.",
+  draft: "Writes a draft the professor can edit.",
+  quote_check: "Checks that a quote appears in the submission.",
+  judge: "Picks one rubric band from the graders.",
+  feedback: "Writes the comment the student will see.",
+  fingerprint: "Compares submissions for shared wording.",
+  viva: "Suggests questions for a conversation about the work.",
+  compare_edits: "Notices how the professor changed a draft.",
+  plan: "Outlines the slides before they are written.",
+  retrieve: "Finds the note a slide should cite.",
+  cite: "Attaches a source to each slide.",
+  critique: "Flags a slide that is not supported by the notes.",
+  pptx: "Builds the PowerPoint file.",
+  rag_search: "Searches the course notes from the chat.",
+  propose: "Suggests a few project ideas.",
+  write: "Writes a strong, average, and weak example.",
+  curriculum: "Checks the weekly topics against the outcomes.",
+  alignment: "Checks that course outcomes map to the program.",
+  balance: "Checks that assessment weights add up.",
+  student: "Reads the outline the way a student would.",
+  debate: "Lets the reviewers answer one another.",
+  list_courses: "Lists the courses in this workspace.",
+  get_course: "Opens one course.",
+  list_outlines: "Lists subject outlines.",
+  start_outline: "Starts a blank outline.",
+  assist_outline: "Drafts one step of an outline.",
+  create_assignment: "Creates an assignment from the outline.",
+  dropout_risk: "Shows who may need a check-in.",
+  integrity_concerns: "Opens work that may be too similar.",
+  suggest_assessments: "Suggests assessment tasks.",
+  accept_assessments: "Saves the tasks the professor accepts.",
+  generate_slides: "Makes slides from the notes.",
+  moodle_sync: "Pulls courses and submissions.",
+  moodle_push: "Sends an approved grade.",
+  start_grade: "Starts a grade draft.",
+  list_memories: "Lists what the assistant remembers.",
+  delete_memory: "Forgets one saved note.",
+  admin_ai_settings: "Reads these settings.",
+};
+
+function toolHelp(agent: string, tool: string) {
+  if (agent === "outline_review" && tool === "judge") {
+    return "Keeps a finding only when the reviewers agree it is a real gap.";
+  }
+  return TOOL_HELP[tool] || "The assistant can call this when the switch is on.";
+}
+
+function promptStatus(source: Source, saved: PromptVersionRow | undefined) {
+  if (source.source === "langfuse") {
+    return source.version ? `From Langfuse, version ${source.version}` : "From Langfuse";
+  }
+  if (saved) return `Saved version ${saved.version}`;
+  if (source.source === "database" && source.version) return `Saved version ${source.version}`;
+  return "Built-in";
+}
+
+function dubaiLine(utcHour: number) {
+  const utc = ((Number(utcHour) % 24) + 24) % 24;
+  const dubai = (utc + 4) % 24;
+  const clock = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
+  return `${clock(utc)} UTC is ${clock(dubai)} in Dubai.`;
+}
+
 export default function AiAdminPage() {
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
@@ -156,10 +224,8 @@ export default function AiAdminPage() {
       {error && <InlineNotification kind="error" title="Check this" subtitle={error} hideCloseButton />}
       {note && <InlineNotification kind="success" title="Saved" subtitle={note} hideCloseButton lowContrast />}
       <Tile id="ai-council">
-        <p className="pa-step-kicker">Admin</p>
-        <h1 style={{ fontWeight: 400, margin: "4px 0 8px" }}>AI settings</h1>
-        <p style={{ maxWidth: 720 }}>
-          This is where an admin turns the assistant on, picks a model for each agent, and sees which servers are connected.
+        <p style={{ maxWidth: 720, marginTop: 0 }}>
+          Turn the assistant on, pick a model for each agent, and see which servers are connected.
           Secret keys stay in the server environment. This page never shows a key.
         </p>
         <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
@@ -212,7 +278,7 @@ export default function AiAdminPage() {
       </Tile>
 
       <Tile id="ai-agents">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Model for each agent</h2>
+        <h2 className="pa-card-title">Model for each agent</h2>
         <p>
           The three council graders can each use a different provider. The chair does not have its own row.
           The chair uses the default model above.
@@ -267,7 +333,7 @@ export default function AiAdminPage() {
       </Tile>
 
       <Tile id="ai-providers">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Provider connections</h2>
+        <h2 className="pa-card-title">Provider connections</h2>
         <p>
           A key is either “not set” or “set, hidden”. Add a missing key as an environment variable and restart the server.
           This page cannot type a key in.
@@ -306,11 +372,33 @@ export default function AiAdminPage() {
       </Tile>
 
       <Tile id="ai-prompts">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Prompts</h2>
+        <h2 className="pa-card-title">Prompts</h2>
         <p>
           Each agent has one instruction. If Langfuse is connected, the production label there wins.
           If Langfuse is off, a version you save here is used for this university. Older versions stay in the list.
         </p>
+        <h3 className="pa-card-sub">Every prompt</h3>
+        <ul className="pa-prompt-list" aria-label="Prompt status">
+          {(view.prompt_sources || []).map((source) => {
+            const saved = (view.prompts || []).find((item) => item.agent === source.agent && item.active);
+            return (
+              <li key={source.agent}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromptKey(source.agent);
+                    setDraft(source.text);
+                  }}
+                >
+                  {agentLabel(source.agent)}
+                </button>
+                <Tag type={source.source === "langfuse" ? "blue" : saved ? "green" : "gray"} size="sm">
+                  {promptStatus(source, saved)}
+                </Tag>
+              </li>
+            );
+          })}
+        </ul>
         <Select
           id="prompt-agent"
           labelText="Which prompt"
@@ -367,7 +455,7 @@ export default function AiAdminPage() {
         >
           Save a new version
         </Button>
-        <h3 style={{ fontWeight: 600 }}>Versions saved here</h3>
+        <h3 className="pa-card-sub">Versions saved here</h3>
         {versions.length === 0 && <p>No saved versions yet. The text above is the built-in default.</p>}
         <ul style={{ paddingLeft: 18 }}>
           {versions.map((row) => (
@@ -379,7 +467,7 @@ export default function AiAdminPage() {
       </Tile>
 
       <Tile id="ai-tools">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Tools and the MCP server</h2>
+        <h2 className="pa-card-title">Tools and the MCP server</h2>
         <p>
           FastMCP serves the same tools the chat can call, at {connections?.mcp_path || "/mcp"}.
           {connections?.mcp_installed
@@ -387,46 +475,56 @@ export default function AiAdminPage() {
             : " The FastMCP package is not installed, so that address is not mounted."}
           {" "}Turning a tool off here stops the chat from calling it. It does not delete the tool.
         </p>
-        {view.tools.map((tool) => (
-          <div key={`${tool.agent}.${tool.tool}`} style={{ borderTop: "1px solid #e0e0e0", padding: "4px 0" }}>
-          <Toggle
-            id={`tool-${tool.agent}-${tool.tool}`}
-            labelText={`${agentLabel(tool.agent)} · ${tool.tool.replaceAll("_", " ")}`}
-            labelA="Off"
-            labelB="On"
-            toggled={tool.enabled}
-            onToggle={async (checked) => {
-              const next = await run(
-                () =>
-                  pa<View>("/admin/ai/tools", {
-                    method: "POST",
-                    body: JSON.stringify({ agent: tool.agent, tool: tool.tool, enabled: checked }),
-                  }),
-                setError,
-              );
-              if (next) setView(next);
-            }}
-          />
-          </div>
+        {Array.from(new Set(view.tools.map((tool) => tool.agent))).map((agent) => (
+          <section key={agent} className="pa-tool-group">
+            <h3 className="pa-card-sub">{agentLabel(agent)}</h3>
+            {view.tools.filter((tool) => tool.agent === agent).map((tool) => (
+              <div key={`${tool.agent}.${tool.tool}`} className="pa-tool-row">
+                <div>
+                  <strong>{toolName(tool.tool)}</strong>
+                  <p>{toolHelp(tool.agent, tool.tool)}</p>
+                </div>
+                <Toggle
+                  id={`tool-${tool.agent}-${tool.tool}`}
+                  labelText={toolName(tool.tool)}
+                  hideLabel
+                  labelA="Off"
+                  labelB="On"
+                  toggled={tool.enabled}
+                  onToggle={async (checked) => {
+                    const next = await run(
+                      () =>
+                        pa<View>("/admin/ai/tools", {
+                          method: "POST",
+                          body: JSON.stringify({ agent: tool.agent, tool: tool.tool, enabled: checked }),
+                        }),
+                      setError,
+                    );
+                    if (next) setView(next);
+                  }}
+                />
+              </div>
+            ))}
+          </section>
         ))}
       </Tile>
 
       <Tile id="ai-moodle">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Moodle connection</h2>
+        <h2 className="pa-card-title">Moodle connection</h2>
         <p>These values come from the server environment. Change them there and restart. This page cannot edit them.</p>
         <p><strong>Mode.</strong> {connections?.moodle_mode === "fake" ? "Fake. Moodle is not contacted. Sync and push are recorded on this computer." : "Real. The server will call the university Moodle."}</p>
         <p><strong>Grade push (MOODLE_PUSH_ENABLED).</strong> {connections?.moodle_push_enabled ? "On. An approved grade can be written to Moodle." : "Off. Approving a grade does not write it to Moodle."}</p>
         <p><strong>Moodle address (MOODLE_BASE_URL).</strong> {connections?.moodle_base_url}</p>
         <p><strong>Moodle token (MOODLE_WS_TOKEN).</strong> {connections?.secrets.find((item) => item.name === "MOODLE_WS_TOKEN")?.state}</p>
-        <h3 style={{ fontWeight: 600 }}>Sync schedule</h3>
+        <h3 className="pa-card-sub">Sync schedule</h3>
         <p>The regular pull is the main path. “Sync now” on the grading page is only a backup.</p>
         <Toggle
-          id="sync-paused"
+          id="sync-running"
           labelText="Regular sync"
-          labelA="Running"
-          labelB="Paused"
-          toggled={view.moodle_sync_paused}
-          onToggle={(checked) => setView({ ...view, moodle_sync_paused: checked })}
+          labelA="Paused"
+          labelB="Running"
+          toggled={!view.moodle_sync_paused}
+          onToggle={(checked) => setView({ ...view, moodle_sync_paused: !checked })}
         />
         <Select
           id="sync-minutes"
@@ -448,7 +546,8 @@ export default function AiAdminPage() {
         />
         <TextInput
           id="nightly-hour"
-          labelText="Nightly hour, UTC"
+          labelText="Nightly hour"
+          helperText={dubaiLine(view.moodle_nightly_hour)}
           type="number"
           min={0}
           max={23}
@@ -459,7 +558,7 @@ export default function AiAdminPage() {
       </Tile>
 
       <Tile id="ai-tracing">
-        <h2 style={{ fontWeight: 400, marginTop: 0 }}>Tracing, search, and keys</h2>
+        <h2 className="pa-card-title">Tracing, search, and keys</h2>
         <p>
           Langfuse records each agent step after personal data has been removed. Qdrant stores the search index for notes and memory.
           Both are read from the environment.
@@ -470,13 +569,13 @@ export default function AiAdminPage() {
         <p><strong>Qdrant.</strong> {connections?.qdrant_host}:{connections?.qdrant_port}. API key {connections?.secrets.find((item) => item.name === "QDRANT_API_KEY")?.state}.</p>
         <p><strong>Model from the environment (LLM_MODEL).</strong> {connections?.model_from_env}</p>
         <p><strong>Model server URL (LLM_BASE_URL).</strong> {connections?.base_url}</p>
-        <h3 style={{ fontWeight: 600 }}>Every secret this server looks for</h3>
+        <h3 className="pa-card-sub">Every secret this server looks for</h3>
         <ul style={{ paddingLeft: 18 }}>
           {(connections?.secrets || []).map((item) => (
             <li key={item.name}><strong>{item.name}.</strong> {item.state}</li>
           ))}
         </ul>
-        <h3 style={{ fontWeight: 600 }}>Recent prompt and setting changes</h3>
+        <h3 className="pa-card-sub">Recent prompt and setting changes</h3>
         {view.audit.length === 0 && <p>No edits yet.</p>}
         <ul style={{ paddingLeft: 18 }}>
           {view.audit.map((row, index) => (
