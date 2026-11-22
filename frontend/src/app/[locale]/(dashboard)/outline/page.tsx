@@ -255,11 +255,22 @@ export default function OutlineWizardPage() {
               }}>Send for council review</Button>
             </div>
             <CouncilStage scene="review" onDone={() => setTalking(false)} />
-            <article>
-              <h3 style={{ fontWeight: 600 }}>{String((body.basics as Record<string, string> | undefined)?.code || outline.code)} {String((body.basics as Record<string, string> | undefined)?.name || outline.name)}</h3>
+            <article className="pa-preview">
+              <h3>{String((body.basics as Record<string, string> | undefined)?.code || outline.code)} {String((body.basics as Record<string, string> | undefined)?.name || outline.name)}</h3>
+              <h4>Description</h4>
               <p>{String(body.description || "No description yet.")}</p>
-              <p>{((body.clos as Array<{ code: string; text: string }>) || []).map((item) => `${item.code}. ${item.text}`).join(" ")}</p>
-              <p>{((body.tasks as Array<Record<string, unknown>>) || []).map((item) => `${String(item.number)} ${String(item.name)} ${String(item.weight)}%`).join(" · ")}</p>
+              <h4>Learning outcomes</h4>
+              <ul>
+                {((body.clos as Array<{ code: string; text: string }>) || []).map((item) => (
+                  <li key={item.code}><strong>{item.code}.</strong> {item.text}</li>
+                ))}
+              </ul>
+              <h4>Assessments</h4>
+              <ul>
+                {((body.tasks as Array<Record<string, unknown>>) || []).map((item) => (
+                  <li key={String(item.number)}><strong>{String(item.number)}.</strong> {String(item.name)} · {String(item.weight)}% · due {String(item.due || "later")}</li>
+                ))}
+              </ul>
             </article>
             {review && <p>Score {review.score}. {review.unresolved_high} high findings still open. {review.summary}</p>}
             {talking && <p>The council is talking through this outline.</p>}
@@ -293,9 +304,11 @@ export default function OutlineWizardPage() {
           <p style={{ fontSize: "1rem", lineHeight: 1.5 }}>
             {note || "Focus on healthcare cases, and prefer a project a group can finish in four weeks."}
           </p>
-          <button type="button" className="pa-why" onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
+          <div className="pa-ai-actions">
+            <button type="button" className="pa-why" onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
+            <Button kind="tertiary" size="sm" onClick={() => setNote("Kept. You can edit the fields, then go to the next step.")}>Use this</Button>
+          </div>
           {why && <p className="pa-why-body">Based on your files{files.length ? `: ${files.map((file) => file.filename).join(", ")}` : ""} and the note you wrote for this course.</p>}
-          <Button kind="tertiary" size="sm" onClick={() => setNote("Kept. You can edit the fields, then go to the next step.")}>Use this</Button>
         </aside>
         </div>
     </div>
