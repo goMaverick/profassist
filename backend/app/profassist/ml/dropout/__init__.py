@@ -35,10 +35,30 @@ DATA_NEEDED = (
 # Scores from the synthetic joblib, so the page still renders if the
 # container cannot import joblib. Same rows as _DEMO_ROWS.
 _CACHED_SCORES = {
-    "stu-1": (0.164, ["scores available count (-0.71)", "resource views 14d (+0.55)", "interactions 14d (-0.21)"]),
-    "stu-2": (0.719, ["scores available count (+1.39)", "active days 14d (+0.40)", "activity change (+0.30)"]),
-    "stu-3": (0.538, ["scores available count (+1.39)", "resource views 14d (+0.17)", "active days 14d (+0.15)"]),
-    "stu-4": (0.143, ["scores available count (-0.71)", "resource views 14d (+0.46)", "interactions 14d (-0.15)"]),
+    "stu-1": (
+        0.164,
+        [
+            "scores available count (-0.71)",
+            "resource views 14d (+0.55)",
+            "interactions 14d (-0.21)",
+        ],
+    ),
+    "stu-2": (
+        0.719,
+        ["scores available count (+1.39)", "active days 14d (+0.40)", "activity change (+0.30)"],
+    ),
+    "stu-3": (
+        0.538,
+        ["scores available count (+1.39)", "resource views 14d (+0.17)", "active days 14d (+0.15)"],
+    ),
+    "stu-4": (
+        0.143,
+        [
+            "scores available count (-0.71)",
+            "resource views 14d (+0.46)",
+            "interactions 14d (-0.15)",
+        ],
+    ),
 }
 
 _DEMO_ROWS = {
@@ -116,7 +136,9 @@ def predict(students: list[dict[str, Any]], *, course_code: str = "") -> dict[st
             except Exception:
                 score, factors = None, []
         if score is None:
-            cached_key = key if key in _CACHED_SCORES else ("stu-1", "stu-2", "stu-3", "stu-4")[index % 4]
+            cached_key = (
+                key if key in _CACHED_SCORES else ("stu-1", "stu-2", "stu-3", "stu-4")[index % 4]
+            )
             score, factors = _CACHED_SCORES[cached_key]
         if score is not None:
             if score >= 0.5:
