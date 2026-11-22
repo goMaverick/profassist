@@ -220,8 +220,8 @@ async def add_material(
     data: bytes,
 ) -> dict[str, Any]:
     course = await _course(db, org_id, course_id)
-    if len(data) > 10 * 1024 * 1024:
-        raise ProfassistError(413, "Keep uploads under 10 MB for this demo.")
+    if len(data) > 25 * 1024 * 1024:
+        raise ProfassistError(413, "Keep uploads under 25 MB.")
     raw = extract_text(filename, data)
     if not raw.strip():
         raise ProfassistError(400, "That file had no text to read.")
@@ -244,6 +244,7 @@ async def add_material(
             "replacements": len(cleaned.replacements),
             "uncertain": cleaned.uncertain,
             "quarantined": cleaned.quarantined,
+            "bytes": len(data),
         },
         storage_key=storage_key,
     )
@@ -256,12 +257,36 @@ async def add_material(
 
 
 def _material_dict(row: Material) -> dict[str, Any]:
+    report = row.pii_report or {}
     return {
         "id": str(row.id),
         "filename": row.filename,
         "status": row.status,
-        "pii_report": row.pii_report,
+        "pii_report": report,
+        "size": int(report.get("bytes") or 0),
+        "scrubbed": int(report.get("replacements") or 0) > 0,
     }
+
+
+async def delete_material(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    material_id: uuid.UUID,
+) -> dict[str, Any]:
+    row = await db.get(Material, material_id)
+    if (
+        row is None
+        or row.organization_id != org_id
+        or row.course_id != course_id
+        or row.owner_user_id != user_id
+    ):
+        raise ProfassistError(404, "That file is not in this course.")
+    await db.execute(Chunk.__table__.delete().where(Chunk.material_id == row.id))
+    await db.delete(row)
+    await db.flush()
+    return {"deleted": str(material_id)}
 
 
 async def list_materials(

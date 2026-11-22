@@ -46,7 +46,8 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | python-pptx | Done | Title, agenda, sections, content, two columns, quote, chart or table, summary, references, notes, slide numbers, image placeholder, and an optional master file. |
 | Blind sample | Done | One group in twenty is hidden until she chooses or reveals it. |
 | IBM Carbon | Partial | Professor shell, home, outline, assessments, and login use Carbon, IBM Plex, and Carbon icons. Other template screens keep their layout inside that shell. |
-| Subject outline wizard | Done | Ten steps. Attachments and instructions are step 2, after Basics and before the lecture. Review and generate is the last step. Files are indexed per professor and course. |
+| Subject outline wizard | Done | Ten steps. Attachments and instructions are step 2. The upload is a full-width drop tile, and instructions autosave. Files are indexed per professor and course. |
+| Assess navigation | Done | Three items: Assignments, Grading, and Integrity. Similarity and group work redirect into those pages. |
 | Outline review | Done | One reviewer or the council. Findings have a severity, a section, and a one-click fix. High findings do not block approval. |
 | Council animation | Done | Marking, debate, judge, and feedback play as avatar cards. Demo mode replays a timed script. The same view uses AI Elements for each persona's message, reasoning, the judge's chain of thought, and a rubric tool card. |
 | Universal chat | Done | A sheet on every professor page. It streams tool cards, citations, and the reply. A Moodle push or a delete waits for a confirm. |

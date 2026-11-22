@@ -9,11 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.profassist.errors import ProfassistError
 from app.profassist.models import (
     AssignmentIdea,
+    Course,
     Exemplar,
     GroupAllocation,
     GroupAssignment,
     Student,
     StudentGroup,
+    SubjectOutline,
     Submission,
 )
 from app.profassist.similarity import cosine, hash_embed
@@ -399,6 +401,137 @@ async def similarity_report(
         "pairs": flags,
         "note": "Shared idea briefs are removed before the comparison. A trained model can replace HashSimilarity later.",
     }
+
+
+def merge_catalog(
+    tasks: list[dict[str, Any]], stored: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Numbered outline tasks, with a saved assignment filling in the same number."""
+    by_number = {str(item.get("number") or ""): item for item in stored}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for task in tasks:
+        number = str(task.get("number") or "")
+        existing = by_number.get(number)
+        rows.append(
+            {
+                "id": (existing or {}).get("id") or "",
+                "number": number,
+                "title": (existing or {}).get("title")
+                or task.get("name")
+                or task.get("title")
+                or number,
+                "due": (existing or {}).get("due") or task.get("due") or "",
+                "weight": (existing or {}).get("weight", task.get("weight") or 0),
+                "status": (existing or {}).get("status") or "in outline",
+                "lo_codes": task.get("lo_codes") or (existing or {}).get("lo_codes") or [],
+                "brief": task.get("brief") or (existing or {}).get("body") or "",
+            }
+        )
+        seen.add(number)
+    for item in stored:
+        number = str(item.get("number") or "")
+        if number in seen:
+            continue
+        rows.append(
+            {
+                "id": item.get("id") or "",
+                "number": number,
+                "title": item.get("title") or number,
+                "due": item.get("due") or "",
+                "weight": item.get("weight") or 0,
+                "status": item.get("status") or "draft",
+                "lo_codes": item.get("lo_codes") or [],
+                "brief": item.get("body") or "",
+            }
+        )
+    return rows
+
+
+def _code(value: str) -> str:
+    return "".join(ch for ch in (value or "").upper() if ch.isalnum())
+
+
+async def list_for_course(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, course_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    course = await db.get(Course, course_id)
+    if course is None or course.organization_id != org_id:
+        raise ProfassistError(404, "That course is not in this university.")
+    stored_rows = (
+        (
+            await db.execute(
+                select(GroupAssignment).where(
+                    GroupAssignment.organization_id == org_id,
+                    GroupAssignment.owner_user_id == user_id,
+                    GroupAssignment.course_id == course_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    stored = [
+        {
+            "id": str(row.id),
+            "number": row.number,
+            "title": row.title,
+            "due": row.due,
+            "weight": row.weight,
+            "status": row.status,
+            "lo_codes": row.lo_codes,
+            "body": row.body,
+        }
+        for row in stored_rows
+    ]
+    outlines = (
+        (
+            await db.execute(
+                select(SubjectOutline).where(
+                    SubjectOutline.organization_id == org_id,
+                    SubjectOutline.owner_user_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    wanted = _code(course.code)
+    tasks: list[dict[str, Any]] = []
+    for outline in outlines:
+        body = outline.body or {}
+        basics = body.get("basics") or {}
+        code_matches = _code(str(basics.get("code") or outline.code)) == wanted
+        if outline.course_id != course_id and not code_matches:
+            continue
+        tasks.extend(body.get("tasks") or [])
+    return merge_catalog(tasks, stored)
+
+
+async def list_submissions(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assignment_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    row = await _assignment(db, org_id, user_id, assignment_id)
+    query = select(Submission).where(
+        Submission.organization_id == org_id,
+        Submission.course_id == row.course_id,
+    )
+    if row.assessment_id:
+        query = query.where(Submission.assessment_id == row.assessment_id)
+    rows = (await db.execute(query)).scalars().all()
+    items = []
+    for submission in rows:
+        text = submission.scrubbed_text or ""
+        items.append(
+            {
+                "id": str(submission.id),
+                "group_name": submission.group_name,
+                "topic": submission.topic,
+                "origin": submission.origin,
+                "excerpt": text[:180],
+            }
+        )
+    return items
 
 
 async def roster(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict[str, str]]:

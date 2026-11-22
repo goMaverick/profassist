@@ -5,8 +5,6 @@ import {
   AILabel,
   Button,
   Column,
-  FileUploaderDropContainer,
-  FileUploaderItem,
   Grid,
   InlineNotification,
   ProgressIndicator,
@@ -18,6 +16,7 @@ import {
 } from "@carbon/react";
 import { Download, MagicWand, Save } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
+import { CourseFiles, type CourseFile } from "@/components/profassist/course-files";
 import { AiSuggestion } from "@/components/profassist/ai-suggestion";
 import { CouncilStage } from "@/components/profassist/council-stage";
 
@@ -42,6 +41,7 @@ interface Outline {
   body: Record<string, unknown>;
   pdf_ready: boolean;
   instructions?: string;
+  course_id?: string;
 }
 
 export default function OutlineWizardPage() {
@@ -52,7 +52,8 @@ export default function OutlineWizardPage() {
   const [talking, setTalking] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [instructions, setInstructions] = useState("Focus on healthcare cases. Prefer project work.");
-  const [files, setFiles] = useState<Array<{ filename: string; status: string }>>([]);
+  const [files, setFiles] = useState<CourseFile[]>([]);
+  const [instructionsReady, setInstructionsReady] = useState(false);
   const [reviewMode, setReviewMode] = useState("council");
   const [review, setReview] = useState<{
     id: string;
@@ -72,13 +73,25 @@ export default function OutlineWizardPage() {
           : await pa<Outline>("/outlines?demo=true", { method: "POST" });
         setOutline(opened);
         if (opened.instructions) setInstructions(opened.instructions);
-        const materials = await pa<{ items: Array<{ filename: string; status: string }> }>(
-          `/outlines/${opened.id}/materials`,
-        ).catch(() => ({ items: [] }));
+        const materials = await pa<{ items: CourseFile[] }>(`/outlines/${opened.id}/materials`).catch(() => ({
+          items: [],
+        }));
         setFiles(materials.items || []);
+        setInstructionsReady(true);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open the outline"));
   }, []);
+
+  useEffect(() => {
+    if (!outline || !instructionsReady) return;
+    const handle = window.setTimeout(() => {
+      void pa(`/outlines/${outline.id}/instructions`, {
+        method: "PUT",
+        body: JSON.stringify({ instructions }),
+      }).catch(() => undefined);
+    }, 700);
+    return () => window.clearTimeout(handle);
+  }, [instructions, outline, instructionsReady]);
 
   const current = STEPS[step];
   const body = outline?.body || {};
@@ -146,52 +159,27 @@ export default function OutlineWizardPage() {
           <p style={{ color: "#525252", marginTop: 0 }}>{current?.helper}</p>
         {outline && current?.id === "basics" && <Basics body={body.basics as Record<string, string>} onSave={save} />}
         {outline && current?.id === "attachments" && (
-          <div style={{ display: "grid", gap: 16 }}>
-            <FileUploaderDropContainer
-              accept={[".pdf", ".docx", ".pptx", ".txt", ".md"]}
-              labelText="Drag a PDF, DOCX, PPTX, or text file here, or click to upload"
-              onAddFiles={async (_event, content) => {
-                const file = content.addedFiles[0];
-                if (!file || !outline || file.invalidFileType) return;
-                const body = new FormData();
-                body.append("file", file);
-                const saved = await run(
-                  () =>
-                    pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, {
-                      method: "POST",
-                      body,
-                    }),
-                  setError,
-                );
-                if (saved) setFiles(saved.materials);
-              }}
-            />
-            {files.map((file) => (
-              <FileUploaderItem key={file.filename} name={`${file.filename} · ${file.status}`} status="complete" />
-            ))}
-            <TextArea
-              id="instructions"
-              labelText="Instructions to AI"
-              helperText={`${instructions.length} characters. For example: focus on healthcare, or keep the deck to 10 slides.`}
-              value={instructions}
-              rows={4}
-              onChange={(event) => setInstructions(event.target.value)}
-            />
-            <Button
-              kind="tertiary"
-              disabled={!outline}
-              onClick={async () => {
-                if (!outline) return;
-                await run(
-                  () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
-                  setError,
-                );
-                setNote("Instructions saved. Later steps use them when you ask for a suggestion.");
-              }}
-            >
-              Save instructions
-            </Button>
-          </div>
+          <CourseFiles
+            files={files}
+            instructions={instructions}
+            onInstructions={setInstructions}
+            onUpload={async (file) => {
+              const body = new FormData();
+              body.append("file", file);
+              const saved = await pa<{ materials: CourseFile[] }>(`/outlines/${outline.id}/materials`, {
+                method: "POST",
+                body,
+              });
+              setFiles(saved.materials || []);
+            }}
+            onRemove={async (file) => {
+              if (!file.id) return;
+              const courseId = outline.course_id || "";
+              if (!courseId) return;
+              await pa(`/courses/${courseId}/materials/${file.id}`, { method: "DELETE" });
+              setFiles((currentFiles) => currentFiles.filter((item) => item.id !== file.id));
+            }}
+          />
         )}
         {outline && current?.id === "lecture" && <Lecture body={body.lecture as Record<string, string>} onSave={save} />}
         {outline && current?.id === "description" && (

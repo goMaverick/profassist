@@ -20,6 +20,8 @@ from app.profassist.groupwork import (
     assignment_view,
     create_from_task,
     draft_text,
+    list_for_course,
+    list_submissions,
     propose_ideas,
     publish_assignment,
     roster,
@@ -57,6 +59,7 @@ from app.profassist.service import (
     check_rubric,
     create_rubric,
     deck_bytes,
+    delete_material,
     draft_assessment,
     draft_objectives,
     draft_slides,
@@ -197,6 +200,17 @@ async def upload_material(
 ) -> dict:
     data = await file.read()
     return await add_material(db, org.id, course_id, user.id, file.filename or "notes.txt", data)
+
+
+@router.delete("/courses/{course_id}/materials/{material_id}")
+async def remove_material(
+    course_id: uuid.UUID,
+    material_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+) -> dict:
+    return await delete_material(db, org.id, course_id, user.id, material_id)
 
 
 @router.post("/courses/{course_id}/objectives/draft")
@@ -810,6 +824,13 @@ class GroupsBody(BaseModel):
     groups: list[dict] = Field(default_factory=list)
 
 
+@router.get("/assignments")
+async def assignments_list(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {"items": await list_for_course(db, org.id, user.id, course_id)}
+
+
 @router.post("/assignments")
 async def assignments_create(
     body: AssignmentBody, user: CurrentUser, org: ProfOrg, db: DBSession
@@ -888,6 +909,13 @@ async def assignments_publish(
     assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
     return await publish_assignment(db, org.id, user.id, assignment_id)
+
+
+@router.get("/assignments/{assignment_id}/submissions")
+async def assignments_submissions(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {"items": await list_submissions(db, org.id, user.id, assignment_id)}
 
 
 @router.get("/assignments/{assignment_id}/similarity")

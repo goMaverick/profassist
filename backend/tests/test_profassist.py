@@ -160,6 +160,28 @@ def test_outline_assist_scrubs_a_contact_email_before_the_model() -> None:
     assert isinstance(drafted, dict)
 
 
+def test_assignment_catalog_keeps_the_outline_number_and_due_date() -> None:
+    from app.profassist.groupwork import merge_catalog
+
+    rows = merge_catalog(
+        [{"number": "A2", "name": "Architecture report", "due": "Week 7", "weight": 25}],
+        [
+            {
+                "id": "saved",
+                "number": "A2",
+                "title": "Architecture report",
+                "due": "15 Dec",
+                "weight": 25,
+                "status": "draft",
+            }
+        ],
+    )
+    assert rows[0]["id"] == "saved"
+    assert rows[0]["due"] == "15 Dec"
+    assert rows[0]["title"] == "Architecture report"
+    assert rows[0]["status"] == "draft"
+
+
 def test_create_assignment_phrase_picks_the_course_tool() -> None:
     from app.profassist.platform_tools import choose_tool
 

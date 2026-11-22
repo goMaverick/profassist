@@ -308,7 +308,7 @@ async def _create_assignment(db, current, args):
         "title": title,
         "due": due or "Date still open",
         "status": "draft",
-        "href": "/generate",
+        "href": "/assignments",
     }
 
 
