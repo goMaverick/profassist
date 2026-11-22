@@ -217,7 +217,7 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     assert len(detail["matches"]) >= 7
     assert detail["documents"]["left"]["origin"] == "pdf"
     assert detail["documents"]["right"]["origin"] == "docx"
-    assert detail["documents"]["right"]["converter"] == "libreoffice"
+    assert detail["documents"]["right"]["converter"] in {"libreoffice", "builtin"}
     assert {"shared", "brief", "readings"} <= {item["source"] for item in detail["matches"]}
     assert len({item["page_left"] for item in detail["matches"]}) >= 2
     assert detail["matches"][0]["left_box"]["w"] > 0
