@@ -1,6 +1,7 @@
 """Idempotent demo professor, university workspace, course and Moodle submissions."""
 
 import logging
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -41,6 +42,8 @@ async def seed_demo(db: AsyncSession) -> None:
             user.id,
         )
         logger.info("Created university workspace uowd")
+    if not org.avatar_url:
+        org.avatar_url = "/brand/uowd-logo.svg"
 
     from app.profassist.models import Course, Material, StyleProfile
 
@@ -77,4 +80,10 @@ async def seed_demo(db: AsyncSession) -> None:
         )
         for row in rows.scalars().all():
             row.owner_user_id = user.id
+    from app.profassist.outline import finish_outline, list_outlines, start_outline
+
+    outlines = await list_outlines(db, org.id, user.id)
+    if not any(item["code"].replace(" ", "").upper().startswith("MAAI") for item in outlines):
+        created = await start_outline(db, org.id, user.id, demo=True)
+        await finish_outline(db, org.id, user.id, uuid.UUID(created["id"]))
     logger.info("Demo seed sync %s", summary)

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
+import { CourseFiles, type CourseFile } from "@/components/profassist/course-files";
 
 interface Material {
   id: string;
@@ -59,46 +60,26 @@ export default function StudioPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Course studio</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Objectives, slides and the rubric are drafts. Approve each one before you use it.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Course notes</h2>
-        <label className="border-foreground/15 hover:bg-foreground/[0.03] inline-flex w-fit cursor-pointer rounded-lg border px-3 py-2 text-sm">
-          Upload a note (txt, md, pdf, docx)
-          <input
-            className="hidden"
-            type="file"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              setBusy("upload");
-              const body = new FormData();
-              body.append("file", file);
-              await run(async () => {
-                await pa(`/courses/${course.id}/materials`, { method: "POST", body });
-                await refresh(course.id);
-              }, setError);
-              setBusy("");
-            }}
-          />
-        </label>
-        <ul className="flex flex-col gap-2">
-          {materials.map((item) => (
-            <li key={item.id} className="border-foreground/10 flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
-              <span>{item.filename}</span>
-              <span className="text-foreground/60">
-                {item.status === "quarantined" ? "Quarantined — personal data was not fully removed" : "Indexed"}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <CourseFiles
+          files={materials as CourseFile[]}
+          onUpload={async (file) => {
+            setBusy("upload");
+            const body = new FormData();
+            body.append("file", file);
+            await pa(`/courses/${course.id}/materials`, { method: "POST", body });
+            await refresh(course.id);
+            setBusy("");
+          }}
+          onRemove={async (file) => {
+            await pa(`/courses/${course.id}/materials/${file.id}`, { method: "DELETE" });
+            await refresh(course.id);
+          }}
+        />
       </section>
 
       <section className="flex flex-col gap-3">

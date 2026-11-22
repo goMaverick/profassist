@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Cookie, X } from "lucide-react";
 
 import { ROUTES } from "@/lib/constants";
@@ -34,7 +35,12 @@ function writeConsent(consent: CookieConsent) {
 }
 
 export function CookieBanner() {
+  const path = usePathname() || "";
   const [show, setShow] = useState(false);
+  const hide =
+    /\/(dashboard|outline|generate|assignments|similarity|studio|slides|grade|integrity|students|style|login|design|rubric|quality|admin)/.test(
+      path,
+    );
   const [showPrefs, setShowPrefs] = useState(false);
   const [analytics, setAnalytics] = useState(true);
   const [functional, setFunctional] = useState(true);
@@ -85,7 +91,7 @@ export function CookieBanner() {
     close();
   };
 
-  if (!show) return null;
+  if (!show || hide) return null;
 
   return (
     <div

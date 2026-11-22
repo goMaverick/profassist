@@ -1,27 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Geist_Mono, Inter } from "next/font/google";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import "@/components/profassist/ai-carbon.css";
+import "@/components/profassist/shell.css";
 import { defaultLocale } from "@/i18n";
 import { SITE } from "@/lib/seo";
 
-const display = Bricolage_Grotesque({
+const plex = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["700", "800"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex",
   display: "swap",
 });
 
-const body = Inter({
+const mono = IBM_Plex_Mono({
   subsets: ["latin"],
-  variable: "--font-body",
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
-
-const mono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
   weight: ["400", "500"],
+  variable: "--font-mono",
   display: "swap",
 });
 
@@ -89,9 +84,9 @@ export default function RootLayout({
     <html
       lang={defaultLocale}
       suppressHydrationWarning
-      className={`${display.variable} ${body.variable} ${mono.variable}`}
+      className={`${plex.variable} ${mono.variable}`}
     >
-      <body className="font-body">{children}</body>
+      <body className={plex.className}>{children}</body>
     </html>
   );
 }

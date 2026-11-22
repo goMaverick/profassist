@@ -24,10 +24,6 @@ export default function QualityPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">Not trained yet</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Quality and the calibrator</h1>
-      </div>
       {error && <Banner>{error}</Banner>}
       {data && (
         <div className="border-foreground/10 rounded-xl border p-5 text-sm">

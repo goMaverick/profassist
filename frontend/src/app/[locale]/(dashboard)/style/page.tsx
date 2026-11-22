@@ -53,14 +53,7 @@ export default function StylePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">soul.md</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">My style</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Agents read this when they write. It stores how you decide, not facts about students.
-          A reflection can propose a change. It is not applied until you approve it.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">This stores how you decide, not facts about students.</p>
       {error && <Banner>{error}</Banner>}
       {saved && <Banner>{saved}</Banner>}
       <section className="flex flex-col gap-2">

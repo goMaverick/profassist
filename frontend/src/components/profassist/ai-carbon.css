@@ -1,0 +1,59 @@
+/* AI Elements sit inside .pa-ai so Carbon tokens apply only there. */
+
+.pa-ai {
+  --color-background: #ffffff;
+  --color-foreground: #161616;
+  --color-card: #ffffff;
+  --color-card-foreground: #161616;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #161616;
+  --color-primary: #8a3ffc;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e0e0e0;
+  --color-secondary-foreground: #161616;
+  --color-muted: #f4f4f4;
+  --color-muted-foreground: #525252;
+  --color-accent: #d0e2ff;
+  --color-accent-foreground: #161616;
+  --color-destructive: #da1e28;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e0e0e0;
+  --color-input: #e0e0e0;
+  --color-ring: #8a3ffc;
+  --radius: 0px;
+  color: #161616;
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+.cds--g100 .pa-ai {
+  --color-background: #262626;
+  --color-foreground: #f4f4f4;
+  --color-card: #161616;
+  --color-card-foreground: #f4f4f4;
+  --color-popover: #262626;
+  --color-popover-foreground: #f4f4f4;
+  --color-primary: #78a9ff;
+  --color-primary-foreground: #161616;
+  --color-secondary: #393939;
+  --color-secondary-foreground: #f4f4f4;
+  --color-muted: #393939;
+  --color-muted-foreground: #c6c6c6;
+  --color-accent: #393939;
+  --color-accent-foreground: #f4f4f4;
+  --color-border: #393939;
+  --color-input: #393939;
+  --color-ring: #78a9ff;
+  color: #f4f4f4;
+}
+
+.pa-ai :focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-ai * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

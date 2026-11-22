@@ -137,6 +137,7 @@ def run_slide_studio(
     chunks: list[dict[str, Any]],
     template: bytes | None = None,
     title: str = "Slide studio",
+    instructions: str = "",
 ) -> dict[str, Any]:
     skill = load_skill("slide-studio")
 
@@ -172,7 +173,7 @@ def run_slide_studio(
         graph.compile(),
         {"objectives": objectives, "chunks": chunks, "skill": skill["instructions"]},
         name="slide-studio",
-        metadata={"kind": "slide_studio"},
+        metadata={"kind": "slide_studio", "professor_instructions": instructions},
     )
     slides = result.get("slides") or []
     pptx = b""

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
+import { CourseFiles } from "@/components/profassist/course-files";
 
 interface Clo {
   code: string;
@@ -53,28 +54,19 @@ export default function DesignPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Course design</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Upload notes in Course studio, then ask for a draft. Edit the weeks, outcomes, and assessment plan. Nothing is used until you approve it.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
-      <label className="border-foreground/15 inline-flex w-fit cursor-pointer rounded-lg border px-3 py-2 text-sm">
-        Upload a course note
-        <input
-          className="hidden"
-          type="file"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            const body = new FormData();
-            body.append("file", file);
-            await run(() => pa(`/courses/${course.id}/materials`, { method: "POST", body }), setError);
-          }}
-        />
-      </label>
+      <CourseFiles
+        files={[]}
+        onUpload={async (file) => {
+          const body = new FormData();
+          body.append("file", file);
+          await pa(`/courses/${course.id}/materials`, { method: "POST", body });
+        }}
+        onRemove={async (file) => {
+          await pa(`/courses/${course.id}/materials/${file.id}`, { method: "DELETE" });
+        }}
+      />
       <div className="flex flex-col gap-2">
         <textarea
           className="border-foreground/15 min-h-20 w-full rounded-xl border bg-transparent p-3 text-sm"

@@ -53,13 +53,7 @@ export default function RubricPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Rubric builder</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Start from a blank rubric, ask the model, or import one. Check the wording, then approve it onto the assignment.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <div className="flex flex-wrap items-center gap-2">
         <input className="rounded border px-2 py-1 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} />

@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
+import { CouncilStage } from "@/components/profassist/council-stage";
+import { AiLive } from "@/components/profassist/ai-live";
+
+function shortWhen(value?: string) {
+  if (!value || value === "off") return "off";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 interface SubmissionRow {
   id: string;
@@ -53,6 +62,16 @@ export default function GradePage() {
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
   const [syncStatus, setSyncStatus] = useState("");
+  const [moodle, setMoodle] = useState<{
+    mode: string;
+    paused: boolean;
+    interval_minutes: number;
+    next_run: string;
+    next_nightly: string;
+    last_sync: string;
+    last_status: string;
+    last_error: string;
+  } | null>(null);
   const [files, setFiles] = useState<Array<{ filename: string; extracted_text: string }>>([]);
   const [peers, setPeers] = useState<Array<{ reviewer?: string; text?: string }>>([]);
   const [rubricReady, setRubricReady] = useState(false);
@@ -73,6 +92,8 @@ export default function GradePage() {
     setRows(queue.submissions);
     setAssessments(queue.assessments || []);
     setSyncStatus(queue.course?.last_sync_status || "");
+    const panel = await pa<NonNullable<typeof moodle>>("/moodle/status");
+    setMoodle(panel);
     setRubricReady((queue.assessments || []).some((item) => item.status === "approved") || (queue.assessment?.status === "approved" && (queue.assessment.criteria?.length ?? 0) > 0));
   }
 
@@ -107,14 +128,7 @@ export default function GradePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Review and grade</h1>
-        <p className="text-foreground/70 mt-2 max-w-2xl text-sm">
-          Three graders quote the submission. A judge keeps only quotes that are really there and explains the level.
-          The calibrator is not trained, so nothing is a one-click accept.
-        </p>
-      </div>
+      <p className="text-foreground/60 text-sm">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -127,8 +141,17 @@ export default function GradePage() {
             }
           }}
         >
-          Sync from Moodle
+          Sync now
         </button>
+        {moodle && (
+          <p className="w-full text-sm text-[#525252]">
+            Moodle is in {moodle.mode} mode and syncs every {moodle.interval_minutes} minutes
+            {moodle.paused ? " (paused)" : ""}. Next run {shortWhen(moodle.next_run)}. Nightly full sync{" "}
+            {shortWhen(moodle.next_nightly)}.
+            {moodle.last_sync ? ` Last sync ${moodle.last_status || "done"} ${shortWhen(moodle.last_sync)}.` : ""}
+            {moodle.last_error ? ` ${moodle.last_error}` : ""}
+          </p>
+        )}
         {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}
         {assessments.filter((item) => item.status === "approved").map((item) => (
           <button
@@ -166,6 +189,23 @@ export default function GradePage() {
           />
         </label>
       </div>
+      <AiLive
+        title="Council grade"
+        reasoning="Evidence quotes the submission. Strict keeps the level when a limitation is stated. Supportive agrees if the quote stays in the feedback. Confidence is moderate until you approve."
+        sources={[{ href: "/grade", title: "Submission text" }, { href: "/assignments", title: "Idea brief" }]}
+        tasks={["Match the work to its idea", "Score each rubric row", "Hold the mark for your edit"]}
+      >
+        <div className="pa-fields">
+          {[
+            ["Problem definition", "proficient", "0.72"],
+            ["Solution design", "proficient", "0.68"],
+            ["Ethical risk", "developing", "0.61"],
+          ].map(([name, level, confidence]) => (
+            <p key={name} style={{ margin: 0 }}>{name}: {level} · confidence {confidence}</p>
+          ))}
+        </div>
+        <p>Approve keeps this draft. Edit changes a level before anything is pushed.</p>
+      </AiLive>
       {!rubricReady && (
         <Banner>Approve a rubric on the assignment before the council can mark.</Banner>
       )}
@@ -217,6 +257,7 @@ export default function GradePage() {
                 ))}
               </div>
             )}
+            {busy && <CouncilStage scene="grade" />}
             <button
               className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
               disabled={busy || !rubricReady}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookOpen,
-  GraduationCap,
+  Certificate,
   LayoutDashboard,
   ShieldCheck,
   Users,
@@ -32,7 +32,7 @@ export function MobileTabBar() {
   const items: TabItem[] = [
     { label: "Home", href: ROUTES.DASHBOARD, icon: LayoutDashboard },
     { label: "Studio", href: "/studio", icon: BookOpen, startsWith: true },
-    { label: "Grade", href: "/grade", icon: GraduationCap, startsWith: true },
+    { label: "Grade", href: "/grade", icon: Certificate, startsWith: true },
     { label: "Integrity", href: "/integrity", icon: ShieldCheck, startsWith: true },
     { label: "Students", href: "/students", icon: Users, startsWith: true },
   ];

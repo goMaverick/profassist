@@ -43,6 +43,7 @@ export function LoginForm() {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
+        <img src="/brand/uowd-logo.svg" alt="University of Wollongong in Dubai" className="h-12 w-auto" />
         <span className="eyebrow text-foreground/55">{t("welcomeBack")}</span>
         <h1 className="text-display-md text-foreground [&_em]:font-accent [&_em]:font-normal [&_em]:italic">
           Sign in to <em>your workspace.</em>

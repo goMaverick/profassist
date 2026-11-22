@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AiSuggestion } from "@/components/profassist/ai-suggestion";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 
 interface Bullet {
@@ -28,8 +29,10 @@ export default function SlideReviewPage() {
   const [error, setError] = useState("");
   const [decks, setDecks] = useState<Deck[]>([]);
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState("");
   const [master, setMaster] = useState("");
   const [week, setWeek] = useState(1);
+  const [instructions, setInstructions] = useState("Max 10 slides. One idea per slide.");
 
   async function load(courseId: string) {
     const data = await pa<{ items: Deck[] }>(`/courses/${courseId}/slides`);
@@ -45,15 +48,16 @@ export default function SlideReviewPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">Slide studio</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Review slides and sources</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Each bullet stays next to the note it came from. A gap means the upload does not cover that objective.
-        </p>
-      </div>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm">
+          Instructions to AI
+          <textarea
+            className="mt-1 block w-full rounded border p-2"
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+          />
+        </label>
         <label className="text-sm">
           Week
           <input
@@ -66,20 +70,36 @@ export default function SlideReviewPage() {
         </label>
         <button
           className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+          data-build-deck=""
           disabled={busy}
           onClick={async () => {
             setBusy(true);
             const deck = await run(
-              () => pa<Deck>(`/courses/${course.id}/slides/studio?week=${week}`, { method: "POST" }),
+              () => pa<Deck>(`/courses/${course.id}/slides/studio?week=${week}&instructions=${encodeURIComponent(instructions)}`, { method: "POST" }),
               setError,
             );
-            if (deck) await load(course.id);
+            if (deck) {
+              await load(course.id);
+              setDraft(`${deck.title || "This week's deck"}. Instructions: ${instructions}`);
+            }
             setBusy(false);
           }}
         >
-          {busy ? "Planning the deck…" : "Build this week's deck"}
+          {busy ? "Planning the deck…" : "Build or regenerate this week's deck"}
         </button>
       </div>
+      {(busy || draft) && (
+        <AiSuggestion
+          title="Slide studio"
+          description="A cited deck for the week, using your instructions."
+          body={draft || "Planning the deck…"}
+          busy={busy}
+          citation={instructions}
+          onRegenerate={() => {
+            document.querySelector<HTMLButtonElement>("[data-build-deck]")?.click();
+          }}
+        />
+      )}
       <label className="text-sm">
         Deck master (.pptx or .potx)
         <input

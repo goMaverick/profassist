@@ -34,7 +34,7 @@ from app.profassist.models import (
     Submission,
     SubmissionFile,
 )
-from app.profassist.moodle import CLOS, get_connector
+from app.profassist.moodle import CLOS
 from app.profassist.pii import scrub
 from app.profassist.rag import chunk_text, index_chunks, rank_chunks
 from app.profassist.runtime import set_about
@@ -133,6 +133,7 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "clos": course.clos,
         "last_sync_at": course.last_sync_at.isoformat() if course.last_sync_at else "",
         "last_sync_status": course.last_sync_status or "",
+        "ai_instructions": course.ai_instructions or "",
     }
 
 
@@ -168,7 +169,9 @@ async def home(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[
         waiting = len(submissions)
     else:
         waiting = 0
-    connector = get_connector()
+    from app.integrations.moodle.gateway import adapter
+
+    connector = adapter()
     return {
         "courses": courses,
         "submissions": waiting,
@@ -217,13 +220,18 @@ async def add_material(
     data: bytes,
 ) -> dict[str, Any]:
     course = await _course(db, org_id, course_id)
-    if len(data) > 10 * 1024 * 1024:
-        raise ProfassistError(413, "Keep uploads under 10 MB for this demo.")
+    if len(data) > 25 * 1024 * 1024:
+        raise ProfassistError(413, "Keep uploads under 25 MB.")
     raw = extract_text(filename, data)
     if not raw.strip():
         raise ProfassistError(400, "That file had no text to read.")
     cleaned = scrub(raw, await _names(db, org_id, course_id))
-    storage_key = save_bytes(f"{org_id}/{course.id}/{filename}", data, "application/octet-stream")
+    allowed = (".pdf", ".docx", ".pptx", ".txt", ".md", ".potx")
+    if not filename.lower().endswith(allowed):
+        raise ProfassistError(400, "Attach a PDF, DOCX, PPTX, TXT, or Markdown file.")
+    storage_key = save_bytes(
+        f"{org_id}/{user_id}/{course.id}/{filename}", data, "application/octet-stream"
+    )
     material = Material(
         organization_id=org_id,
         course_id=course.id,
@@ -236,6 +244,7 @@ async def add_material(
             "replacements": len(cleaned.replacements),
             "uncertain": cleaned.uncertain,
             "quarantined": cleaned.quarantined,
+            "bytes": len(data),
         },
         storage_key=storage_key,
     )
@@ -248,12 +257,36 @@ async def add_material(
 
 
 def _material_dict(row: Material) -> dict[str, Any]:
+    report = row.pii_report or {}
     return {
         "id": str(row.id),
         "filename": row.filename,
         "status": row.status,
-        "pii_report": row.pii_report,
+        "pii_report": report,
+        "size": int(report.get("bytes") or 0),
+        "scrubbed": int(report.get("replacements") or 0) > 0,
     }
+
+
+async def delete_material(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    material_id: uuid.UUID,
+) -> dict[str, Any]:
+    row = await db.get(Material, material_id)
+    if (
+        row is None
+        or row.organization_id != org_id
+        or row.course_id != course_id
+        or row.owner_user_id != user_id
+    ):
+        raise ProfassistError(404, "That file is not in this course.")
+    await db.execute(Chunk.__table__.delete().where(Chunk.material_id == row.id))
+    await db.delete(row)
+    await db.flush()
+    return {"deleted": str(material_id)}
 
 
 async def list_materials(
@@ -412,6 +445,7 @@ def _deck_dict(row: SlideDeck) -> dict[str, Any]:
         "title": row.title,
         "status": row.status,
         "week": row.week,
+        "instructions": row.instructions or "",
         "slides": row.slides,
         "previews": render_thumbnails(plan[:8]),
     }
@@ -800,7 +834,9 @@ async def push_record(
         assert_can_push(status)
     except PermissionError as exc:
         raise ProfassistError(409, str(exc)) from exc
-    receipt = get_connector().push({"type": target_type, "id": target_id, **payload})
+    from app.integrations.moodle.gateway import push as moodle_push
+
+    receipt = await moodle_push({"type": target_type, "id": target_id, **payload})
     db.add(
         MoodlePush(
             organization_id=org_id,
@@ -920,7 +956,15 @@ async def _apply_imported_criteria(
 async def sync_moodle(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None = None
 ) -> dict[str, Any]:
-    connector = get_connector()
+    """Manual pull. The scheduled Prefect flow is the usual path."""
+    from app.integrations.moodle.gateway import sync as gateway_sync
+
+    return await gateway_sync(db, org_id, user_id, trigger="manual")
+
+
+async def pull_moodle(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None, connector: Any
+) -> dict[str, Any]:
     created = {"courses": 0, "students": 0, "submissions": 0}
     for remote in connector.list_courses():
         result = await db.execute(
@@ -1516,7 +1560,7 @@ async def set_flag(
 
 
 async def list_students(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> dict:
-    await _course(db, org_id, course_id)
+    course = await _course(db, org_id, course_id)
     result = await db.execute(
         select(Student).where(Student.organization_id == org_id, Student.course_id == course_id)
     )
@@ -1530,7 +1574,11 @@ async def list_students(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUI
         }
         for row in result.scalars().all()
     ]
-    return {"students": students, "early_warning": stubs.at_risk_snapshot(students)}
+    return {
+        "students": students,
+        "course": {"id": str(course.id), "code": course.code, "title": course.title},
+        "early_warning": stubs.at_risk_snapshot(students, course_code=course.code),
+    }
 
 
 def _grade_view(feedback: str, levels: dict | None) -> str:
@@ -1797,6 +1845,7 @@ async def build_cited_deck(
     course_id: uuid.UUID,
     user_id: uuid.UUID,
     week: int = 0,
+    instructions: str = "",
 ) -> dict[str, Any]:
     """Slide-studio skill: multi-hop retrieval, citations, gaps, then pptx."""
     from app.profassist.skills.slide_studio import run_slide_studio
@@ -1853,15 +1902,19 @@ async def build_cited_deck(
         )
     if not chunks:
         raise ProfassistError(400, "Upload a course note before building a cited deck.")
+    note = (instructions or course.ai_instructions or "").strip()
+    if instructions:
+        course.ai_instructions = note
     profile = await _style_row(db, org_id, user_id, create=False)
     template = read_bytes(profile.template_key) if profile and profile.template_key else None
-    built = run_slide_studio(objectives, chunks, template=template, title=title)
+    built = run_slide_studio(objectives, chunks, template=template, title=title, instructions=note)
     deck = SlideDeck(
         organization_id=org_id,
         course_id=course.id,
         owner_user_id=user_id,
         title=title,
         week=week,
+        instructions=note,
         slides=built["slides"],
         status="draft",
     )

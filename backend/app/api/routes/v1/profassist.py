@@ -1,16 +1,53 @@
 """Professor API. Drafts stay drafts until she approves them."""
 
+import asyncio
+import json
 import uuid
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAppAdmin, CurrentUser, DBSession
+from app.integrations.moodle.gateway import launch as moodle_launch
+from app.integrations.moodle.gateway import status_for as moodle_status
+from app.integrations.moodle.gateway import test_connection as moodle_test
+from app.profassist.council_script import script_for
 from app.profassist.deps import ProfOrg
 from app.profassist.design import approve_design, draft_design, get_design, save_design
+from app.profassist.groupwork import (
+    allocate,
+    assess_summary,
+    assignment_view,
+    create_from_task,
+    draft_text,
+    list_for_course,
+    list_submissions,
+    propose_ideas,
+    publish_assignment,
+    roster,
+    save_groups,
+    save_ideas,
+    similarity_report,
+    write_exemplars,
+)
 from app.profassist.memory import delete_memory, list_memories
-from app.profassist.moodle import get_connector
+from app.profassist.outline import (
+    accept_assessments,
+    assist_step,
+    attach_file,
+    document_bytes,
+    finish_outline,
+    get_outline,
+    list_outlines,
+    outline_materials,
+    save_instructions,
+    save_step,
+    start_outline,
+    suggest_assessments,
+)
+from app.profassist.outline_review import apply_review_fix, run_review
+from app.profassist.platform_tools import chat_stream_events, chat_turn, tool_catalog
 from app.profassist.service import (
     add_material,
     approve_assessment,
@@ -23,6 +60,7 @@ from app.profassist.service import (
     check_rubric,
     create_rubric,
     deck_bytes,
+    delete_material,
     draft_assessment,
     draft_objectives,
     draft_slides,
@@ -60,6 +98,7 @@ from app.profassist.service import (
 )
 from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
 from app.profassist.tracking import list_registered_models
+from app.profassist.visuals import page_visuals
 
 router = APIRouter()
 
@@ -114,9 +153,27 @@ async def home_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return await home(db, org.id, user.id)
 
 
+@router.get("/visuals")
+async def visuals_view(user: CurrentUser, org: ProfOrg, page: str = "home") -> dict:
+    del user, org
+    return page_visuals(page)
+
+
 @router.get("/courses")
 async def courses(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return {"items": await list_courses(db, org.id)}
+
+
+@router.get("/moodle/status")
+async def moodle_status_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    del user
+    return await moodle_status(db, org.id)
+
+
+@router.post("/moodle/test")
+async def moodle_test_view(user: CurrentUser, org: ProfOrg) -> dict:
+    del user, org
+    return moodle_test()
 
 
 @router.post("/moodle/sync")
@@ -126,7 +183,7 @@ async def moodle_sync(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
 
 @router.post("/lti/launch")
 async def lti_launch(body: LaunchBody, user: CurrentUser, org: ProfOrg) -> dict:
-    return get_connector().lti_launch(body.claims)
+    return await moodle_launch(body.claims)
 
 
 @router.get("/courses/{course_id}/materials")
@@ -144,6 +201,17 @@ async def upload_material(
 ) -> dict:
     data = await file.read()
     return await add_material(db, org.id, course_id, user.id, file.filename or "notes.txt", data)
+
+
+@router.delete("/courses/{course_id}/materials/{material_id}")
+async def remove_material(
+    course_id: uuid.UUID,
+    material_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+) -> dict:
+    return await delete_material(db, org.id, course_id, user.id, material_id)
 
 
 @router.post("/courses/{course_id}/objectives/draft")
@@ -459,8 +527,9 @@ async def slides_studio(
     org: ProfOrg,
     db: DBSession,
     week: int = Query(default=0),
+    instructions: str = Query(default=""),
 ) -> dict:
-    return await build_cited_deck(db, org.id, course_id, user.id, week)
+    return await build_cited_deck(db, org.id, course_id, user.id, week, instructions)
 
 
 @router.get("/memories")
@@ -485,6 +554,10 @@ class SettingsBody(BaseModel):
     debate_threshold: int = 0
     debate_max_rounds: int = 1
     agent_models: dict[str, dict[str, str]] = Field(default_factory=dict)
+    moodle_sync_paused: bool = False
+    moodle_sync_minutes: int = 30
+    moodle_nightly_enabled: bool = True
+    moodle_nightly_hour: int = 2
 
 
 class TestBody(BaseModel):
@@ -525,6 +598,10 @@ async def ai_admin_save(
         body.debate_threshold,
         body.debate_max_rounds,
         body.agent_models,
+        body.moodle_sync_paused,
+        body.moodle_sync_minutes,
+        body.moodle_nightly_enabled,
+        body.moodle_nightly_hour,
     )
 
 
@@ -552,3 +629,352 @@ async def ai_tool_save(body: ToolBody, user: CurrentAppAdmin, org: ProfOrg, db: 
 async def models_admin(user: CurrentAppAdmin, org: ProfOrg) -> dict:
     del user, org
     return list_registered_models()
+
+
+class StepBody(BaseModel):
+    step: str
+    payload: dict = Field(default_factory=dict)
+    message: str = ""
+
+
+class InstructionBody(BaseModel):
+    instructions: str = ""
+
+
+class ChatBody(BaseModel):
+    message: str = ""
+    confirmed: bool = False
+    pending_tool: str = ""
+
+
+class AcceptBody(BaseModel):
+    tasks: list = Field(default_factory=list)
+
+
+class SuggestBody(BaseModel):
+    lo_codes: list[str] = Field(default_factory=list)
+
+
+@router.get("/outlines")
+async def outlines(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return {
+        "items": await list_outlines(db, org.id, user.id),
+        "steps": [
+            "basics",
+            "attachments",
+            "lecture",
+            "description",
+            "outcomes",
+            "schedule",
+            "readings",
+            "assessments",
+            "policies",
+            "review",
+        ],
+    }
+
+
+@router.post("/outlines")
+async def outlines_start(
+    user: CurrentUser, org: ProfOrg, db: DBSession, demo: bool = False
+) -> dict:
+    return await start_outline(db, org.id, user.id, demo=demo)
+
+
+@router.get("/outlines/{outline_id}")
+async def outlines_get(
+    outline_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    row = await get_outline(db, org.id, user.id, outline_id)
+    from app.profassist.outline import _public
+
+    return _public(row)
+
+
+@router.put("/outlines/{outline_id}/step")
+async def outlines_step(
+    outline_id: uuid.UUID, body: StepBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_step(db, org.id, user.id, outline_id, body.step, body.payload)
+
+
+@router.post("/outlines/{outline_id}/assist")
+async def outlines_assist(
+    outline_id: uuid.UUID, body: StepBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await assist_step(db, org.id, user.id, outline_id, body.step, body.message)
+
+
+@router.put("/outlines/{outline_id}/instructions")
+async def outlines_instructions(
+    outline_id: uuid.UUID, body: InstructionBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_instructions(db, org.id, user.id, outline_id, body.instructions)
+
+
+@router.get("/outlines/{outline_id}/materials")
+async def outlines_files(
+    outline_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {"items": await outline_materials(db, org.id, user.id, outline_id)}
+
+
+@router.post("/outlines/{outline_id}/materials")
+async def outlines_attach(
+    outline_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    file: UploadFile = File(...),
+) -> dict:
+    return await attach_file(
+        db, org.id, user.id, outline_id, file.filename or "notes.txt", await file.read()
+    )
+
+
+@router.post("/outlines/{outline_id}/finish")
+async def outlines_finish(
+    outline_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await finish_outline(db, org.id, user.id, outline_id)
+
+
+@router.get("/outlines/{outline_id}/document")
+async def outlines_document(
+    outline_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession, kind: str = "pdf"
+) -> Response:
+    filename, data, media = await document_bytes(db, org.id, user.id, outline_id, kind)
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/outlines/{outline_id}/assessments/suggest")
+async def outlines_suggest(
+    outline_id: uuid.UUID, body: SuggestBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await suggest_assessments(db, org.id, user.id, outline_id, body.lo_codes)
+
+
+@router.post("/outlines/{outline_id}/assessments/accept")
+async def outlines_accept(
+    outline_id: uuid.UUID, body: AcceptBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await accept_assessments(db, org.id, user.id, outline_id, body.tasks)
+
+
+@router.get("/council/stream")
+async def council_stream(
+    user: CurrentUser, org: ProfOrg, scene: str = Query(default="grade")
+) -> StreamingResponse:
+    del user, org
+
+    async def events():
+        for event in script_for(scene):
+            await asyncio.sleep(float(event.get("delay") or 0))
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+class ReviewBody(BaseModel):
+    mode: str = "council"
+    reviewer: str = "curriculum"
+
+
+@router.post("/outlines/{outline_id}/review")
+async def outlines_review(
+    outline_id: uuid.UUID, body: ReviewBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await run_review(db, org.id, user.id, outline_id, mode=body.mode, reviewer=body.reviewer)
+
+
+@router.post("/outlines/{outline_id}/reviews/{review_id}/apply")
+async def outlines_apply(
+    outline_id: uuid.UUID,
+    review_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    finding_id: str = Query(...),
+) -> dict:
+    return await apply_review_fix(db, org.id, user.id, outline_id, review_id, finding_id)
+
+
+class AssignmentBody(BaseModel):
+    course_id: str
+    number: str = "A1"
+    title: str = ""
+    weight: int = 0
+    due: str = ""
+    lo_codes: list[str] = Field(default_factory=list)
+    outline_task_id: str = ""
+    assessment_id: str = ""
+    body: str = ""
+    instructions: str = ""
+
+
+class IdeasBody(BaseModel):
+    ideas: list[dict] = Field(default_factory=list)
+
+
+class GroupsBody(BaseModel):
+    course_id: str
+    groups: list[dict] = Field(default_factory=list)
+
+
+@router.get("/assignments")
+async def assignments_list(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {
+        "items": await list_for_course(db, org.id, user.id, course_id),
+        "summary": await assess_summary(db, org.id, user.id, course_id),
+    }
+
+
+@router.post("/assignments")
+async def assignments_create(
+    body: AssignmentBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    text = body.body or await draft_text(body.title, body.lo_codes, body.instructions)
+    return await create_from_task(
+        db,
+        org.id,
+        user.id,
+        course_id=uuid.UUID(body.course_id),
+        number=body.number,
+        title=body.title,
+        weight=body.weight,
+        due=body.due,
+        lo_codes=body.lo_codes,
+        outline_task_id=body.outline_task_id,
+        assessment_id=body.assessment_id,
+        body=text,
+    )
+
+
+@router.get("/assignments/{assignment_id}")
+async def assignments_get(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await assignment_view(db, org.id, user.id, assignment_id)
+
+
+@router.post("/assignments/{assignment_id}/ideas")
+async def assignments_ideas(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    current = await assignment_view(db, org.id, user.id, assignment_id)
+    ideas = await propose_ideas(current["title"], current["body"], current["lo_codes"])
+    return await save_ideas(db, org.id, user.id, assignment_id, ideas)
+
+
+@router.put("/assignments/{assignment_id}/ideas")
+async def assignments_ideas_save(
+    assignment_id: uuid.UUID, body: IdeasBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await save_ideas(db, org.id, user.id, assignment_id, body.ideas)
+
+
+@router.get("/courses/{course_id}/roster")
+async def course_roster(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    del user
+    return {"items": await roster(db, org.id, course_id)}
+
+
+@router.put("/courses/{course_id}/groups")
+async def course_groups(
+    course_id: uuid.UUID, body: GroupsBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {"items": await save_groups(db, org.id, user.id, course_id, body.groups)}
+
+
+@router.post("/assignments/{assignment_id}/allocate")
+async def assignments_allocate(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await allocate(db, org.id, user.id, assignment_id)
+
+
+@router.post("/assignments/{assignment_id}/exemplars")
+async def assignments_exemplars(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await write_exemplars(db, org.id, user.id, assignment_id)
+
+
+@router.post("/assignments/{assignment_id}/publish")
+async def assignments_publish(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await publish_assignment(db, org.id, user.id, assignment_id)
+
+
+@router.get("/assignments/{assignment_id}/submissions")
+async def assignments_submissions(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return {"items": await list_submissions(db, org.id, user.id, assignment_id)}
+
+
+@router.get("/assignments/{assignment_id}/similarity")
+async def assignments_similarity(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await similarity_report(db, org.id, user.id, assignment_id)
+
+
+@router.get("/brand")
+async def brand(user: CurrentUser, org: ProfOrg) -> dict:
+    del user
+    return {
+        "name": org.name,
+        "logo_url": org.avatar_url or "/brand/uowd-logo.svg",
+    }
+
+
+@router.get("/tools")
+async def tools_view(user: CurrentUser, org: ProfOrg) -> dict:
+    del user, org
+    return {"items": tool_catalog()}
+
+
+@router.post("/chat")
+async def professor_chat(body: ChatBody, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return await chat_turn(
+        db,
+        org.id,
+        user.id,
+        is_admin=bool(user.is_app_admin),
+        message=body.message,
+        confirmed=body.confirmed,
+        pending_tool=body.pending_tool,
+    )
+
+
+@router.post("/chat/stream")
+async def professor_chat_stream(
+    body: ChatBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> StreamingResponse:
+    payload = await chat_turn(
+        db,
+        org.id,
+        user.id,
+        is_admin=bool(user.is_app_admin),
+        message=body.message,
+        confirmed=body.confirmed,
+        pending_tool=body.pending_tool,
+    )
+
+    async def events():
+        for item in chat_stream_events(payload):
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'])}\n\n".encode()
+            if item["event"] == "text":
+                await asyncio.sleep(0.02)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
