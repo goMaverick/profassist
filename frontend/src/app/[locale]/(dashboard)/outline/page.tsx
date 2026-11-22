@@ -22,14 +22,16 @@ import { AiSuggestion } from "@/components/profassist/ai-suggestion";
 import { CouncilStage } from "@/components/profassist/council-stage";
 
 const STEPS = [
-  { id: "basics", label: "Basics" },
-  { id: "lecture", label: "Lecture and educator" },
-  { id: "description", label: "Description" },
-  { id: "outcomes", label: "Outcomes" },
-  { id: "schedule", label: "Weekly schedule" },
-  { id: "readings", label: "Readings" },
-  { id: "assessments", label: "Assessments" },
-  { id: "policies", label: "Policies" },
+  { id: "basics", label: "Basics", helper: "Name, code, credit points, session, year, duration, prerequisites, and delivery." },
+  { id: "attachments", label: "Attachments & Instructions to AI", helper: "Files and instructions for this course. Personal data is removed before the assistant reads them." },
+  { id: "lecture", label: "Lecture and educator", helper: "Who teaches the subject, and when students can reach them." },
+  { id: "description", label: "Description", helper: "The subject description that appears on the outline." },
+  { id: "outcomes", label: "Outcomes (CLOs)", helper: "Course learning outcomes and how they map to the program." },
+  { id: "schedule", label: "Weekly schedule", helper: "Week by week topics for the session." },
+  { id: "readings", label: "Readings", helper: "Required and recommended readings." },
+  { id: "assessments", label: "Assessments", helper: "Tasks, weights, and due dates. Weights should total 100%." },
+  { id: "policies", label: "Policies", helper: "Integrity, attendance, lecture capture, and the other faculty policies." },
+  { id: "review", label: "Review & generate", helper: "Check the outline, then generate the PDF and DOCX. Nothing is sent until you approve." },
 ];
 
 interface Outline {
@@ -39,6 +41,7 @@ interface Outline {
   name: string;
   body: Record<string, unknown>;
   pdf_ready: boolean;
+  instructions?: string;
 }
 
 export default function OutlineWizardPage() {
@@ -64,8 +67,15 @@ export default function OutlineWizardPage() {
   useEffect(() => {
     pa<{ items: Outline[] }>("/outlines")
       .then(async (data) => {
-        if (data.items.length) setOutline(data.items[0]);
-        else setOutline(await pa<Outline>("/outlines?demo=true", { method: "POST" }));
+        const opened = data.items.length
+          ? data.items[0]
+          : await pa<Outline>("/outlines?demo=true", { method: "POST" });
+        setOutline(opened);
+        if (opened.instructions) setInstructions(opened.instructions);
+        const materials = await pa<{ items: Array<{ filename: string; status: string }> }>(
+          `/outlines/${opened.id}/materials`,
+        ).catch(() => ({ items: [] }));
+        setFiles(materials.items || []);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open the outline"));
   }, []);
@@ -132,57 +142,57 @@ export default function OutlineWizardPage() {
         </div>
         <div>
         <Tile>
-          <h2 style={{ fontSize: "1rem", fontWeight: 600, marginTop: 0 }}>Attachments and instructions</h2>
-          <p style={{ color: "#525252" }}>
-            Files stay with this professor and course. Personal data is removed before the assistant reads them.
-          </p>
-          <FileUploaderDropContainer
-            accept={[".pdf", ".docx", ".pptx", ".txt", ".md"]}
-            labelText="Drag a PDF, DOCX, PPTX, or text file here, or click to upload"
-            onAddFiles={async (_event, content) => {
-              const file = content.addedFiles[0];
-              if (!file || !outline || file.invalidFileType) return;
-              const body = new FormData();
-              body.append("file", file);
-              const saved = await run(
-                () =>
-                  pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, {
-                    method: "POST",
-                    body,
-                  }),
-                setError,
-              );
-              if (saved) setFiles(saved.materials);
-            }}
-          />
-          {files.map((file) => (
-            <FileUploaderItem key={file.filename} name={`${file.filename} · ${file.status}`} status="complete" />
-          ))}
-          <TextArea
-            id="instructions"
-            labelText="Instructions to AI"
-            helperText="For example: focus on healthcare, or keep the deck to 10 slides."
-            value={instructions}
-            rows={3}
-            onChange={(event) => setInstructions(event.target.value)}
-          />
-          <Button
-            kind="tertiary"
-            disabled={!outline}
-            onClick={async () => {
-              if (!outline) return;
-              await run(
-                () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
-                setError,
-              );
-              setNote("Instructions saved. Suggest this step again to regenerate with them.");
-            }}
-          >
-            Save instructions
-          </Button>
-        </Tile>
-        <Tile style={{ marginTop: 16 }}>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 400, marginTop: 0 }}>{current?.label}</h2>
+          <p style={{ color: "#525252", marginTop: 0 }}>{current?.helper}</p>
         {outline && current?.id === "basics" && <Basics body={body.basics as Record<string, string>} onSave={save} />}
+        {outline && current?.id === "attachments" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <FileUploaderDropContainer
+              accept={[".pdf", ".docx", ".pptx", ".txt", ".md"]}
+              labelText="Drag a PDF, DOCX, PPTX, or text file here, or click to upload"
+              onAddFiles={async (_event, content) => {
+                const file = content.addedFiles[0];
+                if (!file || !outline || file.invalidFileType) return;
+                const body = new FormData();
+                body.append("file", file);
+                const saved = await run(
+                  () =>
+                    pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, {
+                      method: "POST",
+                      body,
+                    }),
+                  setError,
+                );
+                if (saved) setFiles(saved.materials);
+              }}
+            />
+            {files.map((file) => (
+              <FileUploaderItem key={file.filename} name={`${file.filename} · ${file.status}`} status="complete" />
+            ))}
+            <TextArea
+              id="instructions"
+              labelText="Instructions to AI"
+              helperText={`${instructions.length} characters. For example: focus on healthcare, or keep the deck to 10 slides.`}
+              value={instructions}
+              rows={4}
+              onChange={(event) => setInstructions(event.target.value)}
+            />
+            <Button
+              kind="tertiary"
+              disabled={!outline}
+              onClick={async () => {
+                if (!outline) return;
+                await run(
+                  () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
+                  setError,
+                );
+                setNote("Instructions saved. Later steps use them when you ask for a suggestion.");
+              }}
+            >
+              Save instructions
+            </Button>
+          </div>
+        )}
         {outline && current?.id === "lecture" && <Lecture body={body.lecture as Record<string, string>} onSave={save} />}
         {outline && current?.id === "description" && (
           <Description text={String(body.description || "")} onSave={(description) => save({ description })} />
@@ -206,6 +216,47 @@ export default function OutlineWizardPage() {
         )}
         {outline && current?.id === "policies" && (
           <Policies items={(body.policies as Array<{ key: string; title: string; body: string }>) || []} onSave={(policies) => save({ policies })} />
+        )}
+        {outline && current?.id === "review" && (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button kind={reviewMode === "council" ? "primary" : "tertiary"} onClick={() => setReviewMode("council")}>
+                Full council
+              </Button>
+              <Button kind={reviewMode === "single" ? "primary" : "tertiary"} onClick={() => setReviewMode("single")}>
+                Curriculum reviewer
+              </Button>
+              <Button
+                kind="secondary"
+                disabled={!outline}
+                onClick={async () => {
+                  setTalking(true);
+                  const result = await run(
+                    () =>
+                      pa<NonNullable<typeof review>>(`/outlines/${outline.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ mode: reviewMode, reviewer: "curriculum" }),
+                      }),
+                    setError,
+                  );
+                  if (result) setReview(result);
+                }}
+              >
+                Send for council review
+              </Button>
+            </div>
+            {talking && <CouncilStage scene="review" onDone={() => setTalking(false)} />}
+            <p style={{ margin: 0 }}>
+              {String((body.basics as Record<string, string> | undefined)?.code || outline.code)}{" "}
+              {String((body.basics as Record<string, string> | undefined)?.name || outline.name)}
+            </p>
+            <p style={{ margin: 0 }}>{String(body.description || "No description yet.")}</p>
+            {review && (
+              <p style={{ margin: 0 }}>
+                Score {review.score}. {review.unresolved_high} high findings still open. {review.summary}
+              </p>
+            )}
+          </div>
         )}
         </Tile>
         <div className="pa-sticky-actions">
@@ -275,92 +326,6 @@ export default function OutlineWizardPage() {
         </aside>
         </div>
       </Column>
-      <Column lg={16}>
-        <section className="pa-panel" style={{ marginTop: 24 }}>
-        <h2>Review before approval</h2>
-        <div style={{ display: "flex", gap: "0.5rem", margin: "0.5rem 0 1rem" }}>
-          <Button kind={reviewMode === "council" ? "primary" : "tertiary"} onClick={() => setReviewMode("council")}>
-            Full council
-          </Button>
-          <Button kind={reviewMode === "single" ? "primary" : "tertiary"} onClick={() => setReviewMode("single")}>
-            Curriculum reviewer
-          </Button>
-          <Button
-            kind="secondary"
-            disabled={!outline}
-            onClick={async () => {
-              if (!outline) return;
-              setTalking(true);
-              const result = await run(
-                () =>
-                  pa<NonNullable<typeof review>>(`/outlines/${outline.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                      mode: reviewMode,
-                      reviewer: "curriculum",
-                    }),
-                  }),
-                setError,
-              );
-              if (result) setReview(result);
-            }}
-          >
-            Run review
-          </Button>
-        </div>
-        {talking && <CouncilStage scene="review" onDone={() => setTalking(false)} />}
-        {review && (
-          <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
-            <p>
-              Score {review.score}. {review.unresolved_high} high findings still open. {review.summary}
-            </p>
-            {review.trace_url && (
-              <a href={review.trace_url}>View the Langfuse trace</a>
-            )}
-            {review.debate.map((item) => (
-              <p key={item.round}>Round {item.round}: {item.note}</p>
-            ))}
-            {review.findings.map((finding) => (
-              <div key={finding.id} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                <Tag type={finding.severity === "high" ? "red" : finding.severity === "medium" ? "magenta" : "gray"}>
-                  {finding.severity}
-                </Tag>
-                <span>
-                  {finding.section} · {finding.object_id}: {finding.message}
-                </span>
-                {!finding.applied && outline && (
-                  <Button
-                    size="sm"
-                    kind="ghost"
-                    onClick={async () => {
-                      const next = await run(
-                        () =>
-                          pa<NonNullable<typeof review>>(
-                            `/outlines/${outline.id}/reviews/${review.id}/apply?finding_id=${encodeURIComponent(finding.id)}`,
-                            { method: "POST" },
-                          ),
-                        setError,
-                      );
-                      if (next) setReview(next);
-                    }}
-                  >
-                    Apply fix
-                  </Button>
-                )}
-              </div>
-            ))}
-            {review.unresolved_high > 0 && (
-              <InlineNotification
-                kind="warning"
-                title="High findings are still open"
-                subtitle="You can still approve. Re-run the review after you edit."
-                hideCloseButton
-              />
-            )}
-          </div>
-        )}
-        </section>
-      </Column>
     </Grid>
   );
 }
@@ -408,7 +373,6 @@ function Lecture({ body, onSave }: { body: Record<string, string>; onSave: (payl
   const [form, setForm] = useState(body || {});
   return (
     <div className="pa-fields">
-      <p style={{ margin: 0, color: "#525252" }}>Who teaches the subject, and when students can reach them.</p>
       {["day", "time", "location", "educator_name", "office", "email", "consultation"].map((key) => (
         <TextInput
           key={key}

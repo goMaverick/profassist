@@ -28,6 +28,7 @@ from app.profassist.storage import save_bytes
 
 STEPS = (
     "basics",
+    "attachments",
     "lecture",
     "description",
     "outcomes",
@@ -35,6 +36,7 @@ STEPS = (
     "readings",
     "assessments",
     "policies",
+    "review",
 )
 
 
@@ -129,6 +131,13 @@ async def save_step(
         body["tasks"] = payload.get("tasks") or []
     elif step == "policies":
         body["policies"] = payload.get("policies") or []
+    elif step == "attachments":
+        note = str(payload.get("instructions") or payload.get("message") or "").strip()
+        if note:
+            row.instructions = scrub(note).text.strip()
+        body.pop("attachments", None)
+    elif step == "review":
+        body.pop("review", None)
     row.body = body
     row.status = "draft"
     await db.flush()

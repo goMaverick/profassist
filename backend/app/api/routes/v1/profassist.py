@@ -646,6 +646,7 @@ async def outlines(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
         "items": await list_outlines(db, org.id, user.id),
         "steps": [
             "basics",
+            "attachments",
             "lecture",
             "description",
             "outcomes",
@@ -653,6 +654,7 @@ async def outlines(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
             "readings",
             "assessments",
             "policies",
+            "review",
         ],
     }
 
