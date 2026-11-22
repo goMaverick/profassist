@@ -269,6 +269,8 @@ def test_grading_council_drafts_from_the_rubric() -> None:
     assert {item["band"] for item in design["graders"]} == {"Good", "Fair"}
     ethics = next(row for row in mark["criteria"] if row["id"] == "ethics")
     assert "brief asks" not in ethics["evidence"].lower()
+    for row in mark["criteria"]:
+        assert len(str(row["short"]).split()) <= 12
     assert len(mark["council"]) == 4
 
 
