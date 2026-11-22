@@ -99,6 +99,8 @@ export default function GradePage() {
   const [busy, setBusy] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState("Group A");
   const [sent, setSent] = useState("");
+  const [council, setCouncil] = useState<Draft | null>(null);
+  const [grading, setGrading] = useState(false);
 
   async function loadQueue(courseId: string) {
     const queue = await pa<{
@@ -157,9 +159,41 @@ export default function GradePage() {
     if (next) await loadQueue(course.id);
   }
 
+  async function runCouncil() {
+    const readable = (item: SubmissionRow) => !String(item.id).startsWith("demo") && !item.quarantined;
+    const visible = (item: SubmissionRow) => readable(item) && item.group_name !== "Group B";
+    const row =
+      rows.find((item) => item.group_name === feedbackFor && visible(item)) ||
+      rows.find(visible) ||
+      rows.find((item) => item.group_name === feedbackFor && readable(item)) ||
+      rows.find(readable);
+    if (!row) {
+      setError("There is no submission the council can read yet. A quarantined file stays out.");
+      return;
+    }
+    setGrading(true);
+    const next = await run(() => pa<Draft>(`/submissions/${row.id}/grade`, { method: "POST" }), setError);
+    if (next) setCouncil(next);
+    setGrading(false);
+  }
+
   return (
     <div className="pa-dash">
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
+      <section id="council-result" className="pa-panel">
+        <h2 style={{ marginTop: 0, fontWeight: 400 }}>Council</h2>
+        <p>Three graders read one submission, then the chair picks a band. With no model configured, the offline drafter is used.</p>
+        <Button kind="primary" disabled={grading} onClick={() => void runCouncil()}>
+          {grading ? "The council is reading…" : "Run the council"}
+        </Button>
+        {council && council.results.map((row) => (
+          <p key={row.criterion}>
+            <strong>{row.criterion}.</strong> Chair: {row.judge?.level || "no band"}. {row.judge?.why}
+            {" "}
+            Graders: {(row.votes || []).map((vote) => `${vote.persona || "grader"} ${vote.level || "—"}`).join(", ")}.
+          </p>
+        ))}
+      </section>
       {feedbackFor && (
         <FeedbackDesk
           group={feedbackFor}

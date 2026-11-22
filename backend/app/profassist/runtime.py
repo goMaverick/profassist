@@ -160,12 +160,30 @@ def debate_settings() -> dict[str, Any]:
 
 
 def agent_route(agent: str) -> dict[str, str]:
+    """Which model serves this agent.
+
+    A configured local Ollama server is used only when the chosen provider has
+    no key. With no local server, the offline drafter remains the fallback.
+    """
+    import os
+
+    from app.profassist.providers import key_configured
+
     routes = model_settings().get("agents") or {}
     chosen = routes.get(agent) or {}
-    return {
-        "provider": chosen.get("provider") or model_settings().get("provider") or "openai",
-        "model": chosen.get("model") or model_settings().get("model") or "gpt-4o-mini",
-    }
+    provider = chosen.get("provider") or model_settings().get("provider") or "openai"
+    model = chosen.get("model") or model_settings().get("model") or "gpt-4o-mini"
+    if not key_configured(provider) and key_configured("gemini"):
+        provider = "gemini"
+        override = os.getenv("LLM_MODEL") or ""
+        if override.startswith("gemini/") or override.startswith("gemini-"):
+            model = override.split("/", 1)[-1]
+        else:
+            model = "gemini-3.5-flash-lite"
+    elif not key_configured(provider) and key_configured("ollama"):
+        provider = "ollama"
+        model = os.getenv("LLM_MODEL") or model
+    return {"provider": provider, "model": model}
 
 
 def catalog() -> dict[str, Any]:

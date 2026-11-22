@@ -1,4 +1,15 @@
-.PHONY: install format lint test run clean help db-init dev dev-down dev-logs dev-rebuild dev-frontend docker-clean stage stage-down prod prod-down upgrade upgrade-dry-run upgrade-new-features upgrade-finalize
+.PHONY: install format lint test run clean help db-init dev dev-down dev-logs dev-rebuild dev-frontend docker-clean stage stage-down prod prod-down upgrade upgrade-dry-run upgrade-new-features upgrade-finalize local-llm
+
+# Optional local model. Does not change committed defaults.
+# The offline drafter still answers when Ollama is not running.
+local-llm:
+	@echo "1. Install Ollama: https://ollama.com/download"
+	@echo "2. ollama pull llama3.2:1b"
+	@echo "3. Export these for the API process only:"
+	@echo "     export OLLAMA_API_BASE=http://127.0.0.1:11434"
+	@echo "     export LLM_MODEL=llama3.2:1b"
+	@echo "4. Restart the API. In AI settings, Test Ollama / local."
+	@echo "   With no key and no Ollama, the offline drafter is used."
 
 # === Environments ===========================================================
 # `make dev`   — local development (docker-compose.dev.yml + bind-mounted source)

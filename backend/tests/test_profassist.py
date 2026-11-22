@@ -64,6 +64,20 @@ def test_demo_quotes_are_in_the_submission() -> None:
     assert rejected == []
 
 
+def test_judge_keeps_a_quote_when_only_the_spacing_differs() -> None:
+    submission = "The meter on level two reads 42.7 during the Thursday class change."
+    verdict = reconcile(
+        [
+            {"level": "proficient", "quotes": ["The meter on level two reads 42.7"], "checks": []},
+            {"level": None, "quotes": ["The meter on level two reads 42.7"], "checks": []},
+            {"level": "proficient", "quotes": ["not in the text"], "checks": []},
+        ],
+        submission,
+    )
+    assert verdict["level"] == "proficient"
+    assert verdict["evidence_status"] == "ok"
+
+
 def test_judge_rejects_invented_quotes() -> None:
     submission = "The student wrote one careful paragraph about the meter."
     verdict = reconcile(
@@ -210,6 +224,32 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
 
     architecture = concerns("MAAI903", "2")
     assert "1 pair to read" in architecture["message"]
+    from app.profassist.integrity_board import assignment_matrix
+
+    page = overview("all")
+    expected = page["summary"]["review"] + page["summary"]["concern"]
+    assert expected == 4
+    listed = concerns("AAS910")
+    assert "Nothing needs a look" not in listed["message"]
+    assert "no copying cases yet" in listed["message"]
+    assert "in other courses" in listed["message"]
+    assert "integrity board" not in listed["message"]
+    seen = {
+        (item["slug"], str(item["number"]), pair["left"], pair["right"], pair["percent"])
+        for item in page["items"]
+        if item["status"] != "Clear"
+        for pair in assignment_matrix(item["slug"], str(item["number"]))["pairs"]
+        if pair["status"] != "Clear"
+    }
+    got = {
+        (case["slug"], case["assignment"], case["groups"][0], case["groups"][1], case["percent"])
+        for case in listed["cases"]
+    }
+    assert got == seen
+    for case in listed["cases"]:
+        assert case["href"] in listed["message"]
+        assert f"Group {case['groups'][0]} and Group {case['groups'][1]}" in listed["message"]
+        assert f"{case['percent']}%" in listed["message"]
     detail = pair_detail("MAAI903", "1", "A", "B")
     assert len(detail["left_text"]) >= 3
     assert detail["left_meta"]["members"].startswith("Sara")
@@ -753,12 +793,42 @@ def test_chat_tools_require_a_professor_and_a_confirm() -> None:
     asyncio.run(run())
 
 
-def test_outline_assist_suggests_outcomes() -> None:
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "LLM_API_KEY",
+        "OLLAMA_API_BASE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_outline_assist_suggests_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.profassist.llm import complete
 
+    _offline(monkeypatch)
     drafted = complete("outline_assist", {"step": "outcomes", "message": "Suggest outcomes"})
     assert drafted["suggestion"]["clos"]
     assert drafted["suggestion"]["plos"]
+
+
+def test_outcome_answer_follows_the_requested_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.llm import complete
+    from app.profassist.outline import asked_count, shape_outcomes
+
+    _offline(monkeypatch)
+    message = "Draft 3 learning outcomes for AAS 910"
+    assert asked_count(message) == 3
+    assert asked_count("Suggest outcomes") is None
+    drafted = complete("outline_assist", {"step": "outcomes", "message": message})
+    shaped, reply = shape_outcomes(drafted["suggestion"], message)
+    assert len(shaped["clos"]) == 3
+    assert reply is not None
+    assert "1. " in reply
+    assert "2. " in reply
+    assert "3. " in reply
+    assert "\n4. " not in reply
 
 
 def test_outline_review_names_a_missing_policy_and_a_weight_gap() -> None:
@@ -802,6 +872,45 @@ def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) 
     )
     assert "42.7" in result["feedback"]
     assert "!" not in result["feedback"]
+
+
+def test_local_ollama_is_used_only_when_the_chosen_provider_has_no_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.profassist.runtime import agent_route, bind_runtime
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
+    monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert agent_route("chat")["provider"] == "openai"
+    monkeypatch.setenv("OLLAMA_API_BASE", "http://127.0.0.1:11434")
+    monkeypatch.setenv("LLM_MODEL", "llama3.2:1b")
+    routed = agent_route("persona_evidence")
+    assert routed["provider"] == "ollama"
+    assert routed["model"] == "llama3.2:1b"
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert agent_route("chat")["provider"] == "openai"
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("LLM_MODEL", "gemini/gemini-3.5-flash")
+    routed = agent_route("chat")
+    assert routed["provider"] == "gemini"
+    assert routed["model"] == "gemini-3.5-flash"
+    assert "test-gemini-key" not in str(routed)
+    monkeypatch.setenv("LLM_MODEL", "llama3.2:1b")
+    assert agent_route("chat")["model"] == "gemini-3.5-flash-lite"
+
+
+def test_connection_errors_hide_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.providers import _safe_detail
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-do-not-show")
+    text = _safe_detail("rejected test-gemini-key-do-not-show")
+    assert "test-gemini-key" not in text
+    assert "hidden" in text
 
 
 def test_ai_settings_never_return_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -22,7 +22,7 @@ PROVIDERS: list[dict[str, Any]] = [
         "id": "gemini",
         "label": "Google Gemini",
         "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-        "default_model": "gemini-2.0-flash",
+        "default_model": "gemini-3.5-flash-lite",
         "litellm_model": "gemini/{model}",
     },
     {
@@ -152,11 +152,79 @@ def extra_kwargs(provider_id: str) -> dict[str, str]:
     if provider_id == "ollama":
         base = os.getenv("OLLAMA_API_BASE", "").strip()
         return {"api_base": base} if base else {}
+    if provider_id == "gemini":
+        # Gemini 3 spends the token budget on hidden reasoning unless this is set,
+        # which cuts a chat answer off after a few words.
+        return {"reasoning_effort": "minimal"}
     return {}
+
+
+def _safe_detail(text: str) -> str:
+    """Drop any configured secret before a message is shown on screen."""
+    cleaned = text or ""
+    for name in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "LLM_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MOODLE_WS_TOKEN",
+    ):
+        secret = os.getenv(name, "")
+        if secret:
+            cleaned = cleaned.replace(secret, "hidden")
+    return cleaned[:300]
+
+
+def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwargs: Any):
+    """One LiteLLM call. A quota failure becomes a plain error, with no secret in it."""
+    import time
+
+    import litellm
+
+    from app.profassist.errors import ProfassistError
+
+    call = dict(kwargs)
+    call.update(extra_kwargs(provider_id))
+    if provider_id == "gemini":
+        call["drop_params"] = True
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            return litellm.completion(
+                model=litellm_model(provider_id, model),
+                messages=messages,
+                **call,
+            )
+        except Exception as exc:
+            last = exc
+            text = str(exc)
+            if (
+                "not supported" in text
+                and "thinking" in text.lower()
+                and "reasoning_effort" in call
+            ):
+                call.pop("reasoning_effort", None)
+                continue
+            if "high demand" in text.lower() or "unavailable" in text.lower() or "503" in text:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if getattr(exc, "status_code", None) == 429 or "quota" in text.lower():
+                raise ProfassistError(
+                    429,
+                    "The model provider is out of free quota for this model. Try again later or choose another model.",
+                ) from None
+            raise
+    raise last if last else RuntimeError("The model did not answer.")
 
 
 def test_connection(provider_id: str, model: str) -> dict[str, Any]:
     """One short LiteLLM call. No key is written anywhere."""
+    if provider_id == "ollama" and (not model or model == "llama3.2"):
+        model = os.getenv("LLM_MODEL") or model or "llama3.2"
+    if provider_id == "gemini" and model in {"", "gemini-2.0-flash", "gemini-2.5-flash"}:
+        override = os.getenv("LLM_MODEL") or "gemini-3.5-flash-lite"
+        model = override.split("/", 1)[-1]
     if not key_configured(provider_id):
         return {
             "ok": False,
@@ -164,16 +232,18 @@ def test_connection(provider_id: str, model: str) -> dict[str, Any]:
             "detail": "No key is set for this provider. Add it as an environment variable and restart.",
         }
     try:
-        import litellm
-
-        response = litellm.completion(
-            model=litellm_model(provider_id, model),
-            messages=[{"role": "user", "content": "Reply with the word ready."}],
-            max_tokens=8,
+        response = generate(
+            provider_id,
+            model,
+            [{"role": "user", "content": "Reply with the word ready."}],
+            max_tokens=64,
             temperature=0,
-            **extra_kwargs(provider_id),
         )
         text = response.choices[0].message.content or ""
-        return {"ok": True, "configured": True, "detail": text.strip() or "Connected."}
+        return {
+            "ok": True,
+            "configured": True,
+            "detail": _safe_detail(text.strip() or "Connected."),
+        }
     except Exception as exc:
-        return {"ok": False, "configured": True, "detail": str(exc)[:300]}
+        return {"ok": False, "configured": True, "detail": _safe_detail(str(exc))}

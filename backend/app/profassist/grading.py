@@ -20,11 +20,13 @@ def needs_debate(votes: list[dict[str, Any]], threshold: int) -> bool:
 
 
 def quotes_in_text(quotes: list[str], text: str) -> tuple[list[str], list[str]]:
+    folded = " ".join((text or "").split())
     kept: list[str] = []
     rejected: list[str] = []
     for quote in quotes:
-        if quote and quote in (text or ""):
-            kept.append(quote)
+        compact = " ".join(str(quote or "").split())
+        if compact and (quote in (text or "") or compact in folded):
+            kept.append(quote if quote in (text or "") else compact)
         else:
             rejected.append(quote)
     return kept, rejected
@@ -65,7 +67,21 @@ def reconcile(votes: list[dict[str, Any]], submission: str) -> dict[str, Any]:
                 "The calibrator was skipped. The level is left for you."
             ),
         }
-    top, _count = Counter(levels).most_common(1)[0]
+    usable = [level for level in levels if level in LEVELS]
+    if not usable:
+        return {
+            "evidence_status": "no_reliable_evidence",
+            "level": None,
+            "vote_split": levels,
+            "quotes": kept,
+            "rejected_quotes": rejected,
+            "skip_calibrator": True,
+            "why": (
+                "No reliable evidence. The graders did not return a rubric level. "
+                f"Vote split: {split}. The level is left for you."
+            ),
+        }
+    top, _count = Counter(usable).most_common(1)[0]
     return {
         "evidence_status": "ok",
         "level": top,
