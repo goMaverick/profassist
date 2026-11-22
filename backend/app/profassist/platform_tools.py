@@ -199,13 +199,13 @@ def choose_tool(message: str) -> tuple[str, dict[str, Any]]:
     if "assignment" in text and any(word in text for word in ("create", "add", "draft")):
         return "create_assignment", _assignment_args(text)
     if "dropout" in text or "at risk" in text or "at-risk" in text:
-        return "dropout_risk", {}
+        return "dropout_risk", {"code": _mentioned_code(text)}
     if "integrit" in text or "copying" in text or "similar" in text:
         return "integrity_concerns", _integrity_args(text)
     if "group" in text:
         return "list_courses", {}
     if "assessment" in text and ("suggest" in text or "generat" in text):
-        return "suggest_assessments", {}
+        return "suggest_assessments", {"message": message, "code": _mentioned_code(text)}
     if "learning outcome" in text or "outcomes" in text:
         return "assist_outline", {
             "step": "outcomes",
@@ -366,30 +366,64 @@ async def _integrity(db, current, args):
     return concerns(str(args.get("code") or "MAAI903"), str(args.get("assignment") or ""))
 
 
-async def _dropout(db, current, _args):
-    del db
+_FACTORS = {
+    "scores available count": "recorded scores",
+    "active days 14d": "days active",
+    "activity change": "recent activity",
+    "resource views 14d": "resource views",
+    "interactions 14d": "course interactions",
+}
+
+
+def _top_reason(factor: object) -> str:
+    text = str(factor or "")
+    name = text.split("(")[0].strip().lower()
+    label = _FACTORS.get(name, name or "no strong signal")
+    if "(+" in text:
+        return f"Raises risk · {label}"
+    if "(-" in text:
+        return f"Lowers risk · {label}"
+    return label[:1].upper() + label[1:]
+
+
+async def _dropout(db, current, args):
+    del db, current
     from app.profassist.ml.dropout import predict
 
     _guard("dropout_risk")
+    from app.profassist.journey import ROSTER
+
+    code = str(args.get("code") or "AAS910")
     payload = predict(
         [
-            {"display_name": "Sara Al Maktoum", "external_id": "stu-1"},
-            {"display_name": "Omar Haddad", "external_id": "stu-2"},
+            {"display_name": name, "external_id": f"stu-{(index % 4) + 1}"}
+            for index, (_, name, _) in enumerate(ROSTER)
         ],
-        course_code="MAAI903",
+        course_code=code,
     )
-    return {
-        "href": "/students",
-        "trained": payload["trained"],
-        "message": payload["message"],
-        "students": [
+    students = []
+    for row in payload["students"]:
+        reason = _top_reason((row.get("factors") or [""])[0])
+        students.append(
             {
                 "name": row["display_name"],
                 "band": row["band"],
                 "score": row["score"],
+                "reason": reason,
             }
-            for row in payload["students"]
-        ],
+        )
+    order = {"high": 0, "medium": 1, "low": 2}
+    students.sort(key=lambda row: (order.get(row["band"], 9), -(row["score"] or 0)))
+    watched = [row for row in students if row["band"] in {"high", "medium"}]
+    return {
+        "href": "/students",
+        "trained": payload["trained"],
+        "course": code,
+        "message": (
+            f"{len(watched)} of {len(students)} students in {code} need a look. "
+            "The list is sorted by risk. These scores are advisory and do not change enrolment or marks."
+        ),
+        "students": students,
     }
 
 
@@ -401,13 +435,27 @@ async def _suggest(db, current, args):
         raise ProfassistError(
             400, "Finish or start a subject outline before suggesting assessments."
         )
-    return await suggest_assessments(
+    chosen = next((row for row in rows if (row.get("body") or {}).get("clos")), rows[0])
+    drafted = await suggest_assessments(
         db,
         current["org_id"],
         current["user_id"],
-        uuid.UUID(args.get("outline_id") or rows[0]["id"]),
+        uuid.UUID(args.get("outline_id") or chosen["id"]),
         args.get("lo_codes") or [],
     )
+    week = ""
+    message = str(args.get("message") or "").lower()
+    if "week 5" in message:
+        week = "Week 5"
+    for item in drafted.get("suggestions") or []:
+        if week:
+            item["due"] = week
+            if week.lower() not in str(item.get("name") or "").lower():
+                item["name"] = f"{item.get('name') or 'Assessment'} for {week}"
+    if drafted.get("suggestions"):
+        titles = [item.get("name") for item in drafted["suggestions"]]
+        drafted["message"] = "Suggested: " + "; ".join(str(title) for title in titles if title)
+    return drafted
 
 
 async def _accept(db, current, args):
@@ -444,7 +492,11 @@ async def _slides(db, current, args):
 async def _sync(db, current, _args):
     from app.profassist.service import sync_moodle
 
-    return await sync_moodle(db, current["org_id"], current["user_id"])
+    result = await sync_moodle(db, current["org_id"], current["user_id"])
+    status = result.get("last_status") or "ok"
+    mode = result.get("mode") or "fake"
+    result["message"] = f"Moodle is in {mode} mode. The last sync status is {status}."
+    return result
 
 
 async def _push(db, current, args):
@@ -691,6 +743,17 @@ def _keep_shape(message: str, tool: str, result: Any, spoken: str, fallback: str
         cases = result.get("cases") or []
         if cases:
             return _case_reply(result)
+    if tool == "dropout_risk" and isinstance(result, dict):
+        names = [str(row.get("name") or "") for row in result.get("students") or []]
+        if names and not any(name and name in spoken for name in names):
+            return str(result.get("message") or fallback)
+    if (
+        tool == "suggest_assessments"
+        and isinstance(result, dict)
+        and result.get("message")
+        and not spoken.strip()
+    ):
+        return str(result["message"])
     return spoken or fallback
 
 
@@ -719,6 +782,8 @@ def _reply(name: str, result: Any) -> str:
         )
     if name == "dropout_risk" and isinstance(result, dict):
         return result.get("message") or "Risk scores are advisory."
+    if name == "suggest_assessments" and isinstance(result, dict):
+        return result.get("message") or "Suggested an assessment. It is still a draft."
     if name == "assist_outline" and isinstance(result, dict) and result.get("reply"):
         return str(result["reply"])
     if name == "integrity_concerns" and isinstance(result, dict):

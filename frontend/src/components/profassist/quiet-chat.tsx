@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Checkmark } from "@carbon/icons-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 
@@ -13,12 +14,17 @@ interface CaseRow {
   name: string;
 }
 
+const TOOL_LABELS: Record<string, string> = {
+  integrity_concerns: "Checked integrity",
+  assist_outline: "Drafted outcomes",
+  moodle_sync: "Checked Moodle",
+  dropout_risk: "Checked dropout risk",
+  suggest_assessments: "Suggested an assessment",
+  list_courses: "Listed courses",
+};
+
 export function toolLabel(name: string) {
-  if (name === "integrity_concerns") return "Checked integrity";
-  if (name === "assist_outline") return "Drafted outcomes";
-  if (name === "moodle_sync") return "Checked Moodle";
-  if (name === "list_courses") return "Listed courses";
-  return name.replaceAll("_", " ");
+  return TOOL_LABELS[name] || name.replaceAll("_", " ");
 }
 
 function casesOf(output: unknown): CaseRow[] {
@@ -99,10 +105,68 @@ export function IntegrityAnswer({ output }: { output: unknown }) {
 }
 
 function detailText(output: unknown) {
-  if (!output || typeof output !== "object") return "The tool finished.";
-  const message = (output as { message?: unknown }).message;
-  if (typeof message === "string" && message.trim()) return message;
-  return "The tool finished.";
+  if (!output || typeof output !== "object") return "";
+  const row = output as Record<string, unknown>;
+  if (typeof row.message === "string" && row.message.trim()) return row.message;
+  if (typeof row.last_sync_status === "string" && row.last_sync_status.trim()) return row.last_sync_status;
+  const bits = ["title", "name", "status", "course"].flatMap((key) =>
+    typeof row[key] === "string" && String(row[key]).trim() ? [String(row[key])] : [],
+  );
+  return bits.join(" · ");
+}
+
+interface RiskRow {
+  name: string;
+  band: string;
+  score: number;
+  reason: string;
+}
+
+function riskRows(output: unknown): RiskRow[] {
+  if (!output || typeof output !== "object" || !("students" in output)) return [];
+  const rows = (output as { students?: unknown }).students;
+  if (!Array.isArray(rows)) return [];
+  const order = { high: 0, medium: 1, low: 2 };
+  return rows
+    .flatMap((row) => {
+      if (!row || typeof row !== "object") return [];
+      const item = row as { name?: unknown; band?: unknown; score?: unknown; reason?: unknown };
+      if (typeof item.name !== "string") return [];
+      return [
+        {
+          name: item.name,
+          band: String(item.band || "low"),
+          score: Number(item.score) || 0,
+          reason: String(item.reason || ""),
+        },
+      ];
+    })
+    .sort((a, b) => (order[a.band as keyof typeof order] ?? 3) - (order[b.band as keyof typeof order] ?? 3) || b.score - a.score);
+}
+
+export function AtRiskAnswer({ output }: { output: unknown }) {
+  const students = riskRows(output);
+  if (!students.length) return null;
+  const watched = students.filter((item) => item.band === "high" || item.band === "medium");
+  return (
+    <div className="pa-answer">
+      <p className="pa-case-summary">
+        {watched.length
+          ? `${watched.length} of ${students.length} students need a look, highest risk first.`
+          : `None of the ${students.length} students is at high risk.`}
+      </p>
+      <div className="pa-risk-list">
+        {students.map((item) => (
+          <div className="pa-risk-row" key={item.name}>
+            <span>{item.name}</span>
+            <span className={`pa-sim is-${item.band}`}>{item.band}</span>
+            <span className="pa-risk-reason">{item.reason}</span>
+          </div>
+        ))}
+      </div>
+      <Link className="pa-open" href="/students">Open at-risk page</Link>
+    </div>
+  );
 }
 
 export function QuietTool({ name, output }: { name: string; output: unknown }) {
@@ -118,7 +182,7 @@ export function QuietTool({ name, output }: { name: string; output: unknown }) {
       </button>
       {open && (
         <div className="pa-quiet-detail">
-          <p>{cases.length > 0 ? "The rows below are the same cases as the integrity page." : detailText(output)}</p>
+          {cases.length > 0 ? <p>The rows below are the same cases as the integrity page.</p> : detailText(output) ? <p>{detailText(output)}</p> : null}
         </div>
       )}
     </div>

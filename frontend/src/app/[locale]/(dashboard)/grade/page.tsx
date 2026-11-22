@@ -55,6 +55,7 @@ interface Draft {
   one_click: boolean;
   one_click_reason: string;
   trace_url?: string;
+  grader_model?: string;
   results: Array<{
     criterion: string;
     feedback: string;
@@ -101,6 +102,7 @@ export default function GradePage() {
   const [sent, setSent] = useState("");
   const [council, setCouncil] = useState<Draft | null>(null);
   const [grading, setGrading] = useState(false);
+  const [whyId, setWhyId] = useState("");
 
   async function loadQueue(courseId: string) {
     const queue = await pa<{
@@ -182,17 +184,36 @@ export default function GradePage() {
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
       <section id="council-result" className="pa-panel">
         <h2 style={{ marginTop: 0, fontWeight: 400 }}>Council</h2>
-        <p>Three graders read one submission, then the chair picks a band. With no model configured, the offline drafter is used.</p>
+        <p className="pa-meta">
+          {council?.grader_model ? `Graders: ${council.grader_model}` : "Graders: Offline drafter"}
+        </p>
         <Button kind="primary" disabled={grading} onClick={() => void runCouncil()}>
           {grading ? "The council is reading…" : "Run the council"}
         </Button>
-        {council && council.results.map((row) => (
-          <p key={row.criterion}>
-            <strong>{row.criterion}.</strong> Chair: {row.judge?.level || "no band"}. {row.judge?.why}
-            {" "}
-            Graders: {(row.votes || []).map((vote) => `${vote.persona || "grader"} ${vote.level || "—"}`).join(", ")}.
-          </p>
-        ))}
+        {council && (
+          <div className="pa-council-list">
+            {council.results.map((row) => {
+              const levels = (row.votes || []).map((vote) => vote.level).filter(Boolean);
+              const agree = levels.length === 3 && new Set(levels).size === 1;
+              const open = whyId === row.criterion;
+              return (
+                <div className="pa-council-row" key={row.criterion}>
+                  <div className="pa-council-main">
+                    <span>{row.criterion}</span>
+                    <strong>{row.judge?.level || "no band"}</strong>
+                    <span className={agree ? "pa-votes is-agree" : "pa-votes is-split"} aria-label={agree ? "Graders agree" : "Graders split"}>
+                      <i /><i /><i />
+                    </span>
+                    <button type="button" className="pa-why" onClick={() => setWhyId(open ? "" : row.criterion)}>
+                      {open ? "Hide why" : "Why"}
+                    </button>
+                  </div>
+                  {open && <p className="pa-meta">{row.judge?.why}</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
       {feedbackFor && (
         <FeedbackDesk

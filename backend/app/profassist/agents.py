@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.profassist import llm
+from app.profassist.errors import ProfassistError
 from app.profassist.grading import needs_debate, reconcile
 from app.profassist.observe import invoke_graph
 from app.profassist.rag import keyword_score
@@ -146,31 +147,37 @@ def _debate(state: GradeState) -> GradeState:
         revised = []
         for vote in current:
             peers = [peer for peer in current if peer.get("persona") != vote.get("persona")]
-            revised.append(
-                llm.complete(
-                    "grade_revise",
-                    {
-                        "persona": vote.get("persona"),
-                        "round": number,
-                        "previous": {
-                            "level": vote.get("level"),
-                            "quotes": vote.get("quotes"),
-                            "reasoning": vote.get("reasoning"),
+            try:
+                revised.append(
+                    llm.complete(
+                        "grade_revise",
+                        {
+                            "persona": vote.get("persona"),
+                            "round": number,
+                            "previous": {
+                                "level": vote.get("level"),
+                                "quotes": vote.get("quotes"),
+                                "reasoning": vote.get("reasoning"),
+                            },
+                            "peers": [
+                                {
+                                    "persona": peer.get("persona"),
+                                    "level": peer.get("level"),
+                                    "quotes": peer.get("quotes"),
+                                    "reasoning": peer.get("reasoning"),
+                                }
+                                for peer in peers
+                            ],
+                            "submission": state.get("submission") or "",
+                            "criterion": state.get("criterion") or {},
                         },
-                        "peers": [
-                            {
-                                "persona": peer.get("persona"),
-                                "level": peer.get("level"),
-                                "quotes": peer.get("quotes"),
-                                "reasoning": peer.get("reasoning"),
-                            }
-                            for peer in peers
-                        ],
-                        "submission": state.get("submission") or "",
-                        "criterion": state.get("criterion") or {},
-                    },
+                    )
                 )
-            )
+            except ProfassistError as exc:
+                if exc.status != 429:
+                    raise
+                # The three votes already exist. A busy model should not throw them away.
+                return {"votes": votes, "debate_rounds": rounds}
         current = revised
         rounds.append({"round": number, "votes": revised})
     return {"votes": current, "debate_rounds": rounds}
@@ -191,15 +198,20 @@ def _feedback(state: GradeState) -> GradeState:
             )
         }
     quote = (judge.get("quotes") or [""])[0]
-    written = llm.complete(
-        "feedback",
-        {
-            "quote": quote,
-            "level": judge.get("level"),
-            "soul": state.get("soul") or "",
-            "criterion": state.get("criterion") or {},
-        },
-    )
+    try:
+        written = llm.complete(
+            "feedback",
+            {
+                "quote": quote,
+                "level": judge.get("level"),
+                "soul": state.get("soul") or "",
+                "criterion": state.get("criterion") or {},
+            },
+        )
+    except ProfassistError as exc:
+        if exc.status != 429:
+            raise
+        return {"feedback": ""}
     return {"feedback": written.get("feedback") or ""}
 
 

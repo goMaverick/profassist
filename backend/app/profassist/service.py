@@ -1341,7 +1341,16 @@ def _draft_dict(draft: GradeDraft, submission: Submission) -> dict[str, Any]:
             "with the council at p(keep) of at least 0.85."
         ),
         "trace_url": draft.trace_url or "",
+        "grader_model": _grader_model(),
     }
+
+
+def _grader_model() -> str:
+    from app.profassist.providers import model_label
+    from app.profassist.runtime import agent_route
+
+    route = agent_route("persona_evidence")
+    return model_label(route["provider"], route["model"])
 
 
 async def get_draft(

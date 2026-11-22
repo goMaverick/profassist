@@ -10,7 +10,7 @@ import {
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
 import { MessageAction, MessageActions } from "@/components/ai-elements/message";
-import { AnswerText, IntegrityAnswer, QuietTool } from "@/components/profassist/quiet-chat";
+import { AnswerText, AtRiskAnswer, IntegrityAnswer, QuietTool } from "@/components/profassist/quiet-chat";
 import { sendChat, useChat } from "@/components/profassist/chat-store";
 import {
   PromptInput,
@@ -61,11 +61,13 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
                 {turn.tool && <QuietTool name={turn.tool.name} output={turn.tool.output} />}
                 {turn.tool?.name === "integrity_concerns" ? (
                   <IntegrityAnswer output={turn.tool.output} />
+                ) : turn.tool?.name === "dropout_risk" ? (
+                  <AtRiskAnswer output={turn.tool.output} />
                 ) : (
                   <AnswerText text={turn.text} />
                 )}
-                {turn.text && turn.tool?.name !== "integrity_concerns" && (
-                  <MessageActions>
+                {turn.text && turn.tool?.name !== "integrity_concerns" && turn.tool?.name !== "dropout_risk" && (
+                  <MessageActions className="pa-msg-actions">
                     <MessageAction tooltip="Copy" label="Copy" onClick={() => navigator.clipboard.writeText(turn.text)}>
                       <CopyIcon />
                     </MessageAction>

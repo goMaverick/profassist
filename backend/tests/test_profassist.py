@@ -50,6 +50,28 @@ def test_model_gate_refuses_an_email() -> None:
         assert_prompt_is_clean("contact ada@university.edu now")
 
 
+def test_grade_reply_must_name_a_band() -> None:
+    from app.profassist.llm import parse_grade_content
+
+    vote = parse_grade_content(
+        '{"level": "Proficient", "quotes": ["The meter reads 42.7."], "why": "A number is shown."}',
+        "evidence",
+    )
+    assert vote is not None
+    assert vote["level"] == "proficient"
+    assert vote["persona"] == "evidence"
+    assert parse_grade_content("not json", "strict") is None
+
+
+def test_missing_course_pdf_still_opens() -> None:
+    from app.profassist.integrity_docs import file_bytes
+
+    data, media, name = file_bytes("AAS910", "1", "A", "pdf")
+    assert data.startswith(b"%PDF")
+    assert media == "application/pdf"
+    assert name.endswith(".pdf")
+
+
 def test_demo_quotes_are_in_the_submission() -> None:
     submission = (
         "We chose this use case because the brief asks for a measurable operational problem. "
@@ -551,6 +573,39 @@ def test_debate_starts_only_past_the_threshold() -> None:
     assert needs_debate(close, threshold=0) is True
     assert needs_debate(close, threshold=1) is False
     assert needs_debate(far, threshold=1) is True
+
+
+def test_a_short_rate_limit_is_retried_and_a_daily_cap_is_not() -> None:
+    from app.profassist.providers import retry_wait
+
+    assert retry_wait("Please retry in 12.5s") == 13.0
+    assert retry_wait("Please retry in 40s") == 40.5
+    assert retry_wait("retry in 400s. Quota exceeded per day") is None
+    assert retry_wait("RESOURCE_EXHAUSTED limit: 0") is None
+    assert retry_wait("429 rate limit") == 5.0
+
+
+def test_a_busy_debate_keeps_the_votes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist import agents
+    from app.profassist.errors import ProfassistError
+
+    def boom(*_args: object, **_kwargs: object) -> dict:
+        raise ProfassistError(429, "busy")
+
+    monkeypatch.setattr(agents.llm, "complete", boom)
+    monkeypatch.setattr(
+        agents,
+        "debate_settings",
+        lambda: {"enabled": True, "threshold": 0, "max_rounds": 1},
+    )
+    votes = [
+        {"persona": "evidence", "level": "proficient"},
+        {"persona": "strict", "level": "beginning"},
+        {"persona": "supportive", "level": "proficient"},
+    ]
+    result = agents._debate({"votes": votes})
+    assert result["votes"] == votes
+    assert result["debate_rounds"] == []
 
 
 def test_provider_keys_are_detected_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -21,6 +21,68 @@ from app.profassist.runtime import agent_route, labelled_about, prompt_for
 logger = logging.getLogger(__name__)
 
 LEVELS = ["beginning", "developing", "proficient", "advanced"]
+GRADE_LEVELS = set(LEVELS)
+GRADE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "level": {"type": "string", "enum": LEVELS},
+        "quotes": {"type": "array", "items": {"type": "string"}},
+        "why": {"type": "string"},
+    },
+    "required": ["level", "quotes", "why"],
+}
+
+
+def evidence_lines(submission: str) -> list[str]:
+    """Short sentences a grader can copy without inventing wording."""
+    parts = re.split(r"(?<=[.!?])\s+", submission or "")
+    lines = []
+    for part in parts:
+        text = " ".join(part.split())
+        if 12 <= len(text) <= 220:
+            lines.append(text)
+        if len(lines) == 4:
+            break
+    if not lines and (submission or "").strip():
+        lines.append(" ".join(submission.split())[:180])
+    return lines
+
+
+def normalise_grade(parsed: dict[str, Any], persona: str) -> dict[str, Any] | None:
+    """Turn a model object into a vote, or None when the band is missing."""
+    if not isinstance(parsed, dict):
+        return None
+    level = str(parsed.get("level") or parsed.get("band") or "").strip().lower()
+    if level not in GRADE_LEVELS:
+        return None
+    quotes = parsed.get("quotes")
+    if not isinstance(quotes, list):
+        single = parsed.get("quote") or parsed.get("excerpt")
+        quotes = [single] if isinstance(single, str) else list(single or [])
+    for check in parsed.get("checks") or []:
+        if isinstance(check, dict) and isinstance(check.get("quote"), str):
+            quotes.append(check["quote"])
+    cleaned = [quote.strip() for quote in quotes if isinstance(quote, str) and quote.strip()]
+    return {
+        "persona": parsed.get("persona") or persona or "evidence",
+        "level": level,
+        "quotes": cleaned,
+        "why": str(parsed.get("why") or "").strip(),
+        "checks": parsed.get("checks") if isinstance(parsed.get("checks"), list) else [],
+    }
+
+
+def parse_grade_content(content: str, persona: str) -> dict[str, Any] | None:
+    raw = content or ""
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(raw[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return normalise_grade(parsed, persona)
 
 
 def mode() -> str:
@@ -443,47 +505,75 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
         return drafted
 
-    from app.profassist.providers import generate
+    from app.profassist.providers import _safe_detail, generate
 
-    model = litellm_model(provider, payload.get("model") or route["model"] or llm_model())
-    response = generate(
-        provider,
-        payload.get("model") or route["model"] or llm_model(),
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.2,
-        max_tokens=1500,
-    )
-    content = response.choices[0].message.content or "{}"
-    start = content.find("{")
-    end = content.rfind("}")
-    if start >= 0 and end > start:
-        content = content[start : end + 1]
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        logger.warning("Model returned non-JSON for %s; using the demo draft", task)
-        parsed = demo_complete(task, payload)
-    if not isinstance(parsed, dict):
-        parsed = demo_complete(task, payload)
-    if task in {"grade_persona", "grade_revise"} and isinstance(parsed, dict):
-        parsed.setdefault("persona", payload.get("persona") or "evidence")
-        level = str(parsed.get("level") or "").strip().lower()
-        parsed["level"] = (
-            level if level in {"beginning", "developing", "proficient", "advanced"} else None
+    model_name = payload.get("model") or route["model"] or llm_model()
+    model = litellm_model(provider, model_name)
+    grading = task in {"grade_persona", "grade_revise"}
+    lines = evidence_lines(payload.get("submission") or "") if grading else []
+    grade_user = user
+    if lines:
+        copied = "\n".join(f"- {line}" for line in lines)
+        grade_user = f"{user}\n\nCopy quotes exactly from these sentences already in the submission:\n{copied}"
+    call_kwargs: dict[str, Any] = {"temperature": 0.2, "max_tokens": 800 if grading else 1500}
+    if grading and provider == "gemini":
+        call_kwargs["response_format"] = {"type": "json_object", "response_schema": GRADE_SCHEMA}
+
+    def _ask(prompt: str) -> str:
+        response = generate(
+            provider,
+            model_name,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            **call_kwargs,
         )
-        quotes = parsed.get("quotes")
-        if not isinstance(quotes, list):
-            single = parsed.get("quote") or parsed.get("excerpt")
-            quotes = [single] if isinstance(single, str) else list(single or [])
-        for check in parsed.get("checks") or []:
-            if isinstance(check, dict) and isinstance(check.get("quote"), str):
-                quotes.append(check["quote"])
-        parsed["quotes"] = [
-            quote.strip() for quote in quotes if isinstance(quote, str) and quote.strip()
-        ]
+        return response.choices[0].message.content or ""
+
+    content = _ask(grade_user if grading else user)
+    parsed: dict[str, Any] | None = None
+    if grading:
+        parsed = parse_grade_content(content, str(payload.get("persona") or "evidence"))
+        if parsed is None:
+            logger.warning(
+                "Grade reply was not usable for %s; retrying once. Raw reply: %s",
+                task,
+                _safe_detail(content),
+            )
+            content = _ask(
+                grade_user
+                + "\n\nThe last reply was not valid. Return JSON only. "
+                + "level must be beginning, developing, proficient, or advanced. "
+                + "quotes must be copied exactly from the sentences above."
+            )
+            parsed = parse_grade_content(content, str(payload.get("persona") or "evidence"))
+            if parsed is None:
+                logger.warning(
+                    "Grade reply failed again for %s. Raw reply: %s",
+                    task,
+                    _safe_detail(content),
+                )
+    else:
+        blob = content
+        start = blob.find("{")
+        end = blob.rfind("}")
+        if start >= 0 and end > start:
+            blob = blob[start : end + 1]
+        try:
+            loaded = json.loads(blob or "{}")
+        except json.JSONDecodeError:
+            logger.warning("Model returned non-JSON for %s; using the demo draft", task)
+            loaded = demo_complete(task, payload)
+        parsed = loaded if isinstance(loaded, dict) else demo_complete(task, payload)
+    if grading and parsed is None:
+        parsed = demo_complete(task, payload)
+        parsed["level"] = None
+        parsed["unparsed"] = True
+    if grading and isinstance(parsed, dict):
+        parsed["model"] = model
+    if task == "assessment_suggest" and isinstance(parsed, dict) and not parsed.get("suggestions"):
+        parsed = demo_complete(task, payload)
     if task == "outline_assist":
         suggestion = (
             parsed.get("suggestion") if isinstance(parsed.get("suggestion"), dict) else None
