@@ -1,10 +1,21 @@
 "use client";
 
 import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Dropdown, Tag, TextArea, Tile } from "@carbon/react";
 import { ChevronRight } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
+import type { Hit } from "@/components/profassist/document-viewer";
+
+function fileUrl(path: string) {
+  return `/api/profassist${path}`;
+}
+
+const DocumentPane = dynamic(
+  () => import("@/components/profassist/document-viewer").then((mod) => mod.DocumentPane),
+  { ssr: false },
+);
 
 interface CourseOption {
   code: string;
@@ -63,6 +74,31 @@ interface ReportSide {
   members: string;
   submitted: string;
 }
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+interface Match {
+  id: string;
+  percent: number;
+  source: string;
+  tag: string;
+  quote: string;
+  context: string;
+  page_left: number;
+  page_right: number;
+  left_box: Box;
+  right_box: Box;
+  decision: string;
+}
+interface DocSide {
+  origin: string;
+  view: string;
+  original: string;
+  filename: string;
+}
 interface PairDetail {
   course: string;
   slug: string;
@@ -77,6 +113,9 @@ interface PairDetail {
   left_meta: ReportSide;
   right_meta: ReportSide;
   passages: Passage[];
+  matches: Match[];
+  decisions: { flagged: number; ok: number; pending: number };
+  documents: { left: DocSide; right: DocSide };
   why: string;
 }
 
@@ -100,6 +139,19 @@ function heat(percent: number) {
   if (percent >= 75) return "#ffd7d9";
   if (percent >= 40) return "#d0e2ff";
   return "#defbe6";
+}
+
+function hitsFor(rows: Match[], visible: Array<Match & { n: number }>, side: "left" | "right"): Hit[] {
+  const numbers = new Map(visible.map((row) => [row.id, row.n]));
+  return rows
+    .filter((row) => numbers.has(row.id) || row.source !== "shared")
+    .map((row) => ({
+      id: row.id,
+      n: numbers.get(row.id) || 0,
+      page: side === "left" ? row.page_left : row.page_right,
+      box: side === "left" ? row.left_box : row.right_box,
+      tone: row.source === "readings" ? "readings" : row.source === "brief" ? "brief" : "shared",
+    }));
 }
 
 function showPassage(id: string) {
@@ -165,6 +217,10 @@ function IntegrityDrill() {
   const [note, setNote] = useState("");
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
+  const [strongOnly, setStrongOnly] = useState(false);
+  const [hideCommon, setHideCommon] = useState(false);
+  const [viewer, setViewer] = useState(false);
+  const [cursor, setCursor] = useState(0);
 
   useEffect(() => {
     pa<Overview>(`/integrity/overview?course=${encodeURIComponent(course)}`)
@@ -193,6 +249,19 @@ function IntegrityDrill() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that pair"));
   }, [course, assignment, pair]);
 
+  const visible = useMemo(() => {
+    const rows = (detail?.matches || []).filter((item) => {
+      if (strongOnly && item.percent < 80) return false;
+      if (hideCommon && item.source !== "shared") return false;
+      return true;
+    });
+    return rows.map((item, index) => ({ ...item, n: index + 1 }));
+  }, [detail, strongOnly, hideCommon]);
+
+  useEffect(() => {
+    setCursor(0);
+  }, [pair, strongOnly, hideCommon]);
+
   const pairs = useMemo(() => {
     const rows = matrix?.pairs ? [...matrix.pairs] : [];
     rows.sort((a, b) => (sort === "shared" ? b.shared - a.shared : b.percent - a.percent));
@@ -206,6 +275,28 @@ function IntegrityDrill() {
     if (next.assignment) query.set("assignment", next.assignment);
     if (next.pair) query.set("pair", next.pair);
     router.push(`/integrity${query.toString() ? `?${query}` : ""}`);
+  }
+
+  async function decide(matchId: string, action: "ok" | "flag") {
+    if (!detail) return;
+    const result = await run(
+      () =>
+        pa<{ matches: Match[]; decisions: PairDetail["decisions"]; message: string }>("/integrity/match", {
+          method: "POST",
+          body: JSON.stringify({
+            course: detail.slug,
+            number: detail.assignment,
+            left: detail.left,
+            right: detail.right,
+            match_id: matchId,
+            action,
+          }),
+        }),
+      setError,
+    );
+    if (!result) return;
+    setDetail((current) => (current ? { ...current, matches: result.matches, decisions: result.decisions } : current));
+    setSaved(result.message);
   }
 
   async function act(action: "ok" | "flag" | "note") {
@@ -352,25 +443,59 @@ function IntegrityDrill() {
       {detail && (
         <>
           <h2 style={{ margin: 0, fontWeight: 400 }}>Group {detail.left} and Group {detail.right}</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span>{detail.percent}% similar</span>
             <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag>
+            <span>{detail.decisions.flagged} flagged, {detail.decisions.ok} OK, {detail.decisions.pending} pending</span>
           </div>
-          <div className="pa-pair">
-            <SubmissionCard side="left" group={detail.left} meta={detail.left_meta} paragraphs={detail.left_text} />
-            <SubmissionCard side="right" group={detail.right} meta={detail.right_meta} paragraphs={detail.right_text} />
+          <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+            <Button kind={strongOnly ? "primary" : "tertiary"} size="sm" onClick={() => setStrongOnly((on) => !on)}>Strong only</Button>
+            <Button kind={hideCommon ? "primary" : "tertiary"} size="sm" onClick={() => setHideCommon((on) => !on)}>Hide brief and readings</Button>
+            <Button kind="secondary" size="sm" onClick={() => setViewer(true)}>See in document</Button>
           </div>
-          <h3 style={{ fontWeight: 600 }}>Shared passages</h3>
-          {detail.passages.length === 0 && <p>No shared sentences. This looks like separate work.</p>}
+          {visible.length === 0 && <p>No shared sentences in this view.</p>}
           <div>
-            {detail.passages.map((item) => (
-              <button key={item.id} type="button" className="pa-passage" onClick={() => showPassage(item.id)}>
-                <strong>{item.percent}%</strong>
-                <span> “{item.left}”</span>
-                {item.common && <Tag type="gray" size="sm">From the brief - not counted</Tag>}
-              </button>
+            {visible.map((item) => (
+              <article key={item.id} className={`pa-passage${item.n === cursor + 1 ? " is-current" : ""}`}>
+                <button type="button" onClick={() => { setCursor(item.n - 1); setViewer(true); }}>
+                  <strong>#{item.n}</strong>
+                  <span> {item.percent}% · page {item.page_left}</span>
+                  <span> “{item.context || item.quote}”</span>
+                </button>
+                <Tag type={item.source === "shared" ? "purple" : "gray"} size="sm">{item.tag}</Tag>
+                <span>{item.decision === "ok" ? "OK" : item.decision === "flag" ? "Flagged" : "Pending"}</span>
+                <Button kind="tertiary" size="sm" onClick={() => decide(item.id, "ok")}>Mark OK</Button>
+                <Button kind="danger--tertiary" size="sm" onClick={() => decide(item.id, "flag")}>Flag</Button>
+              </article>
             ))}
           </div>
+          {visible.length > 0 && (
+            <div className="pa-stepper">
+              <span>Match {cursor + 1} of {visible.length}</span>
+              <Button kind="tertiary" size="sm" disabled={cursor === 0} onClick={() => { setCursor((value) => Math.max(0, value - 1)); setViewer(true); }}>Prev</Button>
+              <Button kind="tertiary" size="sm" disabled={cursor >= visible.length - 1} onClick={() => { setCursor((value) => Math.min(visible.length - 1, value + 1)); setViewer(true); }}>Next</Button>
+            </div>
+          )}
+          {viewer && visible[cursor] && (
+            <div className="pa-pair">
+              <DocumentPane
+                url={fileUrl(detail.documents.left.view)}
+                title={`Group ${detail.left}`}
+                subtitle={detail.documents.left.origin === "docx" ? "Word document, shown as PDF" : "PDF"}
+                downloadUrl={fileUrl(detail.documents.left.original)}
+                hits={hitsFor(detail.matches || [], visible, "left")}
+                activeId={visible[cursor].id}
+              />
+              <DocumentPane
+                url={fileUrl(detail.documents.right.view)}
+                title={`Group ${detail.right}`}
+                subtitle={detail.documents.right.origin === "docx" ? "Word document, shown as PDF" : "PDF"}
+                downloadUrl={fileUrl(detail.documents.right.original)}
+                hits={hitsFor(detail.matches || [], visible, "right")}
+                activeId={visible[cursor].id}
+              />
+            </div>
+          )}
           <button type="button" className="pa-why" style={{ display: "block", margin: "12px 0", textAlign: "left" }} onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
           {why && <p id="integrity-why" className="pa-why-body">{detail.why}</p>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>

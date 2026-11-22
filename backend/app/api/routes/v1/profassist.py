@@ -434,7 +434,28 @@ async def draft_edit(
 async def draft_approve(
     draft_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    return await approve_draft(db, org.id, user.id, draft_id)
+    from app.profassist.grade_notes import release_feedback
+    from app.profassist.models import Approval
+
+    result = await approve_draft(db, org.id, user.id, draft_id)
+    release = release_feedback(str(user.id), str(result.get("group_name") or ""))
+    audit = release.get("audit") or {}
+    db.add(
+        Approval(
+            organization_id=org.id,
+            user_id=user.id,
+            target_type=audit.get("target_type") or "grade_feedback",
+            target_id=str(draft_id),
+            action=audit.get("action") or "approved",
+            note=audit.get("note") or release.get("message") or "",
+        )
+    )
+    await db.flush()
+    result["feedback_release"] = {
+        "pushed": release.get("pushed"),
+        "message": release.get("message"),
+    }
+    return result
 
 
 @router.post("/drafts/{draft_id}/push")
@@ -456,6 +477,15 @@ class IntegrityAction(BaseModel):
     right: str = "B"
     action: str = "note"
     note: str = ""
+    match_id: str = ""
+
+
+class FeedbackBody(BaseModel):
+    group: str = "Group A"
+    comments: list = Field(default_factory=list)
+    rubric: list = Field(default_factory=list)
+    overall: str = ""
+    bank: list = Field(default_factory=list)
 
 
 @router.get("/integrity/overview")
@@ -503,6 +533,100 @@ async def integrity_pair_action(
         "action": body.action,
         "note": body.note,
         "message": "Saved for you. Nothing was sent to Moodle or to a student.",
+    }
+
+
+@router.post("/integrity/match")
+async def integrity_match_action(
+    body: IntegrityAction, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.integrity_board import _pair_id, pair_detail
+    from app.profassist.integrity_docs import save_decision
+    from app.profassist.models import Approval
+
+    if body.action not in {"ok", "flag"} or not body.match_id:
+        return {"saved": False}
+    pair_id = _pair_id(body.course, body.number, body.left, body.right)
+    save_decision(pair_id, body.match_id, body.action)
+    db.add(
+        Approval(
+            organization_id=org.id,
+            user_id=user.id,
+            target_type="integrity_match",
+            target_id=f"{pair_id}:{body.match_id}",
+            action=body.action,
+            note="",
+        )
+    )
+    await db.flush()
+    detail = pair_detail(body.course, body.number, body.left, body.right)
+    return {
+        "saved": True,
+        "decisions": detail.get("decisions"),
+        "matches": detail.get("matches"),
+        "message": "Saved for you. Nothing was sent to Moodle or to a student.",
+    }
+
+
+@router.get("/integrity/file")
+async def integrity_file(course: str, number: str, group: str, which: str = "pdf") -> Response:
+    from app.profassist.integrity_docs import file_bytes
+
+    data, media, filename = file_bytes(course, number, group, which)
+    if not data:
+        return Response(status_code=404)
+    disposition = "attachment" if which == "original" else "inline"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
+
+
+@router.get("/grade/feedback")
+async def grade_feedback(user: CurrentUser, group: str = "Group A") -> dict:
+    from app.profassist.grade_notes import load_feedback
+    from app.profassist.integrity_docs import document_side
+
+    notes = load_feedback(str(user.id), group)
+    letter = group.replace("Group ", "").strip() or "A"
+    return {**notes, "document": document_side("MAAI903", "1", letter)}
+
+
+@router.post("/grade/feedback")
+async def grade_feedback_save(
+    body: FeedbackBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.grade_notes import save_feedback
+    from app.profassist.integrity_docs import document_side
+    from app.profassist.models import Approval
+
+    notes = save_feedback(
+        str(user.id),
+        body.group,
+        {
+            "comments": body.comments,
+            "rubric": body.rubric,
+            "overall": body.overall,
+            "bank": body.bank,
+        },
+    )
+    db.add(
+        Approval(
+            organization_id=org.id,
+            user_id=user.id,
+            target_type="grade_feedback",
+            target_id=body.group,
+            action="saved",
+            note="Private draft. Nothing was sent to Moodle or to a student.",
+        )
+    )
+    await db.flush()
+    letter = body.group.replace("Group ", "").strip() or "A"
+    return {
+        **notes,
+        "document": document_side("MAAI903", "1", letter),
+        "message": "Saved as a private draft. Nothing was sent to Moodle or to a student.",
     }
 
 

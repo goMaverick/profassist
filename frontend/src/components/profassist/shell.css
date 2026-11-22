@@ -592,8 +592,177 @@ mark {
   border: 1px solid #e0e0e0;
   background: #fff;
   text-align: left;
+}
+
+.pa-passage button {
+  flex: 1;
+  min-width: 240px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
   font: inherit;
   cursor: pointer;
+}
+
+.pa-passage.is-current {
+  outline: 2px solid #8a3ffc;
+}
+
+.pa-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.pa-doc {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  padding: 12px;
+  min-width: 0;
+}
+
+.pa-doc-head,
+.pa-doc-tools {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.pa-doc-head span,
+.pa-doc-tools {
+  color: #525252;
+  font-size: 0.875rem;
+}
+
+.pa-doc-tools button,
+.pa-doc-tools a {
+  border: 0;
+  background: none;
+  color: #0f62fe;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pa-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.pa-thumbs button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  padding: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.pa-doc-scroll {
+  max-height: 720px;
+  overflow: auto;
+  padding-right: 220px;
+  background: #f4f4f4;
+}
+
+.pa-page {
+  position: relative;
+  margin: 12px auto;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.pa-page canvas {
+  display: block;
+}
+
+.pa-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pa-text-layer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1)) scale(var(--min-font-size-inv));
+}
+
+.pa-hit {
+  position: absolute;
+  z-index: 3;
+}
+
+.pa-hit i {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: #8a3ffc;
+  color: #fff;
+  font-style: normal;
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 18px;
+}
+
+.pa-hit-shared { background: rgba(241, 194, 27, 0.55); }
+.pa-hit-brief,
+.pa-hit-readings { background: rgba(198, 198, 198, 0.8); }
+.pa-hit-note { background: rgba(15, 98, 254, 0.25); }
+
+.pa-bubble {
+  position: absolute;
+  left: calc(100% + 8px);
+  width: 190px;
+  z-index: 4;
+  background: #fff8e1;
+  border: 1px solid #f1c21b;
+  padding: 8px;
+}
+
+.pa-bubble textarea {
+  width: 100%;
+  min-height: 64px;
+  font: inherit;
+}
+
+.pa-feedback {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pa-feedback aside label,
+.pa-feedback aside textarea {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+}
+
+.pa-bank button {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  text-align: left;
 }
 
 @keyframes pa-pulse {

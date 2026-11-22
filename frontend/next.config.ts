@@ -19,6 +19,7 @@ const ContentSecurityPolicy = `
   img-src 'self' blob: data: https:;
   font-src 'self' data:;
   connect-src 'self' ws: wss: http://localhost:* https://localhost:*;
+  worker-src 'self' blob:;
   ${_frameAncestors}
   base-uri 'self';
   form-action 'self';
