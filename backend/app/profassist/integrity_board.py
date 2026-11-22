@@ -40,6 +40,14 @@ COURSES: list[dict[str, Any]] = [
                                 "left": "We interviewed facilities staff and mapped meters to floors.",
                                 "right": "We interviewed facilities staff and mapped meters to floors.",
                             },
+                            {
+                                "id": "m2b",
+                                "percent": 100,
+                                "common": True,
+                                "writing": "Low",
+                                "left": "The brief asks each group to name one campus process and measure it for four weeks.",
+                                "right": "The brief asks each group to name one campus process and measure it for four weeks.",
+                            },
                         ],
                     },
                     {
@@ -181,6 +189,94 @@ COURSES: list[dict[str, Any]] = [
 ]
 
 
+ROSTER: dict[str, dict[str, str]] = {
+    "A": {"members": "Sara Al Maktoum, Omar Haddad", "submitted": "4 Nov 2026"},
+    "B": {"members": "Noor Rahman, Layla Karim", "submitted": "4 Nov 2026"},
+    "C": {"members": "Hana Yusuf, Adam Cole", "submitted": "5 Nov 2026"},
+    "D": {"members": "Priya Nair, Jonah Ellis", "submitted": "5 Nov 2026"},
+    "E": {"members": "Mina Farouk, Chris Adeyemi", "submitted": "6 Nov 2026"},
+    "F": {"members": "Lina Haddad, Samir Qureshi", "submitted": "6 Nov 2026"},
+}
+
+OPENERS: dict[str, str] = {
+    "A": (
+        "We watched the Knowledge Hub doors across four teaching weeks and counted "
+        "entries in ten-minute blocks. The tally stayed in the group notebook. We did "
+        "not borrow a figure from facilities."
+    ),
+    "B": (
+        "We started from the published timetable and then stood at the same doors the "
+        "following week. Two of us counted while the third kept the clock. The notebook "
+        "is the record we are submitting."
+    ),
+    "C": (
+        "Our count covered the east stair, because that is the route from the afternoon "
+        "labs. We kept one sheet per day and checked the totals together each evening."
+    ),
+    "D": (
+        "We measured queue time at the print desk rather than the door. A phone timer "
+        "and a paper log were enough, and we discarded any session where the desk closed early."
+    ),
+    "E": (
+        "The group split the building by floor. One person stayed on level two and one "
+        "in the basement, and we compared the sheets before writing this up."
+    ),
+    "F": (
+        "We followed one workshop room for three weeks and noted when the booking and "
+        "the actual use disagreed. The disagreement is the finding, not a side comment."
+    ),
+}
+
+SETTINGS: dict[str, str] = {
+    "A": "The rooms we watched are the ones booked for the afternoon workshop, not the evening labs.",
+    "B": "We ignored the evening session because the doors were already locked when we arrived.",
+    "C": "Rain on the second Tuesday pushed people to the covered stair, and we noted that on the sheet.",
+    "D": "The desk log names the hour, not the student, so the sheet has no personal data.",
+    "E": "We photographed the meter labels and typed the readings the same evening.",
+    "F": "A room counted as empty only when we waited five minutes past the booking start.",
+}
+
+MIDDLES: dict[str, str] = {
+    "A": "The afternoon pattern was steady enough to plan around. What follows is the method we actually used.",
+    "B": "After the first week we stopped guessing from the timetable and wrote down only what we saw.",
+    "C": "The east stair is quieter than the main door, so a small difference still shows up in the sheet.",
+    "D": "Queue time moved more than headcount, which is why we kept both numbers.",
+    "E": "The basement meters were harder to read, so we treated that floor as its own zone.",
+    "F": "Empty booked rooms were the surprise. The notes below are the ones we would defend.",
+}
+
+CLOSERS: dict[str, str] = {
+    "A": (
+        "We would run the count for one more week before asking for a change to the "
+        "room rules. The recommendation is ours, and it is still a draft for the tutor."
+    ),
+    "B": (
+        "A second week of door counts would tell us whether the Thursday spike is real. "
+        "Until then we are not asking for a timetable change."
+    ),
+    "C": (
+        "The stair count is too small to redesign the building. It is enough to say "
+        "which door the next group should watch."
+    ),
+    "D": (
+        "The print desk is a different problem from the door. We are leaving the booking "
+        "system alone and flagging the queue instead."
+    ),
+    "E": (
+        "Level two and the basement should not be averaged. The pilot we suggest is "
+        "only for the floor we could read clearly."
+    ),
+    "F": (
+        "We can name the rooms that stay empty. We cannot yet say why the booking was made, "
+        "and that limit is part of the report."
+    ),
+}
+
+
+def _count(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
 def _norm(code: str) -> str:
     return "".join(ch for ch in (code or "").upper() if ch.isalnum())
 
@@ -268,6 +364,11 @@ def assignment_card(course: dict[str, Any], item: dict[str, Any]) -> dict[str, A
         "highest": highest,
         "writing_flags": writing,
         "status": overall,
+        "line": (
+            f"{_count(len(item['groups']), 'group', 'groups')} · "
+            f"{_count(flagged, 'pair', 'pairs')} to read · "
+            f"{_count(writing, 'writing flag', 'writing flags')}"
+        ),
     }
 
 
@@ -364,6 +465,8 @@ def pair_detail(course: str, number: str, left: str, right: str) -> dict[str, An
         "status": _status(percent, len(_counted(passages))),
         "left_text": left_body,
         "right_text": right_body,
+        "left_meta": _group_meta(left, item["number"]),
+        "right_meta": _group_meta(right, item["number"]),
         "passages": passages,
         "why": (
             "The highlight is the wording that appears in both submissions. "
@@ -373,17 +476,49 @@ def pair_detail(course: str, number: str, left: str, right: str) -> dict[str, An
     }
 
 
+def _group_meta(group: str, number: str) -> dict[str, str]:
+    roster = ROSTER.get(group, {"members": f"Group {group}", "submitted": "4 Nov 2026"})
+    submitted = roster["submitted"]
+    if str(number) == "2":
+        submitted = {"A": "18 Nov 2026", "B": "18 Nov 2026", "C": "19 Nov 2026"}.get(
+            group, "19 Nov 2026"
+        )
+    if str(number) == "3":
+        submitted = "2 Dec 2026" if group in {"A", "B"} else "3 Dec 2026"
+    return {"members": roster["members"], "submitted": submitted}
+
+
+def _run(text: str, passage_id: str = "", common: bool = False) -> dict[str, Any]:
+    return {"text": text, "id": passage_id, "common": common}
+
+
 def _submission(
     title: str, group: str, passages: list[dict[str, Any]], side: str
-) -> list[dict[str, str]]:
-    blocks = [
-        {"id": "", "text": f"Group {group} — {title}."},
-        {"id": "", "text": "The group describes its own setting and the limit of the evidence."},
-    ]
+) -> list[dict[str, Any]]:
+    del title
+    lead = MIDDLES.get(group, "The notes below are the ones we would defend.")
+    shared: list[dict[str, Any]] = [_run(lead)]
     for passage in passages:
-        blocks.append({"id": passage["id"], "text": passage[side]})
-    blocks.append({"id": "", "text": "The rest of the report is the group's own wording."})
-    return blocks
+        shared.append(_run(" "))
+        shared.append(
+            _run(
+                str(passage.get(side) or ""),
+                str(passage.get("id") or ""),
+                bool(passage.get("common")),
+            )
+        )
+    if not passages:
+        shared.append(_run(" Nothing in this section repeats another group's wording."))
+    return [
+        {
+            "runs": [
+                _run(OPENERS.get(group, "We measured one campus process and kept our own notes."))
+            ]
+        },
+        {"runs": [_run(SETTINGS.get(group, "We wrote down only what we saw."))]},
+        {"runs": shared},
+        {"runs": [_run(CLOSERS.get(group, "The rest of this report is the group's own wording."))]},
+    ]
 
 
 def concerns(code: str, number: str = "") -> dict[str, Any]:
@@ -399,7 +534,7 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
         href = f"/integrity?course={first['slug']}&assignment={first['number']}"
     lines = [
         f"{item['course']} assignment {item['number']} ({item['name']}): {item['status']}, "
-        f"highest {item['highest']}% across {item['flagged_pairs']} pairs to read."
+        f"highest {item['highest']}% across {_count(item['flagged_pairs'], 'pair', 'pairs')} to read."
         for item in picked
     ]
     return {

@@ -202,7 +202,22 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     )
     assert "Concern" in answered["message"]
     assert "86" in answered["message"]
+    assert "1 pairs" not in answered["message"]
     assert answered["href"].startswith("/integrity?course=MAAI903")
+    from app.profassist.integrity_board import concerns, pair_detail
+
+    architecture = concerns("MAAI903", "2")
+    assert "1 pair to read" in architecture["message"]
+    detail = pair_detail("MAAI903", "1", "A", "B")
+    assert len(detail["left_text"]) >= 3
+    assert detail["left_meta"]["members"].startswith("Sara")
+    assert any(item["common"] for item in detail["passages"])
+    assert "1 pair to read" in next(
+        item["line"] for item in overview("MAAI903")["items"] if item["number"] == "2"
+    )
+    assert "1 writing flag" in next(
+        item["line"] for item in overview("MAAI903")["items"] if item["number"] == "3"
+    )
 
 
 def test_create_assignment_phrase_picks_the_course_tool() -> None:

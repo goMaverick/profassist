@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Dropdown, Tag, TextArea, Tile } from "@carbon/react";
+import { ChevronRight } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
 
 interface CourseOption {
@@ -21,6 +22,7 @@ interface Card {
   highest: number;
   writing_flags: number;
   status: string;
+  line: string;
 }
 interface Overview {
   courses: CourseOption[];
@@ -52,6 +54,15 @@ interface Passage {
   left: string;
   right: string;
 }
+interface Run {
+  id: string;
+  text: string;
+  common: boolean;
+}
+interface ReportSide {
+  members: string;
+  submitted: string;
+}
 interface PairDetail {
   course: string;
   slug: string;
@@ -61,8 +72,10 @@ interface PairDetail {
   right: string;
   percent: number;
   status: string;
-  left_text: Array<{ id: string; text: string }>;
-  right_text: Array<{ id: string; text: string }>;
+  left_text: Array<{ runs: Run[] }>;
+  right_text: Array<{ runs: Run[] }>;
+  left_meta: ReportSide;
+  right_meta: ReportSide;
   passages: Passage[];
   why: string;
 }
@@ -87,6 +100,55 @@ function heat(percent: number) {
   if (percent >= 75) return "#ffd7d9";
   if (percent >= 40) return "#d0e2ff";
   return "#defbe6";
+}
+
+function showPassage(id: string) {
+  for (const side of ["left", "right"]) {
+    const node = document.getElementById(`${side}-${id}`);
+    if (!node) continue;
+    if (side === "left") node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.classList.remove("pa-pulse");
+    void node.offsetWidth;
+    node.classList.add("pa-pulse");
+  }
+}
+
+function SubmissionCard({
+  side,
+  group,
+  meta,
+  paragraphs,
+}: {
+  side: "left" | "right";
+  group: string;
+  meta: ReportSide;
+  paragraphs: Array<{ runs: Run[] }>;
+}) {
+  return (
+    <article className="pa-panel pa-submission" id={`${side}-submission`}>
+      <header>
+        <strong>Group {group}</strong>
+        <span>{meta.members}</span>
+        <span>Submitted {meta.submitted}</span>
+      </header>
+      {paragraphs.map((paragraph, index) => (
+        <div className="pa-report-p" key={`${side}-${index}`}>
+          {paragraph.runs.map((run, runIndex) =>
+            run.id ? (
+              <Fragment key={`${run.id}-${runIndex}`}>
+                <span id={`${side}-${run.id}`} className={run.common ? "pa-from-brief" : undefined}>
+                  {run.common ? run.text : <mark>{run.text}</mark>}
+                </span>
+                {run.common ? <Tag type="gray" size="sm">From the brief - not counted</Tag> : null}
+              </Fragment>
+            ) : (
+              <span key={`${side}-plain-${runIndex}`}>{run.text}</span>
+            ),
+          )}
+        </div>
+      ))}
+    </article>
+  );
 }
 
 function IntegrityDrill() {
@@ -210,16 +272,22 @@ function IntegrityDrill() {
               <button
                 key={`${item.slug}-${item.number}`}
                 type="button"
-                className="pa-panel"
-                style={{ textAlign: "left", cursor: "pointer" }}
+                className="pa-panel pa-integrity-row"
                 onClick={() => go({ course: item.slug, assignment: item.number })}
               >
-                <strong>{item.course} · Assignment {item.number}</strong>
-                <span> {item.name}</span>
-                <p style={{ margin: "8px 0" }}>
-                  {item.groups} groups · {item.flagged_pairs} pairs to read · highest {item.highest}% · {item.writing_flags} writing flags
-                </p>
-                <Tag type={statusType(item.status)} size="sm">{item.status}</Tag>
+                <span className="pa-integrity-main">
+                  <strong>{item.course} · Assignment {item.number}</strong>
+                  <span> {item.name}</span>
+                  <span className="pa-integrity-meta">{item.line}</span>
+                  <span className="pa-integrity-bar">
+                    <span className="pa-mini-meter" aria-hidden="true"><span style={{ width: `${item.highest}%`, background: heat(item.highest) }} /></span>
+                    Highest {item.highest}%
+                  </span>
+                </span>
+                <span className="pa-integrity-side">
+                  <Tag type={statusType(item.status)} size="sm">{item.status}</Tag>
+                  <ChevronRight size={20} aria-hidden="true" />
+                </span>
               </button>
             ))}
           </div>
@@ -228,6 +296,11 @@ function IntegrityDrill() {
       {assignment && !pair && matrix && (
         <>
           <h2 style={{ margin: 0, fontWeight: 400 }}>{matrix.course} · Assignment {matrix.assignment} {matrix.name}</h2>
+          <div className="pa-legend" aria-label="Colour key">
+            <span><i style={{ background: "#defbe6" }} /> Under 40%, clear</span>
+            <span><i style={{ background: "#d0e2ff" }} /> 40% to 74%, review</span>
+            <span><i style={{ background: "#ffd7d9" }} /> 75% or more, concern</span>
+          </div>
           <table className="pa-matrix" aria-label="Similarity between groups">
             <thead>
               <tr>
@@ -283,33 +356,21 @@ function IntegrityDrill() {
             <span>{detail.percent}% similar</span>
             <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <article id="left-submission">
-              {detail.left_text.map((block, index) => (
-                <p key={`${block.id}-${index}`} id={block.id ? `left-${block.id}` : undefined}>
-                  {block.id ? (
-                    <a href={`#right-${block.id}`}><mark>{block.text}</mark></a>
-                  ) : block.text}
-                </p>
-              ))}
-            </article>
-            <article id="right-submission">
-              {detail.right_text.map((block, index) => (
-                <p key={`${block.id}-${index}`} id={block.id ? `right-${block.id}` : undefined}>
-                  {block.id ? <mark>{block.text}</mark> : block.text}
-                </p>
-              ))}
-            </article>
+          <div className="pa-pair">
+            <SubmissionCard side="left" group={detail.left} meta={detail.left_meta} paragraphs={detail.left_text} />
+            <SubmissionCard side="right" group={detail.right} meta={detail.right_meta} paragraphs={detail.right_text} />
           </div>
           <h3 style={{ fontWeight: 600 }}>Shared passages</h3>
           {detail.passages.length === 0 && <p>No shared sentences. This looks like separate work.</p>}
-          <ul>
+          <div>
             {detail.passages.map((item) => (
-              <li key={item.id}>
-                {item.percent}% · {item.common ? "Also in the assignment brief, so it is not counted as copying" : "Not in the brief or the readings"} · writing {item.writing}
-              </li>
+              <button key={item.id} type="button" className="pa-passage" onClick={() => showPassage(item.id)}>
+                <strong>{item.percent}%</strong>
+                <span> “{item.left}”</span>
+                {item.common && <Tag type="gray" size="sm">From the brief - not counted</Tag>}
+              </button>
             ))}
-          </ul>
+          </div>
           <button type="button" className="pa-why" style={{ display: "block", margin: "12px 0", textAlign: "left" }} onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
           {why && <p id="integrity-why" className="pa-why-body">{detail.why}</p>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
