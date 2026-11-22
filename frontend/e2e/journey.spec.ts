@@ -66,20 +66,20 @@ test.describe("e2e-journey", () => {
       "policies",
     ]) {
       await page.getByRole("button", { name: "Write a suggestion" }).click();
-      await expect(page.getByText(new RegExp(`Suggested the ${step}`))).toBeVisible({
+      await expect(page.getByText(new RegExp(`Suggested the ${step}`)).first()).toBeVisible({
         timeout: 30_000,
       });
       await page.getByRole("button", { name: "Next", exact: true }).click();
     }
 
     await page.getByRole("button", { name: "Send for council review" }).click();
-    await expect(page.getByText(/Score \d+/)).toBeVisible();
-    await expect(page.getByText("Verdict reached.")).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByText(/Score \d+/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/high findings still open/)).toBeVisible();
     await page.getByText(/Score \d+/).scrollIntoViewIfNeeded();
     await shot("journey-03.png");
 
-    await page.getByRole("button", { name: "Generate" }).click();
-    await expect(page.getByText(/ready to download/)).toBeVisible({ timeout: 40_000 });
+    await page.getByRole("button", { name: "Generate", exact: true }).click();
+    await expect(page.getByText(/ready to download/).first()).toBeVisible({ timeout: 40_000 });
     await expect(page.getByRole("link", { name: "PDF" })).toBeVisible();
     await expect(page.getByRole("link", { name: "DOCX" })).toBeVisible();
     await shot("journey-02.png");
@@ -88,26 +88,38 @@ test.describe("e2e-journey", () => {
     await page.getByRole("button", { name: "Group project" }).click();
     await expect(page.getByRole("heading", { name: /A3 Group project/ })).toBeVisible();
     await page.getByRole("tab", { name: "Ideas" }).click();
-    await page.getByRole("button", { name: "Suggest ideas with council" }).click();
-    await expect(page.getByText("Campus energy dashboard")).toBeVisible();
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.url().includes("/ideas") && response.request().method() === "POST" && response.ok(),
+      ),
+      page.getByRole("button", { name: "Suggest ideas with council" }).click(),
+    ]);
+    await expect(page.getByText("Campus energy dashboard").first()).toBeVisible({ timeout: 30_000 });
     await page.getByRole("tab", { name: "Exemplars" }).click();
-    await page.getByRole("button", { name: "Write exemplar" }).click();
-    await expect(page.getByText(/Strong:/).first()).toBeVisible();
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.url().includes("/exemplars") && response.ok(),
+        { timeout: 30_000 },
+      ),
+      page.getByRole("button", { name: "Write exemplar" }).click(),
+    ]);
+    await expect(page.getByText(/Strong:/).first()).toBeVisible({ timeout: 30_000 });
     await page.getByRole("tab", { name: "Overview" }).click();
-    await expect(page.getByText("Problem definition")).toBeVisible();
+    await expect(page.getByText("Pipeline implementation").first()).toBeVisible();
     await page.getByRole("button", { name: "Form groups of two" }).click();
-    await expect(page.getByText(/groups are ready/)).toBeVisible();
+    await expect(page.getByText(/groups are ready/).first()).toBeVisible();
     await page.getByRole("button", { name: "Publish to Moodle" }).click();
-    await expect(page.getByText(/Published to Moodle/)).toBeVisible();
+    await expect(page.getByText(/Published to Moodle/).first()).toBeVisible();
     await expect(page.getByText("published").first()).toBeVisible();
     await shot("journey-04.png");
 
     await page.getByRole("button", { name: "Sync student submissions" }).click();
-    await expect(page.getByText(/submissions synced/)).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByText(/submissions synced/).first()).toBeVisible({ timeout: 120_000 });
     await page.getByRole("tab", { name: "Submissions" }).click();
-    await expect(page.getByText("Group A").first()).toBeVisible();
-    await expect(page.getByText("Group B").first()).toBeVisible();
-    await expect(page.getByText("Group C").first()).toBeVisible();
+    const submitted = page.getByRole("tabpanel", { name: "Submissions" });
+    await expect(submitted.getByText("Group A").first()).toBeVisible();
+    await expect(submitted.getByText("Group B").first()).toBeVisible();
+    await expect(submitted.getByText("Group C").first()).toBeVisible();
     await shot("journey-05.png");
 
     await page.goto("/integrity?course=AAS910&assignment=A3&pair=A-B");
@@ -133,9 +145,11 @@ test.describe("e2e-journey", () => {
 
     await page.getByRole("button", { name: "Approve grade" }).click();
     await page.getByRole("button", { name: "Send to Moodle" }).click();
-    await expect(page.getByText("Sent to Moodle").first()).toBeVisible({ timeout: 40_000 });
-    await expect(page.getByText(/This assignment is complete/)).toBeVisible();
-    await expect(page.getByText(/Moodle was not contacted/)).toBeVisible();
+    await expect(page.getByText("Sent to Moodle", { exact: true }).first()).toBeVisible({ timeout: 40_000 });
+    const complete = page.getByText(/This assignment is complete/).first();
+    await expect(complete).toBeVisible();
+    await expect(page.getByText(/Moodle was not contacted/).first()).toBeVisible();
+    await complete.scrollIntoViewIfNeeded();
     await shot("journey-08.png");
 
     await page.goto("/assignments");
