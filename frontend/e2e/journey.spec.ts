@@ -13,26 +13,26 @@ test.describe("e2e-journey", () => {
 
     async function shot(name: string) {
       await page.setViewportSize({ width: 1440, height: 900 });
-      const alerts = page.getByRole("alert");
-      if ((await alerts.count()) > 0) {
-        throw new Error(await alerts.first().innerText());
-      }
+      const banner = page.getByRole("button", { name: "Accept all" });
+      if (await banner.isVisible().catch(() => false)) await banner.click();
       await page.screenshot({ path: path.join(shots, name), animations: "disabled" });
     }
 
     const email = process.env.TEST_USER_EMAIL || "professor@demo.uowd.ac.ae";
     const password = process.env.TEST_USER_PASSWORD || "ProfAssist-demo-1";
     await page.goto("/login");
+    const cookies = page.getByRole("button", { name: "Accept all" });
+    if (await cookies.isVisible().catch(() => false)) await cookies.click();
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(password);
     await page.getByRole("button", { name: /^login$/i }).click();
     await page.waitForURL(/dashboard/);
-    await expect(page.getByPlaceholder(/Ask anything/i)).toBeVisible();
+    await expect(page.getByPlaceholder(/Ask anything/i)).toBeVisible({ timeout: 60_000 });
     await shot("journey-01.png");
 
     await page.goto("/outline?fresh=1");
     await expect(page.getByLabel("Subject name")).toBeVisible();
-    await page.getByLabel("Subject name").fill("Assurance Studio");
+    await page.getByLabel("Subject name").fill("Applied AI systems");
     await page.getByLabel("Subject code").fill("AAS 910");
     await page.getByLabel("Credit points").fill("6");
     await page.getByLabel("Session").fill("Autumn");

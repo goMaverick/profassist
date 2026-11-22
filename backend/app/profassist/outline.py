@@ -71,10 +71,12 @@ async def start_outline(
 ) -> dict[str, Any]:
     body = demo_outline() if demo else empty_outline()
     basics = body["basics"]
+    # Each blank outline needs its own code. The professor replaces it on Basics.
+    code = str(basics.get("code") or "").strip() or f"NEW-{uuid.uuid4().hex[:6].upper()}"
     row = SubjectOutline(
         organization_id=org_id,
         owner_user_id=user_id,
-        code=basics.get("code") or "NEW",
+        code=code,
         name=basics.get("name") or "New subject",
         body=body,
         status="draft",

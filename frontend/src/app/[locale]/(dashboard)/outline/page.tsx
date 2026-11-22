@@ -59,6 +59,8 @@ interface Outline {
   course_id?: string;
 }
 
+let freshOutline: Promise<Outline> | null = null;
+
 export default function OutlineWizardPage() {
   const [outline, setOutline] = useState<Outline | null>(null);
   const [step, setStep] = useState(0);
@@ -87,7 +89,7 @@ export default function OutlineWizardPage() {
   useEffect(() => {
     const fresh = new URLSearchParams(window.location.search).get("fresh") === "1";
     const open = fresh
-      ? pa<Outline>("/outlines", { method: "POST" })
+      ? (freshOutline ??= pa<Outline>("/outlines", { method: "POST" }))
       : pa<{ items: Outline[] }>("/outlines").then(async (data) =>
           data.items.length ? data.items[0] : pa<Outline>("/outlines?demo=true", { method: "POST" }),
         );
