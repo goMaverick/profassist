@@ -34,7 +34,9 @@ DATA_NEEDED = (
 )
 
 
-def map_student(student: dict[str, Any], *, submissions: int = 0, graded: int = 0) -> dict[str, Any]:
+def map_student(
+    student: dict[str, Any], *, submissions: int = 0, graded: int = 0
+) -> dict[str, Any]:
     """Map what ProfAssist actually stores. Missing LMS logs stay blank, not zero."""
     features = dict.fromkeys(FEATURE_COLUMNS)
     features["assignments_due_to_date"] = None

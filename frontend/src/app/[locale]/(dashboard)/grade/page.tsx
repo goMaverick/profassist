@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 import { CouncilStage } from "@/components/profassist/council-stage";
 
+function shortWhen(value?: string) {
+  if (!value || value === "off") return "off";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 interface SubmissionRow {
   id: string;
   group_name: string;
@@ -120,14 +127,7 @@ export default function GradePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Review and grade</h1>
-        <p className="text-foreground/70 mt-2 max-w-2xl text-sm">
-          Three graders quote the submission. A judge keeps only quotes that are really there and explains the level.
-          The calibrator is not trained, so nothing is a one-click accept.
-        </p>
-      </div>
+      <p className="text-foreground/60 text-sm">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -143,11 +143,12 @@ export default function GradePage() {
           Sync now
         </button>
         {moodle && (
-          <p className="text-foreground/60 text-sm">
-            {moodle.mode} mode · every {moodle.interval_minutes} min
-            {moodle.paused ? " · paused" : ""} · next run {moodle.next_run || "paused"} · nightly {moodle.next_nightly || "off"}
-            {moodle.last_sync ? ` · last ${moodle.last_status} ${moodle.last_sync}` : ""}
-            {moodle.last_error ? ` · ${moodle.last_error}` : ""}
+          <p className="w-full text-sm text-[#525252]">
+            Moodle is in {moodle.mode} mode and syncs every {moodle.interval_minutes} minutes
+            {moodle.paused ? " (paused)" : ""}. Next run {shortWhen(moodle.next_run)}. Nightly full sync{" "}
+            {shortWhen(moodle.next_nightly)}.
+            {moodle.last_sync ? ` Last sync ${moodle.last_status || "done"} ${shortWhen(moodle.last_sync)}.` : ""}
+            {moodle.last_error ? ` ${moodle.last_error}` : ""}
           </p>
         )}
         {syncStatus && <p className="text-foreground/60 text-sm">{syncStatus}</p>}

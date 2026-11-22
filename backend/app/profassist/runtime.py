@@ -30,6 +30,11 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "Say when the notes do not cover an objective."
     ),
     "chat": "Help the professor. Do not publish anything to Moodle.",
+    "idea_generator": "Propose four or five distinct use cases. Several groups may share one idea.",
+    "exemplar": (
+        "Write a model answer and a strong, average, and weak example for one idea. "
+        "Map them to the rubric. Do not grade a student."
+    ),
     "reviewer_curriculum": (
         "You are the curriculum reviewer. Check Bloom verb level and whether the weekly "
         "schedule names the same learning outcomes as the course."
@@ -60,6 +65,8 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
     "reflection": ["compare_edits"],
     "slide_studio": ["plan", "retrieve", "cite", "critique", "pptx"],
     "chat": ["rag_search"],
+    "idea_generator": ["propose"],
+    "exemplar": ["write"],
     "outline_review": ["curriculum", "alignment", "balance", "student", "judge", "debate"],
     "mcp": [
         "list_courses",

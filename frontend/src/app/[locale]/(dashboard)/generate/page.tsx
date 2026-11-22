@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button, Checkbox, Column, Grid, InlineNotification, Tag, Tile } from "@carbon/react";
 import { Add, MagicWand } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
+import { AiSuggestion } from "@/components/profassist/ai-suggestion";
 import { CouncilStage } from "@/components/profassist/council-stage";
 
 interface Outline {
@@ -45,10 +46,6 @@ export default function GeneratePage() {
 
   return (
     <Grid>
-      <Column lg={16}>
-        <h1 style={{ fontWeight: 400 }}>Assessment generator</h1>
-        <p style={{ color: "#525252" }}>Choose a course, choose the outcomes, then accept the council’s suggestion.</p>
-      </Column>
       {error && (
         <Column lg={16}>
           <InlineNotification kind="error" title="Assessments" subtitle={error} hideCloseButton />
@@ -95,6 +92,7 @@ export default function GeneratePage() {
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
           <Button
             kind="primary"
+            data-ask-council=""
             renderIcon={MagicWand}
             disabled={!current || selected.length === 0}
             onClick={async () => {
@@ -116,6 +114,7 @@ export default function GeneratePage() {
           </Button>
           <Button
             kind="secondary"
+            data-accept-assessments=""
             renderIcon={Add}
             disabled={!current || suggestions.length === 0}
             onClick={async () => {
@@ -139,6 +138,23 @@ export default function GeneratePage() {
           </Button>
         </div>
         {talking && <CouncilStage scene="assessment" />}
+        {(talking || suggestions.length > 0) && (
+          <AiSuggestion
+            title="Assessment suggestion"
+            description="The council drafted a task from the outcomes you picked."
+            body={
+              suggestions.map((item) => `${item.name} (${item.weight}%). ${item.brief}`).join("\n\n") ||
+              "The council is reading the outcomes."
+            }
+            busy={talking}
+            onRegenerate={() => {
+              document.querySelector<HTMLButtonElement>("[data-ask-council]")?.click();
+            }}
+            onAccept={() => {
+              document.querySelector<HTMLButtonElement>("[data-accept-assessments]")?.click();
+            }}
+          />
+        )}
         {suggestions.map((item) => (
           <Tile key={item.name} style={{ marginTop: "1rem" }}>
             <Tag type="purple">{item.task_type}</Tag>

@@ -146,6 +146,68 @@ def test_similarity_flags_the_copied_method_only() -> None:
     assert "sustanability" in copied["rare_details"] or copied["kind"] == "fingerprint"
 
 
+def test_outline_assist_scrubs_a_contact_email_before_the_model() -> None:
+    from app.profassist.llm import complete
+
+    drafted = complete(
+        "outline_assist",
+        {
+            "step": "lecture",
+            "body": {"lecture": {"email": "ada@university.edu"}},
+            "instructions": "",
+        },
+    )
+    assert isinstance(drafted, dict)
+
+
+def test_chat_stream_asks_before_a_moodle_push() -> None:
+    from app.profassist.platform_tools import chat_stream_events
+
+    events = chat_stream_events(
+        {
+            "reply": "I can record the grade.",
+            "tool": "moodle_push",
+            "needs_confirm": True,
+            "result": {"preview": "push"},
+        }
+    )
+    tool = next(item for item in events if item["event"] == "tool")
+    assert tool["data"]["name"] == "moodle_push"
+    assert tool["data"]["state"] == "approval-requested"
+    assert tool["data"]["output"] is None
+    assert "".join(item["data"]["delta"] for item in events if item["event"] == "text").startswith(
+        "I can record"
+    )
+
+
+def test_shared_idea_brief_is_not_treated_as_copying() -> None:
+    from app.profassist.groupwork import pairwise_similarity
+    from app.profassist.llm import complete
+
+    ideas = complete("ideas", {"title": "Report", "lo_codes": ["LO1"]})["ideas"]
+    assert len(ideas) == 5
+    brief = "Shared clinic triage use case."
+    flags = pairwise_similarity(
+        [
+            {
+                "id": "a",
+                "group": "A",
+                "idea_id": "1",
+                "text": brief + " Our pipeline logs every prediction.",
+                "brief": brief,
+            },
+            {
+                "id": "b",
+                "group": "B",
+                "idea_id": "1",
+                "text": brief + " We interviewed nurses and kept paper notes.",
+                "brief": brief,
+            },
+        ]
+    )
+    assert flags == []
+
+
 def test_moodle_schedule_respects_pause_interval_and_nightly_hour() -> None:
     from datetime import UTC, datetime
 

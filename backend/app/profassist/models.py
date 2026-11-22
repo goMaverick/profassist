@@ -435,10 +435,14 @@ class GroupAllocation(Base, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = _org()
     owner_user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     group_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("pa_student_groups.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_student_groups.id", ondelete="CASCADE"),
+        nullable=False,
     )
     idea_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("pa_assignment_ideas.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_assignment_ideas.id", ondelete="CASCADE"),
+        nullable=False,
     )
 
 
@@ -450,7 +454,9 @@ class Exemplar(Base, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = _org()
     owner_user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     idea_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("pa_assignment_ideas.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_assignment_ideas.id", ondelete="CASCADE"),
+        nullable=False,
     )
     model_answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
     strong: Mapped[str] = mapped_column(Text, nullable=False, default="")

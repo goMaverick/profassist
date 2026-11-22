@@ -36,14 +36,7 @@ export default function IntegrityPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Integrity</h1>
-        <p className="text-foreground/70 mt-2 max-w-2xl text-sm">
-          Groups on the same topic are compared section by section. A flag is evidence for a viva, never an accusation.
-          AI-text detection is not used.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}. A flag is evidence for a conversation. AI-text detection is not used.</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <button
         className="bg-foreground text-background w-fit rounded-lg px-3 py-2 text-sm disabled:opacity-50"

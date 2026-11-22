@@ -20,7 +20,7 @@ import {
   Document,
   Education,
   Flag,
-  GraduationCap,
+  Certificate,
   PresentationFile,
   Report,
   User,
@@ -28,13 +28,100 @@ import {
 } from "@carbon/icons-react";
 import { ProfessorChat } from "@/components/profassist/professor-chat";
 
+const PAGES: Record<string, { title: string; section: string; description: string }> = {
+  "/dashboard": {
+    title: "Home",
+    section: "Workspace",
+    description: "Drafts stay drafts. You approve the outline, the assessment, and the grade.",
+  },
+  "/outline": {
+    title: "Subject outline",
+    section: "Course",
+    description: "Walk the faculty template. Download the PDF or DOCX when it is ready.",
+  },
+  "/generate": {
+    title: "Assessment generator",
+    section: "Course",
+    description: "Choose outcomes. The council suggests a task. You accept it.",
+  },
+  "/assignments": {
+    title: "Group assignments",
+    section: "Course",
+    description: "Several groups may share one idea. Each group submits its own work.",
+  },
+  "/similarity": {
+    title: "Similarity",
+    section: "Course",
+    description: "Shared briefs are expected. The check compares the solution after that brief is removed.",
+  },
+  "/studio": {
+    title: "Course studio",
+    section: "Course",
+    description: "Notes, objectives, and the materials the agents read.",
+  },
+  "/slides": {
+    title: "Slides",
+    section: "Course",
+    description: "Each bullet stays next to the note it came from.",
+  },
+  "/grade": {
+    title: "Review and grade",
+    section: "Course",
+    description: "The council drafts. You edit, approve, then record the push.",
+  },
+  "/integrity": {
+    title: "Integrity",
+    section: "Course",
+    description: "Shared passages and viva questions. A flag is not a verdict.",
+  },
+  "/students": {
+    title: "Students at risk",
+    section: "Course",
+    description: "A score is advice for you. It does not message a student or change a mark.",
+  },
+  "/style": {
+    title: "My style",
+    section: "Workspace",
+    description: "Agents read this when they write. A reflection is not applied until you approve it.",
+  },
+  "/design": {
+    title: "Course design",
+    section: "Course",
+    description: "Edit the weeks, outcomes, and assessment plan. Nothing is used until you approve it.",
+  },
+  "/rubric": {
+    title: "Rubric builder",
+    section: "Course",
+    description: "Start blank, ask the model, or import. Approve the rubric onto the assignment.",
+  },
+  "/quality": {
+    title: "Quality",
+    section: "Workspace",
+    description: "The grade calibrator is not trained. It will not change a level.",
+  },
+};
+
+function pageMeta(pathname: string) {
+  const path = pathname.replace(/^\/[a-z]{2}(?=\/)/, "") || "/dashboard";
+  const key = Object.keys(PAGES).find((item) => path === item || path.endsWith(item));
+  if (key && PAGES[key]) return PAGES[key];
+  const name = path.split("/").filter(Boolean).pop() || "Page";
+  return {
+    title: name.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    section: "ProfAssist",
+    description: "",
+  };
+}
+
 const LINKS = [
   { href: "/dashboard", label: "Home", icon: Dashboard },
   { href: "/outline", label: "Subject outline", icon: Document },
   { href: "/generate", label: "Assessments", icon: Report },
+  { href: "/assignments", label: "Group work", icon: Education },
+  { href: "/similarity", label: "Similarity", icon: Flag },
   { href: "/studio", label: "Studio", icon: Education },
   { href: "/slides", label: "Slides", icon: PresentationFile },
-  { href: "/grade", label: "Grade", icon: GraduationCap },
+  { href: "/grade", label: "Grade", icon: Certificate },
   { href: "/integrity", label: "Integrity", icon: Flag },
   { href: "/students", label: "Students", icon: User },
   { href: "/style", label: "My style", icon: Watson },
@@ -59,7 +146,7 @@ export function CarbonShell({ children }: { children: React.ReactNode }) {
     <Theme theme="g10">
       <Header aria-label="ProfAssist">
         <HeaderName href="/dashboard" prefix="">
-          <img src={logo} alt="University of Wollongong in Dubai" style={{ height: 28, marginRight: 8 }} />
+          <img src={logo} alt="University of Wollongong in Dubai" style={{ height: 36, width: "auto", maxWidth: 220, marginRight: 12 }} />
           ProfAssist
         </HeaderName>
         <HeaderGlobalBar>
@@ -87,21 +174,26 @@ export function CarbonShell({ children }: { children: React.ReactNode }) {
         </SideNavItems>
       </SideNav>
       <Content id="main" className="pa-content">
+        <PageHead pathname={pathname || "/dashboard"} onChat={() => setChat(true)} />
         {children}
-        {!chat && (
-          <Button className="pa-chat-fab" kind="primary" renderIcon={Chat} onClick={() => setChat(true)}>
-            Ask ProfAssist
-          </Button>
-        )}
       </Content>
       {chat && <ProfessorChat onClose={() => setChat(false)} />}
-      <style>{`
-        .pa-content { min-height: 100vh; padding: 5rem 2rem 6rem 18rem; background: #f4f4f4; }
-        .pa-chat-fab { position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 9000; }
-        @media (max-width: 66rem) {
-          .pa-content { padding-left: 2rem; }
-        }
-      `}</style>
     </Theme>
+  );
+}
+
+function PageHead({ pathname, onChat }: { pathname: string; onChat: () => void }) {
+  const meta = pageMeta(pathname);
+  return (
+    <header className="pa-page-head">
+      <div>
+        <p className="pa-crumb">ProfAssist / {meta.section}</p>
+        <h1>{meta.title}</h1>
+        {meta.description ? <p>{meta.description}</p> : null}
+      </div>
+      <Button kind="primary" size="md" renderIcon={Chat} onClick={onChat}>
+        Ask ProfAssist
+      </Button>
+    </header>
   );
 }

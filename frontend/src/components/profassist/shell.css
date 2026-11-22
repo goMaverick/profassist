@@ -1,0 +1,118 @@
+/* Carbon shell. Header and side nav stay fixed. Content uses the remaining width. */
+
+.cds--g10,
+.cds--g100,
+.cds--header,
+.cds--side-nav,
+.cds--content,
+.cds--text-input,
+.cds--label,
+.cds--btn {
+  font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+.cds--header {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 8000;
+  height: 3rem;
+}
+
+.cds--side-nav.cds--side-nav--expanded {
+  position: fixed;
+  top: 3rem;
+  bottom: 0;
+  left: 0;
+  z-index: 7000;
+  width: 16rem;
+}
+
+.cds--skip-to-content {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.cds--skip-to-content:focus {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10000;
+  width: auto;
+  height: auto;
+  clip: auto;
+}
+
+.cds--content.pa-content {
+  box-sizing: border-box;
+  min-height: 100vh;
+  margin-top: 3rem;
+  margin-left: 16rem;
+  width: calc(100vw - 16rem);
+  max-width: calc(100vw - 16rem);
+  padding: 1.5rem 1.5rem 5rem;
+  overflow-x: clip;
+  background: #f4f4f4;
+}
+
+.pa-content .cds--grid {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.pa-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.pa-page-head h1 {
+  margin: 0.25rem 0 0;
+  font-size: 1.75rem;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.pa-crumb {
+  margin: 0;
+  color: #525252;
+  font-size: 0.75rem;
+}
+
+.pa-page-head p {
+  margin: 0.35rem 0 0;
+  max-width: 40rem;
+  color: #525252;
+}
+
+.pa-progress {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.pa-fields {
+  display: grid;
+  gap: 1rem;
+  max-width: 40rem;
+}
+
+@media (max-width: 66rem) {
+  .cds--side-nav.cds--side-nav--expanded {
+    position: fixed;
+  }
+  .cds--content.pa-content {
+    margin-left: 0;
+    width: 100vw;
+    max-width: 100vw;
+  }
+}

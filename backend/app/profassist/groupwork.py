@@ -226,21 +226,29 @@ async def allocate(
 ) -> dict[str, Any]:
     row = await _assignment(db, org_id, user_id, assignment_id)
     ideas = (
-        await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id))
-    ).scalars().all()
+        (await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id)))
+        .scalars()
+        .all()
+    )
     groups = (
-        await db.execute(
-            select(StudentGroup).where(
-                StudentGroup.organization_id == org_id,
-                StudentGroup.course_id == row.course_id,
-                StudentGroup.owner_user_id == user_id,
+        (
+            await db.execute(
+                select(StudentGroup).where(
+                    StudentGroup.organization_id == org_id,
+                    StudentGroup.course_id == row.course_id,
+                    StudentGroup.owner_user_id == user_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if pairs is None:
         pairs = [
             {"group_id": group, "idea_id": idea}
-            for group, idea in round_robin([str(item.id) for item in groups], [str(item.id) for item in ideas])
+            for group, idea in round_robin(
+                [str(item.id) for item in groups], [str(item.id) for item in ideas]
+            )
         ]
     await db.execute(
         GroupAllocation.__table__.delete().where(
@@ -270,8 +278,10 @@ async def write_exemplars(
         raise ProfassistError(403, "The exemplar agent is turned off.")
     row = await _assignment(db, org_id, user_id, assignment_id)
     ideas = (
-        await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id))
-    ).scalars().all()
+        (await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id)))
+        .scalars()
+        .all()
+    )
     for idea in ideas:
         drafted = complete(
             "exemplar",
@@ -338,27 +348,31 @@ async def similarity_report(
         ).scalars()
     }
     allocations = (
-        await db.execute(
-            select(GroupAllocation).where(GroupAllocation.idea_id.in_(list(ideas)))
-        )
-    ).scalars().all() if ideas else []
+        (await db.execute(select(GroupAllocation).where(GroupAllocation.idea_id.in_(list(ideas)))))
+        .scalars()
+        .all()
+        if ideas
+        else []
+    )
     idea_by_group = {item.group_id: item.idea_id for item in allocations}
     groups = {
         item.id: item
         for item in (
-            await db.execute(
-                select(StudentGroup).where(StudentGroup.course_id == row.course_id)
-            )
+            await db.execute(select(StudentGroup).where(StudentGroup.course_id == row.course_id))
         ).scalars()
     }
     submissions = (
-        await db.execute(
-            select(Submission).where(
-                Submission.organization_id == org_id,
-                Submission.course_id == row.course_id,
+        (
+            await db.execute(
+                select(Submission).where(
+                    Submission.organization_id == org_id,
+                    Submission.course_id == row.course_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     prepared = []
     for submission in submissions:
         idea_id = submission.idea_id
@@ -390,9 +404,7 @@ async def similarity_report(
 async def roster(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[dict[str, str]]:
     rows = (
         await db.execute(
-            select(Student).where(
-                Student.organization_id == org_id, Student.course_id == course_id
-            )
+            select(Student).where(Student.organization_id == org_id, Student.course_id == course_id)
         )
     ).scalars()
     return [{"id": str(row.id), "name": row.display_name} for row in rows]
@@ -403,24 +415,46 @@ async def assignment_view(
 ) -> dict[str, Any]:
     row = await _assignment(db, org_id, user_id, assignment_id)
     ideas = (
-        await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id))
-    ).scalars().all()
+        (await db.execute(select(AssignmentIdea).where(AssignmentIdea.assignment_id == row.id)))
+        .scalars()
+        .all()
+    )
     exemplars = (
-        await db.execute(select(Exemplar).where(Exemplar.idea_id.in_([item.id for item in ideas])))
-    ).scalars().all() if ideas else []
-    by_idea = {item.idea_id: item for item in exemplars}
-    groups = (
-        await db.execute(
-            select(StudentGroup).where(
-                StudentGroup.course_id == row.course_id, StudentGroup.owner_user_id == user_id
+        (
+            await db.execute(
+                select(Exemplar).where(Exemplar.idea_id.in_([item.id for item in ideas]))
             )
         )
-    ).scalars().all()
-    allocations = (
-        await db.execute(
-            select(GroupAllocation).where(GroupAllocation.group_id.in_([item.id for item in groups]))
+        .scalars()
+        .all()
+        if ideas
+        else []
+    )
+    by_idea = {item.idea_id: item for item in exemplars}
+    groups = (
+        (
+            await db.execute(
+                select(StudentGroup).where(
+                    StudentGroup.course_id == row.course_id, StudentGroup.owner_user_id == user_id
+                )
+            )
         )
-    ).scalars().all() if groups else []
+        .scalars()
+        .all()
+    )
+    allocations = (
+        (
+            await db.execute(
+                select(GroupAllocation).where(
+                    GroupAllocation.group_id.in_([item.id for item in groups])
+                )
+            )
+        )
+        .scalars()
+        .all()
+        if groups
+        else []
+    )
     return _assignment_public(
         row,
         [

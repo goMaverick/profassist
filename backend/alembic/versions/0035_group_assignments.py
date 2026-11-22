@@ -54,9 +54,7 @@ def upgrade() -> None:
         sa.Column("deliverables", sa.Text(), nullable=False, server_default=""),
         sa.Column("evidence", sa.Text(), nullable=False, server_default=""),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["assignment_id"], ["pa_group_assignments.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["assignment_id"], ["pa_group_assignments.id"], ondelete="CASCADE"),
     )
     op.create_table(
         "pa_student_groups",

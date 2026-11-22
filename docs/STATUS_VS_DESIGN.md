@@ -48,7 +48,8 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | IBM Carbon | Partial | Professor shell, home, outline, assessments, and login use Carbon, IBM Plex, and Carbon icons. Other template screens keep their layout inside that shell. |
 | Subject outline wizard | Done | Steps follow the faculty template, then a PDF and DOCX. Files are indexed per professor and course. |
 | Outline review | Done | One reviewer or the council. Findings have a severity, a section, and a one-click fix. High findings do not block approval. |
-| Council animation | Done | Marking, debate, judge, and feedback play as avatar cards. Demo mode replays a timed script. |
+| Council animation | Done | Marking, debate, judge, and feedback play as avatar cards. Demo mode replays a timed script. The same view uses AI Elements for each persona's message, reasoning, the judge's chain of thought, and a rubric tool card. |
+| Universal chat | Done | A sheet on every professor page. It streams tool cards, citations, and the reply. A Moodle push or a delete waits for a confirm. |
 | University logo | Done | The UOW logotype is the default org logo in the header, on login, and on the subject outline. |
 | Kafka | Not done | The app does not publish events to Kafka. |
 | DVC | Not done | No dataset versioning. |

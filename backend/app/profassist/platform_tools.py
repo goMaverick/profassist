@@ -360,7 +360,33 @@ async def chat_turn(
             name, arguments = pending_tool, {}
             confirmed_flag = True
         else:
-            name, arguments = choose_tool(message)
+            from typing import TypedDict
+
+            from langgraph.graph import END, StateGraph
+
+            from app.profassist.observe import invoke_graph
+
+            class ChatState(TypedDict, total=False):
+                message: str
+                name: str
+                arguments: dict
+
+            def pick(state: ChatState) -> ChatState:
+                picked, args = choose_tool(state.get("message") or "")
+                return {"name": picked, "arguments": args}
+
+            graph = StateGraph(ChatState)
+            graph.add_node("pick", pick)
+            graph.set_entry_point("pick")
+            graph.add_edge("pick", END)
+            chosen, _url = invoke_graph(
+                graph.compile(),
+                {"message": message},
+                name="professor-chat",
+                metadata={"kind": "chat"},
+            )
+            name = chosen.get("name") or "list_courses"
+            arguments = chosen.get("arguments") or {}
             confirmed_flag = False
         payload = await invoke_tool(db, name, arguments, confirmed=confirmed_flag)
         if payload.get("needs_confirm"):
@@ -370,6 +396,66 @@ async def chat_turn(
         return {"reply": reply, **payload}
     finally:
         clear_tool_actor()
+
+
+def chat_stream_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Turn one chat result into the events the AI Elements panel reads.
+
+    The UI stream is our own SSE, not the Vercel data protocol. Each event is
+    a tool card, a citation, or a text delta.
+    """
+    reply = str(payload.get("reply") or "")
+    tool = str(payload.get("tool") or "")
+    needs = bool(payload.get("needs_confirm"))
+    events: list[dict[str, Any]] = [
+        {
+            "event": "reasoning",
+            "data": {
+                "text": (
+                    "I stay inside this university and this professor's role. "
+                    "A Moodle push or a delete waits for a confirm."
+                )
+            },
+        }
+    ]
+    if tool:
+        events.append(
+            {
+                "event": "tool",
+                "data": {
+                    "name": tool,
+                    "state": "approval-requested" if needs else "output-available",
+                    "input": {"tool": tool},
+                    "output": None if needs else payload.get("result"),
+                },
+            }
+        )
+        events.append(
+            {
+                "event": "source",
+                "data": {
+                    "title": "Course workspace",
+                    "href": "https://demo.uowd.ac.ae/dashboard",
+                },
+            }
+        )
+    words = reply.split(" ")
+    for index, word in enumerate(words):
+        if not word and index:
+            continue
+        gap = " " if index < len(words) - 1 else ""
+        events.append({"event": "text", "data": {"delta": f"{word}{gap}"}})
+    events.append(
+        {
+            "event": "done",
+            "data": {
+                "reply": reply,
+                "tool": tool,
+                "needs_confirm": needs,
+            },
+        }
+    )
+    return events
 
 
 def _reply(name: str, result: Any) -> str:

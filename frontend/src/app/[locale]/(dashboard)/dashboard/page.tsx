@@ -7,7 +7,7 @@ import {
   Document,
   Education,
   Flag,
-  GraduationCap,
+  Certificate,
   PresentationFile,
   Report,
   User,
@@ -33,7 +33,7 @@ const CARDS = [
   { href: "/generate", title: "Assessments", text: "Pick outcomes. The council suggests a task and a rubric.", icon: Report },
   { href: "/studio", title: "Course studio", text: "Notes, objectives, and the materials the agents read.", icon: Education },
   { href: "/slides", title: "Slides", text: "A cited deck for the week you choose.", icon: PresentationFile },
-  { href: "/grade", title: "Review and grade", text: "Council, your edit, then a recorded push.", icon: GraduationCap },
+  { href: "/grade", title: "Review and grade", text: "Council, your edit, then a recorded push.", icon: Certificate },
   { href: "/integrity", title: "Integrity", text: "Shared passages and viva questions. Not a verdict.", icon: Flag },
   { href: "/students", title: "Students", text: "The roster. Early warning is not trained.", icon: User },
   { href: "/style", title: "My style", text: "Your voice and the About this professor note.", icon: Watson },
@@ -53,15 +53,11 @@ export default function HomePage() {
 
   return (
     <Grid>
-      <Column sm={4} md={8} lg={16}>
-        <p style={{ letterSpacing: "0.12em", textTransform: "uppercase", color: "#6f6f6f", fontSize: "0.75rem" }}>
-          University workspace
-        </p>
-        <h1 style={{ fontSize: "2.5rem", fontWeight: 400, margin: "0.25rem 0 0.5rem" }}>Good to see you, Professor.</h1>
-        <p style={{ maxWidth: "40rem", color: "#525252" }}>
-          Drafts stay drafts. You approve the outline, the assessment, and the grade.
-        </p>
-      </Column>
+      {!home && !error && (
+        <Column lg={16}>
+          <p>Loading the workspace…</p>
+        </Column>
+      )}
       {error && (
         <Column sm={4} md={8} lg={16}>
           <InlineNotification kind="error" title="Could not load" subtitle={error} hideCloseButton />
@@ -72,20 +68,21 @@ export default function HomePage() {
           <InlineNotification kind="info" title="How this works" subtitle={home.principle} hideCloseButton lowContrast />
         </Column>
       )}
-      {[
-        ["Course", course?.code || "None yet"],
-        ["Submissions", String(home?.submissions ?? "0")],
-        ["Open flags", String(home?.open_flags ?? "0")],
-        ["Pushed", String(home?.pushed ?? "0")],
-      ].map(([label, value]) => (
-        <Column key={label} sm={2} md={2} lg={4}>
-          <Tile>
-            <div style={{ color: "#6f6f6f", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
-            <div style={{ fontSize: "2rem", marginTop: "0.5rem" }}>{value}</div>
-          </Tile>
-        </Column>
-      ))}
-      {CARDS.map((card) => (
+      {home &&
+        [
+          ["Course", course?.code || "None yet"],
+          ["Submissions", String(home.submissions)],
+          ["Open flags", String(home.open_flags)],
+          ["Pushed", String(home.pushed)],
+        ].map(([label, value]) => (
+          <Column key={label} sm={2} md={2} lg={4}>
+            <Tile>
+              <div style={{ color: "#6f6f6f", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+              <div style={{ fontSize: "2rem", marginTop: "0.5rem" }}>{value}</div>
+            </Tile>
+          </Column>
+        ))}
+      {home && CARDS.map((card) => (
         <Column key={card.href} sm={4} md={4} lg={4}>
           <ClickableTile href={card.href} style={{ minHeight: "9rem" }}>
             <card.icon size={24} />
@@ -94,14 +91,16 @@ export default function HomePage() {
           </ClickableTile>
         </Column>
       ))}
+      {home && (
       <Column sm={4} md={8} lg={16}>
-        <Tag type="blue">Moodle {home?.moodle_mode || "…"}</Tag>
+        <Tag type="blue">Moodle {home.moodle_mode}</Tag>
         <Tag type={home?.llm_mode === "demo" ? "gray" : "green"}>Model {home?.llm_mode || "…"}</Tag>
         <Tag type="teal">{course?.title || "Course not seeded"}</Tag>
         <Link href="/outline" style={{ marginLeft: "0.5rem" }}>
           Open the subject outline
         </Link>
       </Column>
+      )}
     </Grid>
   );
 }

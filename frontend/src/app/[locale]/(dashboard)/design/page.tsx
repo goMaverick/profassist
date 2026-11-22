@@ -53,13 +53,7 @@ export default function DesignPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Course design</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Upload notes in Course studio, then ask for a draft. Edit the weeks, outcomes, and assessment plan. Nothing is used until you approve it.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
       <label className="border-foreground/15 inline-flex w-fit cursor-pointer rounded-lg border px-3 py-2 text-sm">
         Upload a course note

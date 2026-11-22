@@ -14,7 +14,7 @@ from app.profassist.config import (
     llm_model,
 )
 from app.profassist.observe import record_step
-from app.profassist.pii import assert_prompt_is_clean
+from app.profassist.pii import assert_prompt_is_clean, scrub
 from app.profassist.providers import extra_kwargs, key_configured, litellm_model
 from app.profassist.runtime import agent_route, labelled_about, prompt_for
 
@@ -159,6 +159,46 @@ def demo_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
                     item["task_type"] = "Group project"
         reply += " Edit it before you continue."
         return {"reply": reply, "suggestion": suggestion or {}}
+
+    if task == "ideas":
+        codes = payload.get("lo_codes") or ["LO1"]
+        ideas = []
+        titles = [
+            "Campus energy dashboard",
+            "Clinic triage assistant",
+            "Library occupancy forecast",
+            "Workshop safety monitor",
+            "Student hub water use",
+        ]
+        for index, title in enumerate(titles, start=1):
+            ideas.append(
+                {
+                    "title": title,
+                    "brief": f"Use case {index}: {title}. Evidence should show {', '.join(codes)}.",
+                    "deliverables": "A short report, a diagram, and the data you used.",
+                    "evidence": f"Quote a result that shows {codes[0]}.",
+                }
+            )
+        return {"ideas": ideas}
+
+    if task == "assignment_text":
+        return {
+            "body": (
+                f"Assignment: {payload.get('title') or 'Task'}. "
+                f"Outcomes: {', '.join(payload.get('lo_codes') or [])}. "
+                f"{payload.get('instructions') or ''} "
+                "Work in a group. Each group picks one idea and submits its own solution."
+            ).strip()
+        }
+
+    if task == "exemplar":
+        title = payload.get("title") or "the idea"
+        return {
+            "model_answer": f"A strong solution for {title} names the audience, the pipeline, and a limitation.",
+            "strong": "The report quotes a measured result and states what the result does not show.",
+            "average": "The report describes the pipeline but skips the limitation.",
+            "weak": "The report names the idea and stops there.",
+        }
 
     if task == "outline_review":
         findings = payload.get("findings") or []
@@ -347,6 +387,9 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         "objectives": "course_designer",
         "course_design": "course_designer",
         "outline_assist": "course_designer",
+        "ideas": "idea_generator",
+        "assignment_text": "idea_generator",
+        "exemplar": "exemplar",
         "assessment_suggest": "rubric_designer",
         "slides": "course_designer",
         "rubric": "rubric_designer",
@@ -370,7 +413,8 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
             else ""
         )
     )
-    user = json.dumps(payload, ensure_ascii=False)
+    user = scrub(json.dumps(payload, ensure_ascii=False)).text
+    system = scrub(system).text
     assert_prompt_is_clean(system + "\n" + user)
     trace(task, {"task": task, "persona": payload.get("persona"), "mode": mode()})
     route_key = agent

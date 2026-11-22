@@ -55,6 +55,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  devIndicators: false,
   transpilePackages: ["@carbon/react", "@carbon/icons-react"],
 
   // Security headers

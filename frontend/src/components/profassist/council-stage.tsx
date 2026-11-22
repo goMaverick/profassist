@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Tag, Tile } from "@carbon/react";
+import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtHeader, ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought";
+import { InlineCitation, InlineCitationText } from "@/components/ai-elements/inline-citation";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/ai-elements/tool";
 import {
   ChartColumn,
   Checkmark,
@@ -18,6 +23,7 @@ interface AgentEvent {
   name?: string;
   color?: string;
   state?: string;
+  icon?: string;
   text?: string;
   step?: string;
   from?: string;
@@ -114,6 +120,47 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
           ))}
         </p>
       )}
+      <div className="pa-ai council-thread">
+        <Tool defaultOpen>
+          <ToolHeader type="dynamic-tool" state="output-available" toolName="rubric_lookup" title="rubric_lookup" />
+          <ToolContent>
+            <ToolInput input={{ scene, step }} />
+            <ToolOutput output={{ criteria: ["Evidence", "Limitation"] }} errorText={undefined} />
+          </ToolContent>
+        </Tool>
+        {agents
+          .filter((agent) => agent.state === "speaking" || agent.state === "thinking")
+          .map((agent) => (
+            <Message from="assistant" key={`${agent.id}-${agent.state}`}>
+              <MessageContent>
+                <strong>{agent.name}</strong>
+                {agent.state === "thinking" ? (
+                  <Reasoning isStreaming defaultOpen>
+                    <ReasoningTrigger />
+                    <ReasoningContent>{`${agent.name} is reading the section for this step.`}</ReasoningContent>
+                  </Reasoning>
+                ) : (
+                  <MessageResponse>{agent.text || ""}</MessageResponse>
+                )}
+                {agent.text && (
+                  <InlineCitation>
+                    <InlineCitationText>submission evidence</InlineCitationText>
+                  </InlineCitation>
+                )}
+              </MessageContent>
+            </Message>
+          ))}
+        {step === "judge" && (
+          <ChainOfThought defaultOpen>
+            <ChainOfThoughtHeader>Judge</ChainOfThoughtHeader>
+            <ChainOfThoughtContent>
+              <ChainOfThoughtStep label="Marking" status="complete" description="Each persona quoted the work." />
+              <ChainOfThoughtStep label="Debate" status={arrows.length ? "complete" : "active"} description="Disagreement stays visible." />
+              <ChainOfThoughtStep label="Verdict" status={verdict ? "complete" : "pending"} description={verdict || "Waiting for the last voice."} />
+            </ChainOfThoughtContent>
+          </ChainOfThought>
+        )}
+      </div>
       {verdict && <p className="council-verdict">{verdict}</p>}
       <style>{`
         .council-stage { display: grid; gap: 1rem; }

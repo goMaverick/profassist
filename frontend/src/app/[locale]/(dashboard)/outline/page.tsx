@@ -14,16 +14,17 @@ import {
 } from "@carbon/react";
 import { Download, MagicWand, Save } from "@carbon/icons-react";
 import { pa, run } from "@/components/profassist/bits";
+import { AiSuggestion } from "@/components/profassist/ai-suggestion";
 import { CouncilStage } from "@/components/profassist/council-stage";
 
 const STEPS = [
   { id: "basics", label: "Basics" },
-  { id: "lecture", label: "Lecture and educator" },
-  { id: "description", label: "Description" },
+  { id: "lecture", label: "Lecture" },
+  { id: "description", label: "About" },
   { id: "outcomes", label: "Outcomes" },
-  { id: "schedule", label: "Weekly schedule" },
+  { id: "schedule", label: "Weeks" },
   { id: "readings", label: "Readings" },
-  { id: "assessments", label: "Assessments" },
+  { id: "assessments", label: "Tasks" },
   { id: "policies", label: "Policies" },
 ];
 
@@ -42,6 +43,9 @@ export default function OutlineWizardPage() {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [talking, setTalking] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [instructions, setInstructions] = useState("Focus on healthcare cases. Prefer project work.");
+  const [files, setFiles] = useState<Array<{ filename: string; status: string }>>([]);
   const [reviewMode, setReviewMode] = useState("council");
   const [review, setReview] = useState<{
     id: string;
@@ -67,11 +71,12 @@ export default function OutlineWizardPage() {
 
   async function assist() {
     if (!outline) return;
+    setDrafting(true);
     const next = await run(
       () =>
         pa<{ outline: Outline; reply: string }>(`/outlines/${outline.id}/assist`, {
           method: "POST",
-          body: JSON.stringify({ step: current.id, message: "Suggest this step" }),
+          body: JSON.stringify({ step: current.id, message: instructions || "Suggest this step" }),
         }),
       setError,
     );
@@ -79,6 +84,7 @@ export default function OutlineWizardPage() {
       setOutline(next.outline);
       setNote(next.reply);
     }
+    setDrafting(false);
   }
 
   async function save(payload: Record<string, unknown>) {
@@ -97,8 +103,7 @@ export default function OutlineWizardPage() {
   return (
     <Grid>
       <Column lg={16} md={8} sm={4}>
-        <h1 style={{ fontWeight: 400 }}>Subject outline</h1>
-        <p style={{ color: "#525252" }}>
+        <p style={{ color: "#525252", marginTop: 0 }}>
           {outline ? `${outline.code} · ${outline.name} · ${outline.status}` : "Loading the wizard…"}
         </p>
       </Column>
@@ -113,11 +118,60 @@ export default function OutlineWizardPage() {
         </Column>
       )}
       <Column lg={16}>
-        <ProgressIndicator currentIndex={step} onChange={(index) => setStep(index)} spaceEqually>
+        <h2 style={{ fontWeight: 400 }}>Attachments and instructions</h2>
+        <p style={{ color: "#525252" }}>
+          Files are stored for this professor and course, checked for personal data, and cited when the assistant drafts.
+        </p>
+        <input
+          type="file"
+          accept=".pdf,.docx,.pptx,.txt,.md"
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            if (!file || !outline) return;
+            const body = new FormData();
+            body.append("file", file);
+            const saved = await run(
+              () => pa<{ materials: Array<{ filename: string; status: string }> }>(`/outlines/${outline.id}/materials`, { method: "POST", body }),
+              setError,
+            );
+            if (saved) setFiles(saved.materials);
+          }}
+        />
+        <ul>
+          {files.map((file) => (
+            <li key={file.filename}>{file.filename} · {file.status}</li>
+          ))}
+        </ul>
+        <TextArea
+          id="instructions"
+          labelText="Instructions to AI"
+          value={instructions}
+          rows={3}
+          onChange={(event) => setInstructions(event.target.value)}
+        />
+        <Button
+          kind="tertiary"
+          disabled={!outline}
+          onClick={async () => {
+            if (!outline) return;
+            await run(
+              () => pa(`/outlines/${outline.id}/instructions`, { method: "PUT", body: JSON.stringify({ instructions }) }),
+              setError,
+            );
+            setNote("Instructions saved. Suggest this step again to regenerate with them.");
+          }}
+        >
+          Save instructions
+        </Button>
+      </Column>
+      <Column lg={16}>
+        <div className="pa-progress">
+        <ProgressIndicator currentIndex={step} onChange={(index) => setStep(index)}>
           {STEPS.map((item) => (
             <ProgressStep key={item.id} label={item.label} />
           ))}
         </ProgressIndicator>
+        </div>
       </Column>
       <Column lg={12} md={8} sm={4}>
         {outline && current.id === "basics" && <Basics body={body.basics as Record<string, string>} onSave={save} />}
@@ -145,10 +199,21 @@ export default function OutlineWizardPage() {
         {outline && current.id === "policies" && (
           <Policies items={(body.policies as Array<{ key: string; title: string; body: string }>) || []} onSave={(policies) => save({ policies })} />
         )}
+        {(note || drafting) && (
+          <AiSuggestion
+            title={`Suggestion for ${current?.label || "this step"}`}
+            description="Generated from the outline, the attachments, and your instructions."
+            body={note || "Drafting…"}
+            busy={drafting}
+            citation={note}
+            onAccept={() => setNote("Kept. Edit the fields, then move to the next step.")}
+            onRegenerate={assist}
+          />
+        )}
       </Column>
       <Column lg={16}>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <Button kind="tertiary" renderIcon={MagicWand} onClick={assist} disabled={!outline}>
+          <Button kind="tertiary" renderIcon={MagicWand} onClick={assist} disabled={!outline || drafting}>
             Suggest this step
           </Button>
           <Button kind="secondary" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>
@@ -275,15 +340,34 @@ export default function OutlineWizardPage() {
   );
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  name: "Subject name",
+  code: "Subject code",
+  credit_points: "Credit points",
+  session: "Session",
+  year: "Year",
+  duration: "Duration",
+  prerequisites: "Prerequisites",
+  delivery_mode: "Delivery mode",
+  day: "Lecture day",
+  time: "Lecture time",
+  location: "Location",
+  educator_name: "Educator",
+  office: "Office",
+  email: "Contact email",
+  consultation: "Consultation hours",
+};
+
 function Basics({ body, onSave }: { body: Record<string, string>; onSave: (payload: Record<string, unknown>) => void }) {
   const [form, setForm] = useState(body || {});
   return (
-    <div style={{ display: "grid", gap: "1rem" }}>
+    <div className="pa-fields">
+      <p style={{ margin: 0, color: "#525252" }}>These fields match the faculty subject outline.</p>
       {["name", "code", "credit_points", "session", "year", "duration", "prerequisites", "delivery_mode"].map((key) => (
         <TextInput
           key={key}
           id={key}
-          labelText={key.replaceAll("_", " ")}
+          labelText={FIELD_LABELS[key] || key}
           value={String(form[key] ?? "")}
           onChange={(event) => setForm({ ...form, [key]: event.target.value })}
         />
@@ -298,12 +382,13 @@ function Basics({ body, onSave }: { body: Record<string, string>; onSave: (paylo
 function Lecture({ body, onSave }: { body: Record<string, string>; onSave: (payload: Record<string, unknown>) => void }) {
   const [form, setForm] = useState(body || {});
   return (
-    <div style={{ display: "grid", gap: "1rem" }}>
+    <div className="pa-fields">
+      <p style={{ margin: 0, color: "#525252" }}>Who teaches the subject, and when students can reach them.</p>
       {["day", "time", "location", "educator_name", "office", "email", "consultation"].map((key) => (
         <TextInput
           key={key}
           id={key}
-          labelText={key.replaceAll("_", " ")}
+          labelText={FIELD_LABELS[key] || key}
           value={String(form[key] ?? "")}
           onChange={(event) => setForm({ ...form, [key]: event.target.value })}
         />

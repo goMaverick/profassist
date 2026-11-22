@@ -59,13 +59,7 @@ export default function StudioPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">{course.code}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Course studio</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Objectives, slides and the rubric are drafts. Approve each one before you use it.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">{course.code}</p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
 
       <section className="flex flex-col gap-3">

@@ -6,7 +6,7 @@ import { cn, isAppAdmin } from "@/lib/utils";
 import { APP_NAME, ROUTES } from "@/lib/constants";
 import {
   BookOpen,
-  GraduationCap,
+  Certificate,
   LayoutDashboard,
   PenLine,
   ShieldAlert,
@@ -23,7 +23,7 @@ const navigation = [
   { label: "Design", href: "/design", icon: BookOpen },
   { label: "Rubric", href: "/rubric", icon: PenLine },
   { label: "Slides", href: "/slides", icon: BookOpen },
-  { label: "Grade", href: "/grade", icon: GraduationCap },
+  { label: "Grade", href: "/grade", icon: Certificate },
   { label: "Integrity", href: "/integrity", icon: ShieldCheck },
   { label: "Students", href: "/students", icon: Users },
   { label: "My style", href: "/style", icon: PenLine },

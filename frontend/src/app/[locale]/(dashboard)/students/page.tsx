@@ -43,16 +43,12 @@ export default function StudentsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div>
-        <p className="text-foreground/50 text-xs tracking-[0.18em] uppercase">
-          {data?.course?.code || course.code}
-        </p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Students at risk</h1>
-        <p className="text-foreground/70 mt-2 text-sm">
-          Course filter: {data?.course?.title || course.title}. A score, if one is shown later, is advice for you. It does not message a student or change a mark.
-        </p>
-      </div>
+      <p className="text-sm text-[#525252]">
+        Course filter: {data?.course?.code || course.code} {data?.course?.title || course.title}
+      </p>
       {(error || loadError) && <Banner>{error || loadError}</Banner>}
+      {!data && !error && <p>Loading the roster…</p>}
+      {data && data.students.length === 0 && <p>No students are on this course yet. Sync from Moodle to pull the roster.</p>}
       {warning && (
         <Banner>
           {warning.trained ? warning.message : `Model not trained. ${warning.message}`}
@@ -64,6 +60,7 @@ export default function StudentsPage() {
           Upstream features: {warning.features.join(", ")}.
         </p>
       )}
+      {data && data.students.length > 0 && (
       <table className="w-full text-left text-sm">
         <thead className="text-foreground/50 border-foreground/10 border-b text-xs tracking-wide uppercase">
           <tr>
@@ -89,6 +86,7 @@ export default function StudentsPage() {
           })}
         </tbody>
       </table>
+      )}
     </div>
   );
 }
