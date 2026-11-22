@@ -129,14 +129,14 @@ def draft_mark(group: str = "Group A") -> dict[str, Any]:
             "name": "Ethical risk",
             "weight": 30,
             "band": "Good",
-            "reason": "The sheet keeps hours, not names. Say who is allowed to see the counts.",
-            "evidence": "The brief asks each group to name one campus process and measure it for four weeks.",
+            "reason": "They kept their own tally and did not copy another group's figures. Say who may see the counts.",
+            "evidence": "We did not borrow a figure from another group.",
             "agreed": True,
             "graders": [
                 {
                     "name": "Evidence grader",
                     "band": "Good",
-                    "reason": "The brief sentence is used as the task, not as a finding.",
+                    "reason": "They say the figures are their own.",
                 },
                 {"name": "Method grader", "band": "Good", "reason": "The limit is stated."},
                 {
