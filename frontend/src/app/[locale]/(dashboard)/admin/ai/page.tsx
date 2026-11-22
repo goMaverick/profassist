@@ -3,13 +3,21 @@
 import { useEffect, useState } from "react";
 import { Banner, pa, run } from "@/components/profassist/bits";
 
+interface Source {
+  agent: string;
+  source: string;
+  version: number | null;
+  label: string;
+  text: string;
+  url: string;
+}
 interface View {
   chat_enabled: boolean;
   provider: string;
   model: string;
   base_url: string;
   defaults: Record<string, string>;
-  prompts: Array<{ agent: string; version: number; body: string; active: boolean }>;
+  prompt_sources?: Source[];
   tools: Array<{ agent: string; tool: string; enabled: boolean }>;
   audit: Array<{ agent: string; version: number; action: string; before: string; after: string }>;
 }
@@ -17,14 +25,9 @@ interface View {
 export default function AiAdminPage() {
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
-  const [agent, setAgent] = useState("course_designer");
-  const [body, setBody] = useState("");
-
   async function load() {
     const data = await pa<View>("/admin/ai");
     setView(data);
-    const active = data.prompts.find((row) => row.agent === agent && row.active);
-    setBody(active?.body || data.defaults[agent] || "");
   }
 
   useEffect(() => {
@@ -100,53 +103,26 @@ export default function AiAdminPage() {
             </p>
           </section>
           <section className="border-foreground/10 flex flex-col gap-3 rounded-xl border p-4">
-            <h2 className="text-lg font-medium">Agent prompt</h2>
-            <select
-              className="border-foreground/15 rounded-md border bg-transparent px-2 py-1"
-              value={agent}
-              onChange={(event) => {
-                const next = event.target.value;
-                setAgent(next);
-                const active = view.prompts.find((row) => row.agent === next && row.active);
-                setBody(active?.body || view.defaults[next] || "");
-              }}
-            >
-              {Object.keys(view.defaults).map((key) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
-            <textarea
-              className="border-foreground/15 min-h-32 rounded-lg border bg-transparent p-3"
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-            />
-            <button
-              className="bg-foreground text-background w-fit rounded-lg px-3 py-2"
-              onClick={async () => {
-                const next = await run(
-                  () =>
-                    pa<View>("/admin/ai/prompts", {
-                      method: "POST",
-                      body: JSON.stringify({ agent, body }),
-                    }),
-                  setError,
-                );
-                if (next) setView(next);
-              }}
-            >
-              Publish a new version
-            </button>
-            <ul className="text-foreground/70">
-              {view.prompts
-                .filter((row) => row.agent === agent)
-                .map((row) => (
-                  <li key={`${row.agent}-${row.version}`}>
-                    v{row.version} {row.active ? "(active)" : ""}
-                  </li>
-                ))}
-            </ul>
+            <h2 className="text-lg font-medium">Prompts and personas</h2>
+            <p className="text-foreground/70">
+              Edit these in Langfuse. Agents use the version labeled production. This page does not
+              publish a second copy, so the two screens cannot disagree.
+            </p>
+            {(view.prompt_sources || []).map((source) => (
+              <div key={source.agent} className="border-foreground/10 rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium">{source.agent}</p>
+                  <a className="underline" href={source.url} target="_blank" rel="noreferrer">
+                    Edit in Langfuse
+                  </a>
+                </div>
+                <p className="text-foreground/60 mt-1">
+                  Using {source.source}
+                  {source.version ? ` v${source.version}` : ""} ({source.label})
+                </p>
+                <p className="mt-2 whitespace-pre-wrap">{source.text}</p>
+              </div>
+            ))}
           </section>
           <section className="border-foreground/10 flex flex-col gap-2 rounded-xl border p-4">
             <h2 className="text-lg font-medium">Tools</h2>

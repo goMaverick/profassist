@@ -11,6 +11,7 @@ interface SubmissionRow {
   draft_status: string | null;
   blind: boolean;
   quarantined: boolean;
+  trace_url?: string;
 }
 interface Draft {
   id: string;
@@ -23,6 +24,7 @@ interface Draft {
   model_view: string;
   one_click: boolean;
   one_click_reason: string;
+  trace_url?: string;
   results: Array<{
     criterion: string;
     feedback: string;
@@ -103,6 +105,11 @@ export default function GradePage() {
                 <span className="font-medium">{row.group_name}</span>
                 <span className="text-foreground/50 mt-1 block">{row.draft_status || "not graded"}{row.blind ? " · blind sample" : ""}</span>
               </button>
+              {row.trace_url && (
+                <a className="mt-1 block px-1 text-xs underline" href={row.trace_url} target="_blank" rel="noreferrer">
+                  View agent trail
+                </a>
+              )}
             </li>
           ))}
         </ul>
@@ -224,6 +231,11 @@ export default function GradePage() {
                   </button>
                 </div>
                 <p className="text-foreground/50 text-xs">Status: {draft.status}. Push stays disabled until you approve.</p>
+                {draft.trace_url && (
+                  <a className="text-sm underline" href={draft.trace_url} target="_blank" rel="noreferrer">
+                    View agent trail
+                  </a>
+                )}
               </div>
             )}
           </div>

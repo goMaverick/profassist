@@ -37,7 +37,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
       - LLM_BASE_URL=${LLM_BASE_URL:-}
-      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-false}
+      - LANGFUSE_ENABLED=true
+      - LANGFUSE_PUBLIC_KEY=pk-lf-profassist-local
+      - LANGFUSE_SECRET_KEY=sk-lf-profassist-local-secret
+      - LANGFUSE_HOST=http://langfuse-web:3000
+      - LANGFUSE_PUBLIC_BASE_URL=http://localhost:3100
+      - LANGFUSE_PROJECT_ID=profassist-project
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - DOCLING_ENABLED=${DOCLING_ENABLED:-false}
       - MEM0_HISTORY_PATH=/tmp/profassist-mem0.db
@@ -183,6 +188,111 @@ services:
       - backend
     restart: unless-stopped
 
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: profassist_langfuse_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: profassist_clickhouse
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: profassist_langfuse_web
+    ports:
+      - "3100:3000"
+    environment: &langfuse-env
+      NEXTAUTH_URL: http://localhost:3100
+      NEXTAUTH_SECRET: profassist-langfuse-nextauth-secret
+      DATABASE_URL: postgresql://postgres:postgres@langfuse-db:5432/langfuse
+      SALT: profassist-langfuse-salt
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000001
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LANGFUSE_BULLMQ_SKIP_REDIS_VERSION_CHECK: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: profassist
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: profassist-secret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: profassist
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: profassist-secret
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_INIT_ORG_ID: profassist-org
+      LANGFUSE_INIT_ORG_NAME: ProfAssist
+      LANGFUSE_INIT_PROJECT_ID: profassist-project
+      LANGFUSE_INIT_PROJECT_NAME: ProfAssist
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-profassist-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-profassist-local-secret
+      LANGFUSE_INIT_USER_EMAIL: professor@demo.uowd.ac.ae
+      LANGFUSE_INIT_USER_NAME: Layla Hassan
+      LANGFUSE_INIT_USER_PASSWORD: ProfAssist-demo-1
+    networks:
+      - backend
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: profassist_langfuse_worker
+    environment: *langfuse-env
+    networks:
+      - backend
+    depends_on:
+      langfuse-web:
+        condition: service_started
+    restart: unless-stopped
+
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.22.0
     container_name: profassist_mlflow
@@ -240,3 +350,5 @@ volumes:
   qdrant_data:
   prefect_data:
   minio_data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
