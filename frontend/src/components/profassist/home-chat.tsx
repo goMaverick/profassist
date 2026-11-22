@@ -190,13 +190,13 @@ export function HomeChat({
           <Message from="assistant">
             <MessageContent>
               {turn.reasoning && (
-                <Reasoning defaultOpen isStreaming={turn.streaming && !turn.text}>
+                <Reasoning isStreaming={turn.streaming && !turn.text} defaultOpen={false}>
                   <ReasoningTrigger />
                   <ReasoningContent>{turn.reasoning}</ReasoningContent>
                 </Reasoning>
               )}
               {turn.tool && (
-                <Tool defaultOpen>
+                <Tool>
                   <ToolHeader type="dynamic-tool" state="output-available" toolName={turn.tool.name} title={turn.tool.name} />
                   <ToolContent>
                     <ResultCard output={turn.tool.output} href={turn.tool.href} />

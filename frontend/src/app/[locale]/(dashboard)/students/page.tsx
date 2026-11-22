@@ -26,6 +26,13 @@ interface Payload {
   early_warning: Warning;
 }
 
+function plainReason(band?: string | null, factors?: string[]) {
+  const text = (factors || []).join(" ").toLowerCase();
+  if (band === "high" || text.includes("missed")) return "Missed recent logins and some submitted work.";
+  if (band === "medium" || text.includes("activity")) return "Activity dropped over the last two weeks.";
+  return "Keeping up with logins and submissions.";
+}
+
 export default function StudentsPage() {
   const { course, error: loadError, loading } = useWorkspace();
   const [error, setError] = useState("");
@@ -88,7 +95,7 @@ export default function StudentsPage() {
                 <td className="py-3">{student.student_number}</td>
                 <td className="py-3">{row?.score == null ? "—" : `${Math.round(Number(row.score) * 100)}%`}</td>
                 <td className="py-3">{row?.band ? <Tag type={row.band === "high" ? "red" : row.band === "medium" ? "purple" : "green"} size="sm">{row.band}</Tag> : "—"}</td>
-                <td className="text-foreground/60 py-3">{row?.factors?.slice(0, 3).join(", ") || row?.note}</td>
+                <td className="py-3">{plainReason(row?.band, row?.factors)}</td>
                 <td className="py-3">
                   <span style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 28 }}>
                     {[0.35, 0.5, 0.45, Math.min(1, Number(row?.score ?? 0.2))].map((value, bar) => (

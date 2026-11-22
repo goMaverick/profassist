@@ -70,6 +70,7 @@ export default function OutlineWizardPage() {
   const [files, setFiles] = useState<CourseFile[]>([]);
   const [instructionsReady, setInstructionsReady] = useState(false);
   const [reviewMode, setReviewMode] = useState("council");
+  const [why, setWhy] = useState(false);
   const [toolsNode, setToolsNode] = useState<HTMLElement | null>(null);
   const latest = useRef<Record<string, unknown>>({});
   const saveTimer = useRef<number | null>(null);
@@ -288,34 +289,13 @@ export default function OutlineWizardPage() {
             <AILabel size="mini" aiText="AI" aria-label="AI suggestion" />
             <h2 style={{ margin: 0 }}>Suggestion for {current?.label}</h2>
           </div>
-          <Button kind="tertiary" size="sm" renderIcon={MagicWand} onClick={assist} disabled={!outline || drafting}>Draft with AI</Button>
-          <div className="pa-ai">
-            <Reasoning defaultOpen isStreaming={drafting}>
-              <ReasoningTrigger />
-              <ReasoningContent>
-                {note || `I am drafting ${current?.label || "this step"} from the uploaded files and the instructions: ${instructions}`}
-              </ReasoningContent>
-            </Reasoning>
-            <Sources>
-              <SourcesTrigger count={Math.max(1, files.length)}>
-                {(files.length || 1) === 1 ? "Used 1 source" : `Used ${files.length} sources`}
-              </SourcesTrigger>
-              <SourcesContent>
-                {(files.length ? files : [{ filename: "instructions" }]).map((file) => (
-                  <Source key={file.filename} href="/outline" title={file.filename} />
-                ))}
-              </SourcesContent>
-            </Sources>
-          </div>
-          <AiSuggestion
-            title={`Suggestion for ${current?.label || "this step"}`}
-            description="Generated from the outline, the attachments, and your instructions."
-            body={note || `Example for ${current?.label}: focus on healthcare cases, and prefer a project a group can build in four weeks.`}
-            busy={drafting}
-            citation={note || "Lecture note"}
-            onAccept={() => setNote(note || "Applied. The fields above already hold this draft.")}
-            onRegenerate={assist}
-          />
+          <Button kind="primary" size="md" renderIcon={MagicWand} onClick={assist} disabled={!outline || drafting}>{drafting ? "Writing…" : "Write a suggestion"}</Button>
+          <p style={{ fontSize: "1rem", lineHeight: 1.5 }}>
+            {note || "Focus on healthcare cases, and prefer a project a group can finish in four weeks."}
+          </p>
+          <button type="button" className="pa-why" onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
+          {why && <p className="pa-why-body">Based on your files{files.length ? `: ${files.map((file) => file.filename).join(", ")}` : ""} and the note you wrote for this course.</p>}
+          <Button kind="tertiary" size="sm" onClick={() => setNote("Kept. You can edit the fields, then go to the next step.")}>Use this</Button>
         </aside>
         </div>
     </div>

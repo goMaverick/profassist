@@ -86,17 +86,13 @@ function CouncilCast() {
         <span style={{ width: `${consensus}%` }} />
         <em>{finished ? "Consensus" : `${consensus}%`}</em>
       </div>
-      {finished && (
-        <article className="council-verdict-card">
-          <h3>Chair's verdict</h3>
-          <p>The council agrees on the evidence in the text. Nothing is sent until you approve.</p>
-          <ul>
-            <li>Outcomes: map the thin program outcomes.</li>
-            <li>Assessments: keep the weights on 100.</li>
-            <li>Policies: put integrity next to the tasks.</li>
-          </ul>
-        </article>
-      )}
+      <article className="council-verdict-card">
+        <h3>Council says: approve with 2 changes</h3>
+        <ul>
+          <li>Say which outcomes week 7 assesses. <button type="button" className="pa-why">Accept</button></li>
+          <li>Put the integrity rule next to the assignments. <button type="button" className="pa-why">Accept</button></li>
+        </ul>
+      </article>
     </div>
   );
 }
@@ -139,103 +135,6 @@ export function CouncilStage({ scene, onDone }: { scene: string; onDone?: () => 
   return (
     <section className="council-stage" aria-live="polite">
       <CouncilCast />
-      <ol className="council-steps">
-        {STEPS.map((item) => (
-          <li key={item} className={item === step ? "is-active" : ""}>
-            {item}
-          </li>
-        ))}
-      </ol>
-      <div className="council-grid">
-        {agents.map((agent) => {
-          const Icon = ICONS[agent.icon || "education"] || Education;
-          return (
-            <Tile key={agent.id} className={agent.state === "thinking" ? "is-thinking" : ""}>
-              <div className="council-card" style={{ borderTop: `4px solid ${agent.color}` }}>
-                <span className="council-avatar" style={{ background: agent.color }}>
-                  <Icon size={18} />
-                </span>
-                <strong>{agent.name}</strong>
-                {agent.state === "thinking" ? (
-                  <span className="council-dots" aria-label="Thinking">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                ) : (
-                  <p>{agent.text}</p>
-                )}
-              </div>
-            </Tile>
-          );
-        })}
-      </div>
-      {arrows.length > 0 && (
-        <p className="council-arrows">
-          {arrows.slice(-3).map((arrow) => (
-            <Tag key={`${arrow.from}-${arrow.to}`} type="purple">
-              {arrow.from} → {arrow.to}
-            </Tag>
-          ))}
-        </p>
-      )}
-      <div className="pa-ai council-thread">
-        <p className="council-tool-line">Looked up the rubric. Evidence and limitation are the two criteria in play.</p>
-        <Tool>
-          <ToolHeader type="dynamic-tool" state="output-available" toolName="rubric_lookup" title="rubric_lookup" />
-          <ToolContent>
-            <ToolInput input={{ scene, step }} />
-            <ToolOutput output={{ criteria: ["Evidence", "Limitation"] }} errorText={undefined} />
-          </ToolContent>
-        </Tool>
-        {agents
-          .filter((agent) => agent.state === "speaking" || agent.state === "thinking")
-          .map((agent) => (
-            <Message from="assistant" key={`${agent.id}-${agent.state}`}>
-              <MessageContent>
-                <strong>{agent.name}</strong>
-                {agent.state === "thinking" ? (
-                  <Reasoning isStreaming defaultOpen>
-                    <ReasoningTrigger />
-                    <ReasoningContent>{`${agent.name} is reading the section for this step.`}</ReasoningContent>
-                  </Reasoning>
-                ) : (
-                  <MessageResponse>{agent.text || ""}</MessageResponse>
-                )}
-                {agent.text && (
-                  <InlineCitation>
-                    <InlineCitationText>submission evidence</InlineCitationText>
-                  </InlineCitation>
-                )}
-              </MessageContent>
-            </Message>
-          ))}
-        {step === "judge" && (
-          <ChainOfThought defaultOpen>
-            <ChainOfThoughtHeader>Judge</ChainOfThoughtHeader>
-            <ChainOfThoughtContent>
-              <ChainOfThoughtStep label="Marking" status="complete" description="Each persona quoted the work." />
-              <ChainOfThoughtStep label="Debate" status={arrows.length ? "complete" : "active"} description="Disagreement stays visible." />
-              <ChainOfThoughtStep label="Verdict" status={verdict ? "complete" : "pending"} description={verdict || "Waiting for the last voice."} />
-            </ChainOfThoughtContent>
-          </ChainOfThought>
-        )}
-      </div>
-      <div className="council-meter" aria-label="Consensus">
-        <span style={{ width: `${Math.min(100, agents.filter((agent) => agent.state === "speaking").length * 20)}%` }} />
-        <em>{verdict ? "Consensus" : "Vote in progress"}</em>
-      </div>
-      {verdict && (
-        <article className="council-verdict-card">
-          <h3>Chair's verdict</h3>
-          <p>{verdict} The council can see the evidence. Nothing is sent until you approve.</p>
-          <ul>
-            <li>Outcomes: map the thin program outcomes before accreditation.</li>
-            <li>Assessments: keep the weights on 100, and do not pile week 7.</li>
-            <li>Policies: write attendance and integrity where a student can find them.</li>
-          </ul>
-        </article>
-      )}
       <style>{`
         .council-stage { display: grid; gap: 1rem; }
         .council-steps { display: flex; gap: 0.75rem; list-style: none; padding: 0; margin: 0; text-transform: capitalize; }
