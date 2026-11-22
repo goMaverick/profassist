@@ -732,7 +732,7 @@ mark {
 
 .pa-comment {
   position: absolute;
-  right: 12px;
+  left: calc(100% + 12px);
   width: 210px;
   z-index: 4;
 }
@@ -749,7 +749,6 @@ mark {
 .pa-comment-card {
   display: flex;
   gap: 8px;
-  transform: translateY(20px);
   background: #fff;
   border: 1px solid #e0e0e0;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
@@ -795,6 +794,61 @@ mark {
 .pa-grade-panel {
   max-height: calc(100vh - 120px);
   overflow: auto;
+}
+
+.pa-made {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.pa-made li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: #6f6f6f;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.pa-made li.is-now {
+  color: #0f62fe;
+  font-weight: 600;
+}
+
+.pa-made-num {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: #e0e0e0;
+  color: #161616;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+.pa-made .is-now .pa-made-num {
+  background: #0f62fe;
+  color: #fff;
+}
+
+.pa-made svg {
+  vertical-align: text-bottom;
+  margin-right: 4px;
+}
+
+.pa-bands button em {
+  display: block;
+  margin-top: 2px;
+  color: #0f62fe;
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 600;
 }
 
 .pa-steps {

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Button, FileUploaderDropContainer, Modal, Tag, TextArea } from "@carbon/react";
-import { Add, TrashCan } from "@carbon/icons-react";
+import { Add, Catalog, Checkmark, DocumentView, TrashCan, Watson } from "@carbon/icons-react";
 import { Banner, pa, run, useWorkspace } from "@/components/profassist/bits";
 import type { Box, Hit, MarginNote } from "@/components/profassist/document-viewer";
 
@@ -355,13 +355,17 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
 
   const total = criteria.reduce((sum, row) => sum + chosenScore(row), 0) || grade?.total || 0;
   const letter = letterOf(total);
-  const hits: Hit[] = criteria.filter((row) => row.box).map((row, index) => ({
-    id: row.id,
-    n: index + 1,
-    page: row.page,
-    box: row.box,
-    tone: "shared",
-  }));
+  const hits: Hit[] = [...criteria]
+    .filter((row) => row.box)
+    .sort((a, b) => a.page - b.page || a.box.y - b.box.y || a.box.x - b.box.x)
+    .map((row, index) => ({
+      id: row.id,
+      n: index + 1,
+      page: row.page,
+      box: row.box,
+      tone: "shared" as const,
+    }));
+  const evidenceNumber = new Map(hits.map((hit) => [hit.id, hit.n]));
 
   function choose(row: Criterion, band: string) {
     const next = { ...overrides, [row.id]: band };
@@ -400,6 +404,31 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
           <h2 className="pa-section">Feedback for {group}</h2>
           <Button kind="ghost" size="sm" onClick={onClose}>Close</Button>
         </div>
+        <p className="pa-step-kicker">How this grade was made</p>
+        <ol className="pa-made" aria-label="How this grade was made">
+          {[
+            { icon: Catalog, label: "You set the rubric", link: true },
+            { icon: DocumentView, label: "AI read the submission" },
+            { icon: Watson, label: "AI filled each rubric row with a band, score, reason and evidence" },
+            { icon: Checkmark, label: "You check, change and approve" },
+          ].map((item, index) => {
+            const Icon = item.icon;
+            const current = index === 3;
+            return (
+              <li key={item.label} className={current ? "is-now" : "is-done"}>
+                <span className="pa-made-num">{index + 1}</span>
+                <span>
+                  <Icon size={16} />
+                  {item.link ? (
+                    <button type="button" className="pa-why" onClick={() => setRubricOpen(true)}>{item.label}</button>
+                  ) : (
+                    item.label
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
         <ol className="pa-steps" aria-label="Grade status">
           {["AI drafted", "You reviewed", "Approved", "Sent to Moodle"].map((label, index) => (
             <li key={label} className={index === step ? "is-now" : index < step ? "is-done" : ""}>{label}</li>
@@ -407,10 +436,10 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
         </ol>
         {grade && (
           <article className="pa-ai-grade">
-            <p className="pa-step-kicker">AI draft grade</p>
+            <p className="pa-step-kicker">AI filled the rubric - please check</p>
             <p className="pa-grade-total">{total}<span>/{grade.out_of}</span> <strong>{letter}</strong></p>
             <Tag type={grade.confidence === "High" ? "green" : grade.confidence === "Low" ? "red" : "blue"} size="sm">{grade.confidence} confidence</Tag>
-            <p>Drafted by AI council: 3 graders + chair, using rubric {grade.rubric}.</p>
+            <p>Drafted by AI council: 3 graders + chair, using the {grade.rubric}.</p>
             <div className="pa-council" aria-label="Council">
               {grade.council.map((person) => (
                 <span key={person.name} title={person.name} style={{ background: person.color }}>{person.initials}</span>
@@ -440,13 +469,14 @@ function FeedbackDesk({ group, onClose, onApprove }: { group: string; onClose: (
                   >
                     <strong>{item.name}</strong>
                     <span>{item.low}-{item.high}</span>
+                    {band === item.name && <em>{changed ? "You picked" : "AI picked"}</em>}
                   </button>
                 ))}
               </div>
               <p>{chosenScore(row)}/{row.weight}. {row.reason}</p>
-              {changed && <Tag type="purple" size="sm">Changed by you</Tag>}
+              {changed && <Tag type="purple" size="sm">You picked</Tag>}
               <div className="pa-row-links">
-                <button type="button" className="pa-why" onClick={() => setActiveHit(row.id)}>Evidence {index + 1}</button>
+                <button type="button" className="pa-why" onClick={() => setActiveHit(row.id)}>Evidence {evidenceNumber.get(row.id)}</button>
                 <button type="button" className="pa-why" onClick={() => setWhy((open) => open === row.id ? "" : row.id)}>{why === row.id ? "Hide why" : "Why?"}</button>
               </div>
               {why === row.id && (

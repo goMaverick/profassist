@@ -93,8 +93,9 @@ export function DocumentPane({
     if (!node || !pages || fitted.current) return;
     const styles = getComputedStyle(node);
     const pad = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
-    const fit = (node.clientWidth - pad - 8) / 595;
-    setScale(Math.min(1.45, Math.max(0.9, fit)));
+    const gutter = node.classList.contains("has-notes") ? 220 : 0;
+    const fit = (node.clientWidth - pad - gutter - 8) / 595;
+    setScale(Math.min(1.45, Math.max(gutter ? 0.55 : 0.9, fit)));
     fitted.current = true;
   }, [pages]);
 
