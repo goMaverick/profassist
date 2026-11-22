@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ArrowUp } from "lucide-react";
 import {
   PromptInput,
   PromptInputActionAddAttachments,
@@ -80,6 +81,7 @@ export function HomeChat({
           />
         )}
       </div>
+      <div className="pa-chat-column">
       <PromptInput
         onSubmit={(message: PromptInputMessage) => send(message.text)}
       >
@@ -99,7 +101,9 @@ export function HomeChat({
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
           </PromptInputTools>
-          <PromptInputSubmit status={busy ? "streaming" : "ready"} />
+          <PromptInputSubmit className="pa-send" status={busy ? "streaming" : "ready"}>
+            <ArrowUp className="size-4" />
+          </PromptInputSubmit>
         </PromptInputFooter>
       </PromptInput>
       {turns.length === 0 && (
@@ -113,7 +117,7 @@ export function HomeChat({
       {turns.length > 0 && (() => {
         const last = turns[turns.length - 1];
         return (
-          <div className="pa-chat-column">
+          <div className="pa-thread">
             <div className="pa-user-bubble">
               <p>{last.you}</p>
             </div>
@@ -129,6 +133,7 @@ export function HomeChat({
           </div>
         );
       })()}
+      </div>
     </section>
   );
 }

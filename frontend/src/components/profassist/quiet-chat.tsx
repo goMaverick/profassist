@@ -77,13 +77,20 @@ export function IntegrityAnswer({ output }: { output: unknown }) {
   return (
     <div className="pa-answer">
       <p className="pa-case-summary">{summary}</p>
-      <div className="pa-case-list">
+      <div className="pa-cases" role="table">
+        <div className="pa-case-head" role="row">
+          <span role="columnheader">Assignment</span>
+          <span role="columnheader">Groups</span>
+          <span className="pa-case-end" role="columnheader">Similarity</span>
+        </div>
         {cases.map((item) => (
-          <div className="pa-case-row" key={item.href}>
-            <span>{item.course} · {item.name || `Assignment ${item.assignment}`}</span>
-            <span>Group {item.groups[0]} and Group {item.groups[1]}</span>
-            <span className={`pa-sim ${badgeClass(item.percent)}`}>{item.percent}%</span>
-            <a className="pa-open" href={item.href}>Open</a>
+          <div className="pa-case" role="row" key={item.href}>
+            <span className="pa-case-assign" role="cell">{item.course} · {item.name || `Assignment ${item.assignment}`}</span>
+            <span className="pa-case-groups" role="cell">Group {item.groups[0]} and Group {item.groups[1]}</span>
+            <span className="pa-case-end" role="cell">
+              <span className={`pa-sim ${badgeClass(item.percent)}`}>{item.percent}%</span>
+              <a className="pa-open" href={item.href}>Open<span className="pa-open-chevron" aria-hidden="true"> ›</span></a>
+            </span>
           </div>
         ))}
       </div>

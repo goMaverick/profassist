@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@carbon/react";
 import { Close } from "@carbon/icons-react";
-import { CopyIcon, RotateCcwIcon, ThumbsUpIcon } from "lucide-react";
+import { ArrowUp, CopyIcon, RotateCcwIcon, ThumbsUpIcon } from "lucide-react";
 import {
   Conversation,
   ConversationContent,
@@ -20,11 +20,6 @@ import {
   PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -36,7 +31,6 @@ const CHIPS = ["Sync Moodle", "List my courses", "Suggest an assessment", "Draft
 
 export function ProfessorChat({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState("");
-  const [model, setModel] = useState("demo");
   const [liked, setLiked] = useState(false);
   const { turns, busy, error } = useChat();
 
@@ -109,17 +103,10 @@ export function ProfessorChat({ onClose }: { onClose: () => void }) {
                 <PromptInputActionAddAttachments />
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
-            <PromptInputSelect value={model} onValueChange={setModel}>
-              <PromptInputSelectTrigger>
-                <PromptInputSelectValue placeholder="Model" />
-              </PromptInputSelectTrigger>
-              <PromptInputSelectContent>
-                <PromptInputSelectItem value="demo">Practice answers</PromptInputSelectItem>
-                <PromptInputSelectItem value="council">Council</PromptInputSelectItem>
-              </PromptInputSelectContent>
-            </PromptInputSelect>
           </PromptInputTools>
-          <PromptInputSubmit status={busy ? "streaming" : "ready"} />
+          <PromptInputSubmit className="pa-send" status={busy ? "streaming" : "ready"}>
+            <ArrowUp className="size-4" />
+          </PromptInputSubmit>
         </PromptInputFooter>
       </PromptInput>
       </div>
