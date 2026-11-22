@@ -482,11 +482,20 @@ class IntegrityAction(BaseModel):
 
 class FeedbackBody(BaseModel):
     group: str = "Group A"
+    course: str = "MAAI903"
     comments: list = Field(default_factory=list)
     rubric: list = Field(default_factory=list)
     overall: str = ""
     bank: list = Field(default_factory=list)
     overrides: dict = Field(default_factory=dict)
+
+
+def _grade_place(course: str) -> tuple[str, str]:
+    from app.profassist.integrity_board import _norm
+    from app.profassist.journey import assignment_number
+
+    slug = _norm(course) or "MAAI903"
+    return slug, assignment_number(slug)
 
 
 @router.get("/integrity/overview")
@@ -585,13 +594,16 @@ async def integrity_file(course: str, number: str, group: str, which: str = "pdf
 
 
 @router.get("/grade/feedback")
-async def grade_feedback(user: CurrentUser, group: str = "Group A") -> dict:
+async def grade_feedback(
+    user: CurrentUser, group: str = "Group A", course: str = "MAAI903"
+) -> dict:
     from app.profassist.grade_notes import load_feedback
     from app.profassist.integrity_docs import document_side
 
-    notes = load_feedback(str(user.id), group)
+    slug, number = _grade_place(course)
+    notes = load_feedback(str(user.id), group, slug, number)
     letter = group.replace("Group ", "").strip() or "A"
-    return {**notes, "document": document_side("MAAI903", "1", letter)}
+    return {**notes, "document": document_side(slug, number, letter)}
 
 
 @router.post("/grade/feedback")
@@ -602,6 +614,7 @@ async def grade_feedback_save(
     from app.profassist.integrity_docs import document_side
     from app.profassist.models import Approval
 
+    slug, number = _grade_place(body.course)
     notes = save_feedback(
         str(user.id),
         body.group,
@@ -612,6 +625,8 @@ async def grade_feedback_save(
             "bank": body.bank,
             "overrides": body.overrides,
         },
+        slug,
+        number,
     )
     db.add(
         Approval(
@@ -627,9 +642,21 @@ async def grade_feedback_save(
     letter = body.group.replace("Group ", "").strip() or "A"
     return {
         **notes,
-        "document": document_side("MAAI903", "1", letter),
+        "document": document_side(slug, number, letter),
         "message": "Saved as a private draft. Nothing was sent to Moodle or to a student.",
     }
+
+
+class SendGradeBody(BaseModel):
+    group: str = "Group A"
+    course: str = ""
+
+
+@router.post("/grade/send")
+async def grade_send(body: SendGradeBody, user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    from app.profassist.journey import send_grade
+
+    return await send_grade(db, org.id, user.id, body.course, body.group)
 
 
 @router.get("/courses/{course_id}/integrity")
@@ -1096,6 +1123,24 @@ async def assignments_publish(
     assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
     return await publish_assignment(db, org.id, user.id, assignment_id)
+
+
+@router.post("/assignments/{assignment_id}/class")
+async def assignments_class(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.journey import form_class
+
+    return await form_class(db, org.id, user.id, assignment_id)
+
+
+@router.post("/assignments/{assignment_id}/receive")
+async def assignments_receive(
+    assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.journey import receive_submissions
+
+    return await receive_submissions(db, org.id, user.id, assignment_id)
 
 
 @router.get("/assignments/{assignment_id}/submissions")

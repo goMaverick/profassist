@@ -185,6 +185,13 @@ def scrub(text: str, known_names: list[str] | None = None) -> ScrubResult:
     return result
 
 
+def strip_contacts(text: str) -> str:
+    """Remove emails, phones, and long IDs. Title-case course words stay."""
+    text = EMAIL_RE.sub("[email removed]", text or "")
+    text = PHONE_RE.sub("[phone removed]", text)
+    return BARE_ID_RE.sub("[id removed]", text)
+
+
 def assert_prompt_is_clean(prompt: str) -> None:
     """Last gate in front of the model. Refuses the call instead of guessing."""
     if EMAIL_RE.search(prompt or "") or BARE_ID_RE.search(prompt or ""):

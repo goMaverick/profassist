@@ -116,6 +116,7 @@ function AssignmentsBody() {
   const [ideaFor, setIdeaFor] = useState<Record<string, string>>({});
   const [submissions, setSubmissions] = useState<Array<{ id: string; group_name: string; topic: string; excerpt: string }>>([]);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     if (!course) return;
@@ -285,6 +286,60 @@ function AssignmentsBody() {
                     <p key={row.name} style={{ margin: "4px 0" }}>{row.name} · {row.weight}%</p>
                   ))}
                   {(items.find((item) => item.id === assignment.id)?.criteria || []).length === 0 && <p>No rubric rows stored on this task yet.</p>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
+                    <Button
+                      kind="tertiary"
+                      onClick={async () => {
+                        const next = await run(
+                          () => pa<Assignment & { message?: string }>(`/assignments/${assignment.id}/class`, { method: "POST" }),
+                          setError,
+                        );
+                        if (next) {
+                          setAssignment(next);
+                          setNote(next.message || "Groups are ready.");
+                        }
+                      }}
+                    >
+                      Form groups of two
+                    </Button>
+                    <Button
+                      kind="secondary"
+                      onClick={async () => {
+                        const next = await run(
+                          () => pa<Assignment>(`/assignments/${assignment.id}/publish`, { method: "POST" }),
+                          setError,
+                        );
+                        if (next) {
+                          setAssignment(next);
+                          setNote("Published to Moodle. Moodle was not contacted.");
+                        }
+                      }}
+                    >
+                      Publish to Moodle
+                    </Button>
+                    <Button
+                      kind="primary"
+                      onClick={async () => {
+                        const next = await run(
+                          () =>
+                            pa<{
+                              assignment: Assignment;
+                              submissions: Array<{ id: string; group_name: string; topic: string; excerpt: string }>;
+                              message: string;
+                            }>(`/assignments/${assignment.id}/receive`, { method: "POST" }),
+                          setError,
+                        );
+                        if (next) {
+                          setAssignment(next.assignment);
+                          setSubmissions(next.submissions);
+                          setNote(next.message);
+                        }
+                      }}
+                    >
+                      Sync student submissions
+                    </Button>
+                  </div>
+                  {note && <p>{note}</p>}
                 </TabPanel>
                 <TabPanel>
                   <Button

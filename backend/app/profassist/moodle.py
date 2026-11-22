@@ -211,13 +211,14 @@ WORKSHOP_SUBMISSIONS = [
 
 
 def _with_files(row: dict[str, Any]) -> dict[str, Any]:
-    files = []
-    for filename, content_type in _SAMPLE_FILES.get(row["id"], []):
-        files.append(
-            {"filename": filename, "content_type": content_type, "data": _sample(filename)}
-        )
     copied = dict(row)
-    copied["files"] = files
+    if not copied.get("files"):
+        files = []
+        for filename, content_type in _SAMPLE_FILES.get(row["id"], []):
+            files.append(
+                {"filename": filename, "content_type": content_type, "data": _sample(filename)}
+            )
+        copied["files"] = files
     copied.setdefault("peer_reviews", [])
     copied.setdefault("author_id", "")
     return copied
@@ -304,6 +305,30 @@ class FakeMoodleConnector:
             "moodle_response": "Recorded in ProfAssist. Moodle was not contacted.",
             "item": item,
         }
+
+    def stage_course_work(
+        self,
+        *,
+        course: dict[str, Any],
+        students: list[dict[str, Any]],
+        assignment: dict[str, Any],
+        submissions: list[dict[str, Any]],
+    ) -> None:
+        """Remember a published assignment so the next fake sync can pull it.
+
+        Nothing is sent over the network. The rows live in this process only.
+        """
+        if not any(row.get("id") == course["id"] for row in CATALOG["courses"]):
+            CATALOG["courses"].append(course)
+        for student in students:
+            if not any(row.get("id") == student["id"] for row in STUDENTS):
+                STUDENTS.append(student)
+        if not any(row.get("id") == assignment["id"] for row in CATALOG["assignments"]):
+            CATALOG["assignments"].append(assignment)
+        for submission in submissions:
+            if any(row.get("id") == submission["id"] for row in SUBMISSIONS):
+                continue
+            SUBMISSIONS.append(submission)
 
 
 class RealMoodleConnector:
