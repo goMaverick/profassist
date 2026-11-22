@@ -7,6 +7,18 @@ from typing import Any
 LEVELS = ["beginning", "developing", "proficient", "advanced"]
 
 
+def level_spread(votes: list[dict[str, Any]]) -> int:
+    """How many rubric steps separate the highest and lowest mark."""
+    indexes = [LEVELS.index(vote["level"]) for vote in votes if vote.get("level") in LEVELS]
+    if len(indexes) < 2:
+        return 0
+    return max(indexes) - min(indexes)
+
+
+def needs_debate(votes: list[dict[str, Any]], threshold: int) -> bool:
+    return level_spread(votes) > threshold
+
+
 def quotes_in_text(quotes: list[str], text: str) -> tuple[list[str], list[str]]:
     kept: list[str] = []
     rejected: list[str] = []

@@ -5,9 +5,10 @@ from typing import Any, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.profassist import llm
-from app.profassist.grading import reconcile
+from app.profassist.grading import needs_debate, reconcile
 from app.profassist.observe import invoke_graph
 from app.profassist.rag import keyword_score
+from app.profassist.runtime import debate_settings
 
 PERSONAS = ("evidence", "strict", "supportive")
 
@@ -27,6 +28,7 @@ class GradeState(TypedDict, total=False):
     criterion: dict[str, Any]
     soul: str
     votes: list[dict[str, Any]]
+    debate_rounds: list[dict[str, Any]]
     judge: dict[str, Any]
     feedback: str
 
@@ -120,6 +122,50 @@ def _grade_persona(persona: str, index: int):
     return node
 
 
+def _debate(state: GradeState) -> GradeState:
+    """If the council is far apart, each member reads the others and revises."""
+    settings = debate_settings()
+    votes = list(state.get("votes") or [])
+    rounds: list[dict[str, Any]] = []
+    if not settings["enabled"] or not needs_debate(votes, settings["threshold"]):
+        return {"votes": votes, "debate_rounds": []}
+    current = votes
+    for number in range(1, settings["max_rounds"] + 1):
+        if not needs_debate(current, settings["threshold"]):
+            break
+        revised = []
+        for vote in current:
+            peers = [peer for peer in current if peer.get("persona") != vote.get("persona")]
+            revised.append(
+                llm.complete(
+                    "grade_revise",
+                    {
+                        "persona": vote.get("persona"),
+                        "round": number,
+                        "previous": {
+                            "level": vote.get("level"),
+                            "quotes": vote.get("quotes"),
+                            "reasoning": vote.get("reasoning"),
+                        },
+                        "peers": [
+                            {
+                                "persona": peer.get("persona"),
+                                "level": peer.get("level"),
+                                "quotes": peer.get("quotes"),
+                                "reasoning": peer.get("reasoning"),
+                            }
+                            for peer in peers
+                        ],
+                        "submission": state.get("submission") or "",
+                        "criterion": state.get("criterion") or {},
+                    },
+                )
+            )
+        current = revised
+        rounds.append({"round": number, "votes": revised})
+    return {"votes": current, "debate_rounds": rounds}
+
+
 def _judge(state: GradeState) -> GradeState:
     judge = reconcile(state.get("votes") or [], state.get("submission") or "")
     return {"judge": judge}
@@ -152,12 +198,14 @@ def build_grading_graph():
     graph.add_node("evidence", _grade_persona("evidence", 0))
     graph.add_node("strict", _grade_persona("strict", 1))
     graph.add_node("supportive", _grade_persona("supportive", 2))
+    graph.add_node("debate", _debate)
     graph.add_node("judge", _judge)
     graph.add_node("feedback", _feedback)
     graph.set_entry_point("evidence")
     graph.add_edge("evidence", "strict")
     graph.add_edge("strict", "supportive")
-    graph.add_edge("supportive", "judge")
+    graph.add_edge("supportive", "debate")
+    graph.add_edge("debate", "judge")
     graph.add_edge("judge", "feedback")
     graph.add_edge("feedback", END)
     return graph.compile()
@@ -174,6 +222,7 @@ def run_grading_council(
     )
     return {
         "votes": result.get("votes") or [],
+        "debate_rounds": result.get("debate_rounds") or [],
         "judge": result.get("judge") or {},
         "feedback": result.get("feedback") or "",
         "trace_url": url,

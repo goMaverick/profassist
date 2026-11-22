@@ -328,6 +328,15 @@ class SettingsBody(BaseModel):
     provider: str = "openai"
     model: str = "gpt-4o-mini"
     base_url: str = ""
+    debate_enabled: bool = True
+    debate_threshold: int = 0
+    debate_max_rounds: int = 1
+    agent_models: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class TestBody(BaseModel):
+    provider: str
+    model: str = ""
 
 
 class PromptBody(BaseModel):
@@ -352,8 +361,26 @@ async def ai_admin_save(
     body: SettingsBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
 ) -> dict:
     return await save_model_settings(
-        db, org.id, user.id, body.chat_enabled, body.provider, body.model, body.base_url
+        db,
+        org.id,
+        user.id,
+        body.chat_enabled,
+        body.provider,
+        body.model,
+        body.base_url,
+        body.debate_enabled,
+        body.debate_threshold,
+        body.debate_max_rounds,
+        body.agent_models,
     )
+
+
+@router.post("/admin/ai/test")
+async def ai_test(body: TestBody, user: CurrentAppAdmin, org: ProfOrg) -> dict:
+    del user, org
+    from app.profassist.providers import test_connection
+
+    return test_connection(body.provider, body.model)
 
 
 @router.post("/admin/ai/prompts")

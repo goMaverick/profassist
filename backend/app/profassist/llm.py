@@ -11,12 +11,12 @@ from typing import Any
 from app.profassist.config import (
     council_models,
     llm_api_key,
-    llm_base_url,
     llm_model,
 )
 from app.profassist.observe import record_step
 from app.profassist.pii import assert_prompt_is_clean
-from app.profassist.runtime import model_settings, prompt_for
+from app.profassist.providers import extra_kwargs, key_configured, litellm_model
+from app.profassist.runtime import agent_route, prompt_for
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +157,26 @@ def demo_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
             ]
         }
 
+    if task == "grade_revise":
+        previous = payload.get("previous") or {}
+        peers = payload.get("peers") or []
+        indexes = [
+            LEVELS.index(item["level"])
+            for item in [previous, *peers]
+            if item.get("level") in LEVELS
+        ]
+        target = LEVELS[round(sum(indexes) / len(indexes))] if indexes else previous.get("level")
+        quote = _quote(payload.get("submission") or "")
+        return {
+            "persona": payload.get("persona"),
+            "model": payload.get("model") or "demo-drafter",
+            "level": target or "proficient",
+            "quotes": [quote] if quote else previous.get("quotes") or [],
+            "checks": previous.get("checks") or [],
+            "revised": True,
+            "reasoning": "I moved toward the other graders after reading their quotes.",
+        }
+
     if task == "reflection":
         return {
             "proposal": payload.get("proposal")
@@ -181,9 +201,8 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         "reflection": "reflection",
         "slide_studio": "slide_studio",
     }.get(task, "chat")
-    configured = model_settings()
     persona = ""
-    if task == "grade_persona":
+    if task in {"grade_persona", "grade_revise"}:
         persona = prompt_for(f"persona_{payload.get('persona') or 'evidence'}")
     system = (
         "You are ProfAssist drafting for a university professor. "
@@ -193,11 +212,23 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
     user = json.dumps(payload, ensure_ascii=False)
     assert_prompt_is_clean(system + "\n" + user)
     trace(task, {"task": task, "persona": payload.get("persona"), "mode": mode()})
-    if not llm_api_key():
+    route_key = agent
+    if task in {"grade_persona", "grade_revise"}:
+        route_key = f"persona_{payload.get('persona') or 'evidence'}"
+    route = agent_route(route_key)
+    provider = route["provider"]
+    step_name = str(payload.get("persona") or task)
+    if task == "grade_revise":
+        step_name = f"debate round {payload.get('round')} / {payload.get('persona')}"
+    if not key_configured(provider):
         drafted = demo_complete(task, payload)
         record_step(
-            str(payload.get("persona") or task),
-            input_data={"task": task, "persona": payload.get("persona")},
+            step_name,
+            input_data={
+                "task": task,
+                "persona": payload.get("persona"),
+                "round": payload.get("round"),
+            },
             output_data=drafted,
             model="demo-drafter",
         )
@@ -205,7 +236,7 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     import litellm
 
-    model = payload.get("model") or configured.get("model") or llm_model()
+    model = litellm_model(provider, payload.get("model") or route["model"] or llm_model())
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -213,13 +244,8 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
+        **extra_kwargs(provider),
     }
-    base = configured.get("base_url") or llm_base_url()
-    if base:
-        kwargs["api_base"] = base
-        if not str(model).startswith("openai/"):
-            kwargs["model"] = f"openai/{model}"
-    kwargs["api_key"] = llm_api_key()
     response = litellm.completion(**kwargs)
     content = response.choices[0].message.content or "{}"
     start = content.find("{")
@@ -234,8 +260,8 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         parsed = demo_complete(task, payload)
     record_step(
-        str(payload.get("persona") or task),
-        input_data={"task": task, "persona": payload.get("persona")},
+        step_name,
+        input_data={"task": task, "persona": payload.get("persona"), "round": payload.get("round")},
         output_data=parsed,
         model=str(model),
     )

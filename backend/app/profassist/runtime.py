@@ -44,10 +44,10 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
 
 _prompts: ContextVar[dict[str, str] | None] = ContextVar("pa_prompts", default=None)
 _tools: ContextVar[dict[str, bool] | None] = ContextVar("pa_tools", default=None)
-_model: ContextVar[dict[str, str] | None] = ContextVar("pa_model", default=None)
+_model: ContextVar[dict[str, Any] | None] = ContextVar("pa_model", default=None)
 
 
-def bind_runtime(prompts: dict[str, str], tools: dict[str, bool], model: dict[str, str]) -> None:
+def bind_runtime(prompts: dict[str, str], tools: dict[str, bool], model: dict[str, Any]) -> None:
     _prompts.set(prompts)
     _tools.set(tools)
     _model.set(model)
@@ -73,8 +73,27 @@ def tool_enabled(agent: str, tool: str) -> bool:
     return bool(flag)
 
 
-def model_settings() -> dict[str, str]:
+def model_settings() -> dict[str, Any]:
     return dict(_model.get() or {})
+
+
+def debate_settings() -> dict[str, Any]:
+    raw = model_settings().get("debate") or {}
+    rounds = int(raw.get("max_rounds", 1) or 1)
+    return {
+        "enabled": bool(raw.get("enabled", True)),
+        "threshold": int(raw.get("threshold", 0)),
+        "max_rounds": max(0, min(3, rounds)),
+    }
+
+
+def agent_route(agent: str) -> dict[str, str]:
+    routes = model_settings().get("agents") or {}
+    chosen = routes.get(agent) or {}
+    return {
+        "provider": chosen.get("provider") or model_settings().get("provider") or "openai",
+        "model": chosen.get("model") or model_settings().get("model") or "gpt-4o-mini",
+    }
 
 
 def catalog() -> dict[str, Any]:

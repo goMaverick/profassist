@@ -55,10 +55,16 @@ cp backend/.env.example backend/.env
 
 | Variable | What it does |
 |---|---|
-| `LLM_API_KEY` or `OPENAI_API_KEY` | Key for LiteLLM. Empty means the demo drafter. |
-| `LLM_MODEL` | Model name. Default `gpt-4o-mini`. |
-| `LLM_BASE_URL` | Optional OpenAI-compatible base URL. |
-| `LLM_COUNCIL_MODELS` | Optional three models, comma-separated, for the grading council. |
+| `OPENAI_API_KEY` or `LLM_API_KEY` | OpenAI. Empty means the demo drafter for that provider. |
+| `ANTHROPIC_API_KEY` | Anthropic. |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Google Gemini. |
+| `XAI_API_KEY` | xAI Grok. |
+| `MISTRAL_API_KEY` | Mistral. |
+| `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION` | Azure OpenAI. The model field is the deployment name. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION_NAME` | AWS Bedrock. |
+| `OLLAMA_API_BASE` | Ollama or another local server, for example `http://host.docker.internal:11434`. |
+| `LLM_BASE_URL` | Any OpenAI-compatible base URL. Use with `LLM_API_KEY` if that server wants a key. |
+| `LLM_MODEL` | Default model name when an agent has no choice of its own. |
 | `MOODLE_MODE` | `fake` (default) or `real`. |
 | `MOODLE_BASE_URL`, `MOODLE_WS_TOKEN` | Only for `real`. Reads use the Moodle REST API. Grade push stays disabled there. |
 | `LANGFUSE_ENABLED` | Off by default. Set `true` plus `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to trace calls. |
@@ -74,7 +80,7 @@ Do not commit a key. `backend/.env` is gitignored.
 - **Add an agent.** Put a `StateGraph` in `backend/app/profassist/`, give it a prompt key in `backend/app/profassist/runtime.py`, and call it from `backend/app/profassist/service.py`. A skill can also be a folder under `backend/skills/<name>/SKILL.md` plus tool code the graph loads.
 - **Tenants.** A university is an organization. Courses, the Moodle roster, and submissions are shared inside that university. Each professor's notes, objectives, slides, rubric, grade drafts, integrity flags, style, and memories are private to her (`owner_user_id` on those tables). Qdrant payloads include `organization_id` and `owner_user_id`. Files go in one MinIO bucket, under a key that includes the organization and the professor.
 - **Langfuse** is at <http://localhost:3100>. Sign in with `professor@demo.uowd.ac.ae` / `ProfAssist-demo-1`. After you grade a group, open **View agent trail** on the Grade screen. That trace is a tree: Evidence, Strict, Supportive, Judge, then Feedback. Edit a prompt or persona in Langfuse (keep the `production` label). The next run uses that text. `/admin/ai` still turns chat on or off, sets the model, and toggles tools. Prompt text there is read-only and says whether the live copy is Langfuse, the database, or the code default.
-- **Configure AI.** The API key stays in `LLM_API_KEY` or `OPENAI_API_KEY`. With no key, the demo drafter still runs and still writes Langfuse spans.
+- **Providers and debate.** `/admin/ai` lists each provider and whether its environment key is set. It never shows the key. Pick a provider and model per agent, including a different one for each council member. Test connection sends one short LiteLLM call. If the graders are more than the chosen number of levels apart, they debate for up to the chosen number of rounds, then the judge decides. Each round is stored on the grade and appears in the Langfuse trace. With no keys, the demo drafter still runs those rounds.
 - **MLflow** is at <http://localhost:5000> after `docker compose up`. It stores runs in Postgres and artifacts in MinIO. **Models** in the admin tabs shows the grade calibrator and the early-warning model as not trained until something is registered. Nothing trains them in this build.
 - **Memory.** Saving My style writes a memory for that professor only, after the privacy gate. She can read and delete memories on My style. When Mem0 is installed and an LLM key is set, the same text is also sent to self-hosted Mem0 (Qdrant). There is no Mem0 cloud account.
 

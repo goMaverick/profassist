@@ -818,6 +818,7 @@ async def run_grade(
                 "criterion_id": str(criterion.id),
                 "criterion": criterion.name,
                 "votes": outcome["votes"],
+                "debate_rounds": outcome.get("debate_rounds") or [],
                 "judge": judge,
                 "feedback": outcome["feedback"],
                 "calibrator": calibrator,
