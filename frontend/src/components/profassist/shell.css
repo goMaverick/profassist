@@ -1758,9 +1758,160 @@ mark {
   color: #0f62fe;
 }
 
+.pa-thread {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
 .pa-text-link {
+  display: inline-block;
   justify-self: start;
+  position: static;
   cursor: pointer;
+  margin: 16px 0 8px;
+}
+
+.pa-hero {
+  margin-bottom: 16px;
+}
+
+.pa-dash > section {
+  padding-top: 8px;
+}
+
+.pa-msg-actions {
+  opacity: 0;
+}
+
+.pa-turn:hover .pa-msg-actions,
+.pa-msg-actions:focus-within {
+  opacity: 1;
+}
+
+.pa-msg-actions button,
+.pa-msg-actions button:hover {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  color: #525252;
+}
+
+.pa-risk-list {
+  display: grid;
+}
+
+.pa-risk-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 16px;
+}
+
+.pa-risk-reason {
+  color: #525252;
+}
+
+.pa-sim.is-high {
+  background: #fff1f1;
+  color: #da1e28;
+}
+
+.pa-sim.is-medium {
+  background: #fcf4d6;
+  color: #8e6a00;
+}
+
+.pa-sim.is-low {
+  background: #f4f4f4;
+  color: #525252;
+}
+
+.pa-meta {
+  margin: 0 0 8px;
+  color: #525252;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.pa-council-list {
+  display: grid;
+  margin-top: 16px;
+}
+
+.pa-council-row {
+  padding: 12px 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.pa-council-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 16px;
+}
+
+.pa-council-main strong {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.pa-votes {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.pa-votes i {
+  width: 8px;
+  height: 8px;
+  border-radius: 8px;
+  background: #c6c6c6;
+}
+
+.pa-votes.is-agree i {
+  background: #0f62fe;
+}
+
+.pa-votes.is-split i:nth-child(1),
+.pa-votes.is-split i:nth-child(3) {
+  background: #0f62fe;
+}
+
+.pa-votes.is-split i:nth-child(2) {
+  background: #f1c21b;
+}
+
+@media (max-width: 672px) {
+  .pa-council-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name band"
+      "votes why";
+  }
+
+  .pa-council-main > span:first-child {
+    grid-area: name;
+    font-weight: 600;
+  }
+
+  .pa-council-main > strong {
+    grid-area: band;
+    justify-self: end;
+  }
+
+  .pa-votes {
+    grid-area: votes;
+  }
+
+  .pa-council-main .pa-why {
+    grid-area: why;
+    justify-self: end;
+  }
 }
 
 .pa-hero [data-slot="input-group"],
@@ -1904,6 +2055,18 @@ mark {
 
   .pa-greet {
     grid-template-columns: 1fr;
+  }
+
+  .pa-msg-actions {
+    opacity: 1;
+  }
+
+  .pa-risk-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pa-risk-reason {
+    grid-column: 1 / -1;
   }
 }
 

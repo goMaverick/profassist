@@ -1,7 +1,15 @@
 """LiteLLM provider catalog. Keys are read from the environment and never stored."""
 
+import logging
 import os
+import re
+import threading
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
+_pace_lock = threading.Lock()
+_last_gemini_call = 0.0
 
 PROVIDERS: list[dict[str, Any]] = [
     {
@@ -122,6 +130,20 @@ def catalog() -> list[dict[str, Any]]:
     return rows
 
 
+def model_label(provider_id: str, model: str) -> str:
+    """A name a professor can read. No key is included."""
+    if not key_configured(provider_id):
+        return "Offline drafter"
+    name = (model or "").strip()
+    if provider_id == "gemini":
+        words = name.removeprefix("gemini/").removeprefix("gemini-").replace("-", " ")
+        pretty = " ".join(
+            part if part[:1].isdigit() else part.capitalize() for part in words.split()
+        )
+        return f"Gemini {pretty}".strip()
+    return name or provider_id
+
+
 def litellm_model(provider_id: str, model: str) -> str:
     provider = provider_by_id(provider_id)
     name = (model or provider["default_model"]).strip()
@@ -176,10 +198,37 @@ def _safe_detail(text: str) -> str:
     return cleaned[:300]
 
 
+def retry_wait(text: str) -> float | None:
+    """How long a refused call is worth retrying.
+
+    A short "retry in 12s" is the per-minute limit. A wait of more than a
+    minute and a half, or a daily allowance that is already gone, should fail
+    in one sentence instead of sitting there.
+    """
+    lowered = text.lower()
+    match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", lowered)
+    if match:
+        delay = float(match.group(1))
+        if delay > 90:
+            return None
+        return delay + 0.5
+    if "per day" in lowered or "daily" in lowered or "limit: 0" in lowered:
+        return None
+    return 5.0
+
+
+def _pace_gemini() -> None:
+    """Keep a council from firing a dozen calls in the same second."""
+    global _last_gemini_call
+    with _pace_lock:
+        wait = 2.5 - (time.monotonic() - _last_gemini_call)
+        if wait > 0:
+            time.sleep(wait)
+        _last_gemini_call = time.monotonic()
+
+
 def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwargs: Any):
     """One LiteLLM call. A quota failure becomes a plain error, with no secret in it."""
-    import time
-
     import litellm
 
     from app.profassist.errors import ProfassistError
@@ -189,8 +238,10 @@ def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwa
     if provider_id == "gemini":
         call["drop_params"] = True
     last: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
+            if provider_id == "gemini":
+                _pace_gemini()
             return litellm.completion(
                 model=litellm_model(provider_id, model),
                 messages=messages,
@@ -209,7 +260,17 @@ def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwa
             if "high demand" in text.lower() or "unavailable" in text.lower() or "503" in text:
                 time.sleep(2 * (attempt + 1))
                 continue
-            if getattr(exc, "status_code", None) == 429 or "quota" in text.lower():
+            refused = getattr(exc, "status_code", None) == 429 or "quota" in text.lower()
+            if refused or "resource_exhausted" in text.lower():
+                wait = retry_wait(text)
+                logger.warning(
+                    "Model call refused (wait=%s): %s",
+                    wait if wait is not None and attempt < 3 else "stop",
+                    _safe_detail(text),
+                )
+                if wait is not None and attempt < 3:
+                    time.sleep(wait)
+                    continue
                 raise ProfassistError(
                     429,
                     "The model provider is out of free quota for this model. Try again later or choose another model.",

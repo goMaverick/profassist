@@ -23,7 +23,7 @@ interface CourseOption {
   code: string;
   title: string;
 }
-import { AnswerText, IntegrityAnswer, QuietTool } from "@/components/profassist/quiet-chat";
+import { AnswerText, AtRiskAnswer, IntegrityAnswer, QuietTool } from "@/components/profassist/quiet-chat";
 import { sendChat, useChat } from "@/components/profassist/chat-store";
 
 const CHIPS = [
@@ -124,6 +124,8 @@ export function HomeChat({
             {last.tool && <QuietTool name={last.tool.name} output={last.tool.output} />}
             {last.tool?.name === "integrity_concerns" ? (
               <IntegrityAnswer output={last.tool.output} />
+            ) : last.tool?.name === "dropout_risk" ? (
+              <AtRiskAnswer output={last.tool.output} />
             ) : (
               <AnswerText text={last.text} />
             )}
