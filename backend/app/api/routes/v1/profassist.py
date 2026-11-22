@@ -486,6 +486,7 @@ class FeedbackBody(BaseModel):
     rubric: list = Field(default_factory=list)
     overall: str = ""
     bank: list = Field(default_factory=list)
+    overrides: dict = Field(default_factory=dict)
 
 
 @router.get("/integrity/overview")
@@ -609,6 +610,7 @@ async def grade_feedback_save(
             "rubric": body.rubric,
             "overall": body.overall,
             "bank": body.bank,
+            "overrides": body.overrides,
         },
     )
     db.add(

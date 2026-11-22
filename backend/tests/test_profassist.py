@@ -253,6 +253,23 @@ def test_integrity_gate_and_match_decisions(monkeypatch: pytest.MonkeyPatch, tmp
     assert after < before
 
 
+def test_grading_council_drafts_from_the_rubric() -> None:
+    from app.profassist.grade_notes import draft_mark, letter_for
+
+    mark = draft_mark("Group B")
+    assert mark["rubric"] == "Workshops rubric"
+    assert mark["total"] == 78
+    assert mark["letter"] == "B"
+    assert letter_for(70) == "C"
+    assert mark["confidence"] == "Medium"
+    names = [row["name"] for row in mark["criteria"]]
+    assert names == ["Problem definition", "Solution design", "Ethical risk"]
+    design = next(row for row in mark["criteria"] if row["id"] == "design")
+    assert design["agreed"] is False
+    assert {item["band"] for item in design["graders"]} == {"Good", "Fair"}
+    assert len(mark["council"]) == 4
+
+
 def test_grade_feedback_stays_private_until_push_is_enabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
