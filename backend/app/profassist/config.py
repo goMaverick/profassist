@@ -8,7 +8,17 @@ def _flag(name: str, default: str = "") -> str:
 
 
 def llm_api_key() -> str:
-    return _flag("LLM_API_KEY") or _flag("OPENAI_API_KEY")
+    """The key LiteLLM spends.
+
+    A Gemini-only install is a supported single-key setup: the platform and Mem0
+    both accept GEMINI_API_KEY (or GOOGLE_API_KEY) when no neutral key is set.
+    """
+    return (
+        _flag("LLM_API_KEY")
+        or _flag("OPENAI_API_KEY")
+        or _flag("GEMINI_API_KEY")
+        or _flag("GOOGLE_API_KEY")
+    )
 
 
 def llm_model() -> str:

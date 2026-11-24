@@ -16,6 +16,7 @@ services:
       - ./backend/skills:/app/skills:ro
       - ./backend/cli:/app/cli:ro
       - media_data:/app/media
+      - mem0_data:/app/data
     env_file:
       - ./backend/.env.example
     environment:
@@ -36,9 +37,11 @@ services:
       - MOODLE_BASE_URL=http://moodle-mock:8090
       - MOODLE_WS_TOKEN=demo-token
       - MOODLE_ALLOW_PRIVATE=true
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-gemini/gemini-3.5-flash-lite}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_MODEL=${LLM_MODEL:-gemini/gemini-3.5-flash-lite}
       - LLM_BASE_URL=${LLM_BASE_URL:-}
       - LANGFUSE_ENABLED=true
       - LANGFUSE_PUBLIC_KEY=pk-lf-profassist-local
@@ -48,7 +51,13 @@ services:
       - LANGFUSE_PROJECT_ID=profassist-project
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - DOCLING_ENABLED=${DOCLING_ENABLED:-false}
-      - MEM0_HISTORY_PATH=/tmp/profassist-mem0.db
+      - MEM0_ENABLED=true
+      - MEM0_EMBEDDER_PROVIDER=fastembed
+      - MEM0_EMBEDDER_MODEL=BAAI/bge-small-en-v1.5
+      - MEM0_EMBEDDER_DIMS=384
+      - MEM0_HISTORY_PATH=/app/data/mem0.db
+      - MEM0_TELEMETRY=False
+      - LITELLM_DROP_PARAMS=True
     command: ["sh", "/app/docker-entrypoint.sh"]
     networks:
       - backend
@@ -70,6 +79,9 @@ services:
     restart: unless-stopped
 
   moodle-mock:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     image: profassist_backend:dev
     pull_policy: never
     container_name: profassist_moodle_mock
@@ -172,6 +184,7 @@ services:
     volumes:
       - ./backend/app:/app/app:ro
       - media_data:/app/media
+      - mem0_data:/app/data
     command: python -m app.worker.prefect_app
     healthcheck:
       disable: true
@@ -187,6 +200,18 @@ services:
       - MOODLE_BASE_URL=http://moodle-mock:8090
       - MOODLE_WS_TOKEN=demo-token
       - MOODLE_ALLOW_PRIVATE=true
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-gemini/gemini-3.5-flash-lite}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gemini/gemini-3.5-flash-lite}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - MEM0_ENABLED=true
+      - MEM0_EMBEDDER_PROVIDER=fastembed
+      - MEM0_EMBEDDER_MODEL=BAAI/bge-small-en-v1.5
+      - MEM0_EMBEDDER_DIMS=384
+      - MEM0_HISTORY_PATH=/app/data/mem0.db
+      - MEM0_TELEMETRY=False
+      - LITELLM_DROP_PARAMS=True
     networks:
       - backend
     depends_on:
@@ -420,6 +445,7 @@ networks:
 
 volumes:
   media_data:
+  mem0_data:
   postgres_data:
   redis_data:
   qdrant_data:
