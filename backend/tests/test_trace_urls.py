@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -99,6 +100,7 @@ def test_outline_review_stores_the_step_trace_url(monkeypatch: pytest.MonkeyPatc
         return {"summary": "Two outcomes need work."}
 
     monkeypatch.setattr(outline_review, "get_outline", fake_get_outline)
+    monkeypatch.setattr(outline_review, "load_runtime", AsyncMock())
     monkeypatch.setattr(llm, "complete", fake_complete)
 
     result = asyncio.run(

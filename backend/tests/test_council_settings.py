@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import Delete
@@ -160,6 +161,8 @@ def _wire_model(
         reply = by_task.get(task, {})
         if isinstance(reply, Exception):
             raise reply
+        if callable(reply):
+            return reply(payload)
         return reply
 
     monkeypatch.setattr(llm, "complete", fake_complete)
@@ -243,11 +246,51 @@ def test_grading_defaults_are_three_personas_and_a_deterministic_chair() -> None
     assert roles[0]["prompt_editable"] is True
 
 
-def test_only_material_and_assignment_allow_custom_roles() -> None:
+@pytest.mark.anyio
+async def test_outline_defaults_include_the_creator_and_allow_custom_roles() -> None:
+    roles = default_roles("outline")
+
+    assert [role["role_key"] for role in roles] == [
+        "creator",
+        "curriculum",
+        "alignment",
+        "balance",
+        "student",
+        "chair",
+    ]
+    creator = roles[0]
+    assert creator["label"] == "Creator"
+    assert creator["kind"] == "creator"
+    assert creator["persona_prompt"] == DEFAULT_PROMPTS["outline_generate"]
+    assert creator["agent_key"] == "course_designer"
+    assert creator["position"] == 1
+
+    view = await council_view(_Session(), uuid.uuid4(), "outline")
+    assert view["allow_custom"] is True
     assert default_roles("material")[0]["kind"] == "creator"
     assert default_roles("assignment")[0]["kind"] == "creator"
     assert all(role["kind"] != "creator" for role in default_roles("grading"))
-    assert all(role["kind"] != "creator" for role in default_roles("outline"))
+
+
+def test_every_default_reviewer_is_an_llm_with_a_prompt() -> None:
+    expected = {
+        "material": ["curriculum", "evidence", "design"],
+        "assignment": ["alignment", "brief", "rubric"],
+        "grading": ["evidence", "strict", "supportive"],
+        "outline": ["curriculum", "alignment", "balance", "student"],
+    }
+
+    for key, role_keys in expected.items():
+        roles = default_roles(key)
+        reviewers = [role for role in roles if role["kind"] == "llm"]
+        assert [role["role_key"] for role in reviewers] == role_keys
+        assert all(role["persona_prompt"].strip() for role in reviewers)
+        assert all(role["prompt_editable"] for role in reviewers)
+
+
+def test_no_default_council_role_is_a_deterministic_code_check() -> None:
+    for key in COUNCIL_KEYS:
+        assert all(role["kind"] != "deterministic" for role in default_roles(key))
 
 
 # --- the migration ---------------------------------------------------------
@@ -402,6 +445,7 @@ async def test_reset_deletes_this_orgs_rows_and_restores_the_default() -> None:
 
     assert db.rows == [other_row]
     assert [role["role_key"] for role in view["roles"]] == [
+        "creator",
         "curriculum",
         "alignment",
         "balance",
@@ -468,20 +512,18 @@ async def test_positions_are_contiguous_from_one() -> None:
 
 
 @pytest.mark.anyio
-async def test_custom_roles_are_only_allowed_where_the_spec_says() -> None:
-    for key in ("grading", "outline"):
-        with pytest.raises(ProfassistError) as caught:
-            await save_council_roles(_Session(), uuid.uuid4(), key, _with_custom(key))
-        assert caught.value.status == 400
-        assert "does not accept custom roles" in caught.value.detail
+async def test_custom_roles_are_allowed_where_the_spec_says() -> None:
+    with pytest.raises(ProfassistError) as caught:
+        await save_council_roles(_Session(), uuid.uuid4(), "grading", _with_custom("grading"))
+    assert caught.value.status == 400
+    assert "does not accept custom roles" in caught.value.detail
 
-    view = await save_council_roles(
-        _Session(), uuid.uuid4(), "assignment", _with_custom("assignment")
-    )
-    custom = next(role for role in view["roles"] if role["role_key"] == "ethics")
-    assert custom["custom"] is True
-    assert custom["kind"] == "llm"
-    assert custom["prompt_editable"] is True
+    for key in ("material", "assignment", "outline"):
+        view = await save_council_roles(_Session(), uuid.uuid4(), key, _with_custom(key))
+        custom = next(role for role in view["roles"] if role["role_key"] == "ethics")
+        assert custom["custom"] is True
+        assert custom["kind"] == "llm"
+        assert custom["prompt_editable"] is True
 
 
 @pytest.mark.anyio
@@ -498,7 +540,7 @@ async def test_a_custom_role_needs_a_persona_prompt() -> None:
 @pytest.mark.anyio
 async def test_a_builtin_role_keeps_its_kind() -> None:
     roles = _roles("material")
-    _set(roles, "evidence", kind="llm")
+    _set(roles, "evidence", kind="deterministic")
 
     with pytest.raises(ProfassistError) as caught:
         await save_council_roles(_Session(), uuid.uuid4(), "material", roles)
@@ -511,8 +553,11 @@ async def test_council_view_reports_custom_and_editability() -> None:
 
     material = await council_view(db, uuid.uuid4(), "material")
     grading = await council_view(db, uuid.uuid4(), "grading")
+    outline = await council_view(db, uuid.uuid4(), "outline")
 
     assert material["allow_custom"] is True
+    assert outline["allow_custom"] is True
+    assert outline["roles"][0]["role_key"] == "creator"
     assert grading["allow_custom"] is False
     chair = grading["roles"][-1]
     assert chair["prompt_editable"] is False
@@ -541,7 +586,11 @@ def test_a_disabled_material_reviewer_drops_findings_and_message(
         "chair",
     ]
     assert review["roles"] == ["curriculum", "design", "chair"]
-    assert [task for task, _payload in calls] == ["slide_review"]
+    assert [task for task, _payload in calls] == [
+        "council_review",
+        "council_review",
+        "slide_review",
+    ]
 
 
 def test_a_custom_material_role_adds_findings_and_a_message(
@@ -551,15 +600,19 @@ def test_a_custom_material_role_adds_findings_and_a_message(
     calls = _wire_model(
         monkeypatch,
         {
-            "council_review": {
-                "issues": [
-                    {
-                        "severity": "high",
-                        "issue": "The deck never discusses who is accountable.",
-                        "fix": "Add an accountability slide.",
-                    }
-                ]
-            },
+            "council_review": lambda payload: (
+                {
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "issue": "The deck never discusses who is accountable.",
+                            "fix": "Add an accountability slide.",
+                        }
+                    ]
+                }
+                if payload.get("reviewer") == "ethics"
+                else {"issues": []}
+            ),
             "slide_review": {"verdict": "pass", "issues": [], "strengths": []},
         },
     )
@@ -576,7 +629,11 @@ def test_a_custom_material_role_adds_findings_and_a_message(
         "ethics",
         "chair",
     ]
-    custom_call = next(payload for task, payload in calls if task == "council_review")
+    custom_call = next(
+        payload
+        for task, payload in calls
+        if task == "council_review" and payload.get("prompt_override") == "Review as ethics."
+    )
     assert custom_call["reviewer"] == "ethics"
     assert custom_call["prompt_override"] == "Review as ethics."
 
@@ -606,7 +663,7 @@ def test_a_disabled_material_chair_skips_the_model(monkeypatch: pytest.MonkeyPat
 
     review = agents.run_slide_review(_deck(), council_roles=roles)
 
-    assert [task for task, _payload in calls] == []
+    assert [task for task, _payload in calls] == ["council_review"] * 3
     assert review["degraded"] is False
     assert review["verdict"] == "pass"
 
@@ -642,15 +699,19 @@ def test_a_custom_assignment_role_adds_role_issues_and_a_message(
     calls = _wire_model(
         monkeypatch,
         {
-            "council_review": {
-                "issues": [
-                    {
-                        "severity": "high",
-                        "issue": "The brief has no ethics section.",
-                        "fix": "Add the ethics section.",
-                    }
-                ]
-            },
+            "council_review": lambda payload: (
+                {
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "issue": "The brief has no ethics section.",
+                            "fix": "Add the ethics section.",
+                        }
+                    ]
+                }
+                if payload.get("reviewer") == "ethics"
+                else {"issues": []}
+            ),
             "assignment_review": {"verdict": "pass", "strengths": []},
         },
     )
@@ -674,7 +735,11 @@ def test_a_custom_assignment_role_adds_role_issues_and_a_message(
         "ethics",
         "chair",
     ]
-    custom_call = next(payload for task, payload in calls if task == "council_review")
+    custom_call = next(
+        payload
+        for task, payload in calls
+        if task == "council_review" and payload.get("reviewer") == "ethics"
+    )
     assert custom_call["prompt_override"] == "Review as ethics."
 
 
@@ -696,6 +761,98 @@ def test_the_assignment_chair_uses_its_prompt_and_model(
     chair_call = next(payload for task, payload in calls if task == "assignment_review")
     assert chair_call["prompt_override"] == "Chair voice: be brief."
     assert chair_call["model"] == "chair-model"
+
+
+def test_a_disabled_llm_assignment_reviewer_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _roles("assignment")
+    _set(roles, "brief", enabled=False)
+    calls = _wire_model(monkeypatch, {"assignment_review": {"verdict": "pass", "strengths": []}})
+
+    assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+        council_roles=roles,
+    )
+
+    reviewers = [payload.get("reviewer") for task, payload in calls if task == "council_review"]
+    assert reviewers == ["alignment", "rubric"]
+
+
+def test_llm_role_issues_keep_their_reviewer_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire_model(
+        monkeypatch,
+        {
+            "council_review": lambda payload: (
+                {
+                    "issues": [
+                        {
+                            "severity": "medium",
+                            "issue": "The alignment claim is thin.",
+                            "fix": "Add a CLO.",
+                        }
+                    ]
+                }
+                if payload.get("reviewer") == "alignment"
+                else {"issues": []}
+            ),
+            "assignment_review": {"verdict": "pass", "strengths": []},
+        },
+    )
+
+    review = assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+    )
+
+    tagged = [item for item in review["issues"] if item.get("reviewer") == "alignment"]
+    assert len(tagged) == 1
+    assert tagged[0]["code"] == "role_alignment"
+
+
+def test_the_chair_reconciles_llm_role_issues(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire_model(
+        monkeypatch,
+        {
+            "council_review": lambda payload: (
+                {
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "issue": "The rubric never describes the advanced level.",
+                            "fix": "Add the advanced level.",
+                        }
+                    ]
+                }
+                if payload.get("reviewer") == "rubric"
+                else {"issues": []}
+            ),
+            "assignment_review": {
+                "verdict": "pass",
+                "summary": "One rubric issue stands.",
+                "strengths": ["Clear brief."],
+            },
+        },
+    )
+
+    review = assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+    )
+
+    assert any(
+        item["reviewer"] == "rubric" and item["severity"] == "high" for item in review["issues"]
+    )
+    assert review["verdict"] == "revise"
+    assert "One rubric issue stands." in review["messages"][-1]["text"]
+    assert review["strengths"] == ["Clear brief."]
 
 
 # --- llm.complete ----------------------------------------------------------
@@ -996,6 +1153,7 @@ def _wire_outline(
     roles: list[dict[str, Any]],
     *,
     tool: Any | None = None,
+    replies: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[uuid.UUID, str]]]:
     row = _outline_row()
     calls: list[tuple[str, dict[str, Any]]] = []
@@ -1010,10 +1168,14 @@ def _wire_outline(
 
     def fake_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append((task, payload))
-        return {"summary": "Reviewed."}
+        reply = (replies or {}).get(task)
+        if callable(reply):
+            return reply(payload)
+        return reply if isinstance(reply, dict) else {"summary": "Reviewed."}
 
     monkeypatch.setattr(outline_review, "get_outline", fake_get_outline)
     monkeypatch.setattr(outline_review, "load_council_roles", fake_load_roles)
+    monkeypatch.setattr(outline_review, "load_runtime", AsyncMock())
     monkeypatch.setattr(llm, "complete", fake_complete)
     if tool is not None:
         monkeypatch.setattr(outline_review, "tool_enabled", tool)
@@ -1048,7 +1210,31 @@ async def test_outline_reviewers_are_enabled_roles_in_order(
     reviewers = {item["reviewer"] for item in result["findings"]}
     assert "balance" not in reviewers
     assert reviewers <= {"curriculum", "alignment", "student"}
-    assert [task for task, _payload in calls] == ["outline_review"]
+    assert [task for task, _payload in calls] == [
+        "council_review",
+        "council_review",
+        "council_review",
+        "outline_review",
+    ]
+
+
+@pytest.mark.anyio
+async def test_outline_review_loads_the_signed_in_professor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _roles("outline")
+    _wire_outline(monkeypatch, roles)
+    load = outline_review.load_runtime
+    org_id, user_id = uuid.uuid4(), uuid.uuid4()
+    db = _ReviewSession()
+
+    await outline_review.run_review(
+        db, org_id, user_id, uuid.uuid4(), mode="single", reviewer="curriculum"
+    )
+
+    load.assert_awaited_once()
+    args = load.await_args.args
+    assert args == (db, org_id, user_id)
 
 
 @pytest.mark.anyio
@@ -1072,12 +1258,140 @@ async def test_the_outline_chair_uses_its_prompt_and_model(monkeypatch: pytest.M
 
 
 @pytest.mark.anyio
+async def test_a_custom_outline_reviewer_adds_findings_the_chair_sees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _with_custom("outline")
+    _set(roles, "ethics", model="ethics-model")
+    calls, _seen_roles = _wire_outline(
+        monkeypatch,
+        roles,
+        replies={
+            "council_review": lambda payload: (
+                {
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "section": "policies",
+                            "object_id": "ethics",
+                            "issue": "The outline has no research ethics policy.",
+                            "fix": "Add a research ethics section.",
+                        }
+                    ]
+                }
+                if payload.get("prompt_override") == "Review as ethics."
+                else {"issues": []}
+            )
+        },
+    )
+
+    result = await outline_review.run_review(
+        _ReviewSession(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        mode="council",
+        reviewer="curriculum",
+    )
+
+    custom_call = next(
+        payload
+        for task, payload in calls
+        if task == "council_review" and payload.get("prompt_override") == "Review as ethics."
+    )
+    assert custom_call["prompt_override"] == "Review as ethics."
+    assert custom_call["model"] == "ethics-model"
+
+    ethics = [item for item in result["findings"] if item["reviewer"] == "ethics"]
+    assert len(ethics) == 1
+    assert ethics[0]["severity"] == "high"
+    assert ethics[0]["message"] == "The outline has no research ethics policy."
+    assert ethics[0]["fix"] == {"note": "Add a research ethics section."}
+    assert ethics[0]["applied"] is False
+    assert result["findings"][-1]["reviewer"] == "ethics"
+
+    chair_call = next(payload for task, payload in calls if task == "outline_review")
+    assert any(item["reviewer"] == "ethics" for item in chair_call["findings"])
+
+
+@pytest.mark.anyio
+async def test_a_disabled_custom_outline_reviewer_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _with_custom("outline")
+    _set(roles, "ethics", enabled=False)
+    calls, _seen_roles = _wire_outline(monkeypatch, roles)
+
+    result = await outline_review.run_review(
+        _ReviewSession(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        mode="council",
+        reviewer="curriculum",
+    )
+
+    assert [task for task, _payload in calls] == [
+        "council_review",
+        "council_review",
+        "council_review",
+        "council_review",
+        "outline_review",
+    ]
+    assert all(item["reviewer"] != "ethics" for item in result["findings"])
+
+
+@pytest.mark.anyio
+async def test_an_outline_llm_reviewer_returns_normalised_findings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _roles("outline")
+    issue = {
+        "severity": "high",
+        "section": "outcomes",
+        "object_id": "LO1",
+        "issue": "LO1 maps to no program outcome.",
+        "fix": "Map LO1 to PLO1.",
+    }
+    calls, _seen_roles = _wire_outline(
+        monkeypatch,
+        roles,
+        replies={
+            "council_review": lambda payload: (
+                {"issues": [issue]}
+                if payload.get("prompt_override") == DEFAULT_PROMPTS["reviewer_curriculum"]
+                else {"issues": []}
+            )
+        },
+    )
+
+    result = await outline_review.run_review(
+        _ReviewSession(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        mode="council",
+        reviewer="curriculum",
+    )
+
+    found = [item for item in result["findings"] if item["reviewer"] == "curriculum"]
+    assert len(found) == 1
+    assert found[0]["severity"] == "high"
+    assert found[0]["section"] == "outcomes"
+    assert found[0]["object_id"] == "LO1"
+    assert found[0]["message"] == "LO1 maps to no program outcome."
+    assert found[0]["fix"] == {"note": "Map LO1 to PLO1."}
+    chair_call = next(payload for task, payload in calls if task == "outline_review")
+    assert any(item["reviewer"] == "curriculum" for item in chair_call["findings"])
+
+
+@pytest.mark.anyio
 async def test_no_enabled_outline_reviewer_never_calls_the_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     roles = _roles("outline")
     for role in roles:
-        if role["kind"] == "deterministic":
+        if role["kind"] in {"deterministic", "llm"}:
             role["enabled"] = False
     calls, _seen_roles = _wire_outline(monkeypatch, roles)
 

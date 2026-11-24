@@ -115,6 +115,9 @@ export default function StylePage() {
         value={soul}
         onChange={(event) => setSoul(event.target.value)}
       />
+      <p className="text-foreground/60 text-sm">
+        This voice and the About me portrait are both injected into every agent prompt. Changes are remembered per professor.
+      </p>
       <div className="flex gap-2">
         <button
           className="bg-foreground text-background rounded-lg px-3 py-2 text-sm"

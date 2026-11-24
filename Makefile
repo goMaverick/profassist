@@ -1,4 +1,4 @@
-.PHONY: install format lint test run clean help db-init dev dev-down dev-logs dev-rebuild dev-frontend docker-clean stage stage-down prod prod-down upgrade upgrade-dry-run upgrade-new-features upgrade-finalize local-llm
+.PHONY: install format lint test run clean help db-init dev dev-down dev-logs dev-rebuild dev-frontend docker-clean stage stage-down prod prod-down upgrade upgrade-dry-run upgrade-new-features upgrade-finalize local-llm demo demo-down demo-logs demo-ps
 
 # Optional local model. Does not change committed defaults.
 # With no cloud key and no Ollama, drafting stops with an explicit error.
@@ -97,6 +97,60 @@ dev-frontend:
 	docker compose -f docker-compose.frontend.yml up -d
 	@echo ""
 	@echo "✅ Frontend at http://localhost:3000  (backend must be up — 'make dev')"
+
+# === One-command POC demo ====================================================
+# One key, one command. `.env` is gitignored; never commit a real key.
+# The first account to register at /register becomes the app admin.
+demo:
+	@test -f .env || (cp .env.example .env && \
+		echo "" && \
+		echo "❌ Created .env from .env.example." && \
+		echo "   Open .env, set GEMINI_API_KEY=your-key, then re-run 'make demo'." && \
+		echo "   (.env is gitignored - never commit it.)" && exit 1)
+	@if ! grep -qE '^GEMINI_API_KEY=[^[:space:]]' .env; then \
+		echo ""; \
+		echo "❌ GEMINI_API_KEY is empty in .env."; \
+		echo "   Open .env, set GEMINI_API_KEY=your-key, then re-run 'make demo'."; \
+		exit 1; \
+	fi
+	@echo "▶ Building app, prefect-runner, frontend…"
+	docker compose build app prefect-runner frontend
+	@echo "▶ Starting the stack…"
+	docker compose up -d --force-recreate
+	@echo "▶ Waiting for the API (up to 3 minutes)…"
+	@i=0; while [ $$i -lt 60 ]; do \
+		if curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1; then \
+			echo "  ✅ API is healthy"; break; \
+		fi; \
+		i=$$((i + 1)); printf '.'; sleep 3; \
+	done
+	@curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1 || \
+		(echo ""; echo "❌ API did not become healthy. Run 'make demo-logs'."; exit 1)
+	@echo ""
+	@echo "🚀 ProfAssist POC is up:"
+	@echo "   App:           http://localhost:3000"
+	@echo "   Register:      http://localhost:3000/register"
+	@echo "   API:           http://localhost:8000"
+	@echo "   API docs:      http://localhost:8000/docs"
+	@echo "   Langfuse:      http://localhost:3100"
+	@echo "   MLflow:        http://localhost:5000"
+	@echo "   Prefect:       http://localhost:4200"
+	@echo "   Moodle mock:   http://localhost:8090/health"
+	@echo ""
+	@echo "Register at /register; the first user becomes app admin."
+	@echo "Moodle is preconfigured against the mock: test and sync it at"
+	@echo "  http://localhost:3000/admin/integrations/moodle"
+	@echo ""
+	@echo "Logs: 'make demo-logs'   Stop: 'make demo-down'"
+
+demo-down:
+	docker compose down
+
+demo-logs:
+	docker compose logs -f
+
+demo-ps:
+	docker compose ps
 
 # === Staging: built images, no bind mounts (production-like, local DB) ===
 stage:
@@ -325,6 +379,9 @@ help:
 	@echo "======================================"
 	@echo ""
 	@echo "🚀 Bootstrap (first-time setup):"
+	@echo "  make demo           One-command POC: build + up + wait for health (needs .env)"
+	@echo "  make demo-down      Stop the demo stack"
+	@echo "  make demo-logs      Tail demo logs"
 	@echo "  make bootstrap      'make dev' + 'make seed' — full setup from a fresh clone"
 	@echo ""
 	@echo "Day-to-day dev:"

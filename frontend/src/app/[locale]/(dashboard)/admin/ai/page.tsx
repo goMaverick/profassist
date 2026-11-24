@@ -74,6 +74,7 @@ interface View {
   agent_models: Record<string, { provider: string; model: string }>;
   prompt_sources?: Source[];
   prompts?: PromptVersionRow[];
+  published_to_langfuse?: boolean;
   moodle_sync_paused: boolean;
   moodle_sync_minutes: number;
   moodle_nightly_enabled: boolean;
@@ -490,9 +491,8 @@ export default function AiAdminPage() {
       <Card id="ai-prompts" className="p-4">
         <h2 className="pa-card-title">Prompts</h2>
         <p>
-          Each agent has one instruction. If Langfuse is connected, the production label there wins.
-          If Langfuse is off, a version you save here is used for this university. Older versions
-          stay in the list.
+          Global agent prompts are versioned in Langfuse when enabled. The local copy is the
+          fallback. Saving makes a new version; older versions stay in the list.
         </p>
         <h3 className="pa-card-sub">Every prompt</h3>
         <ul className="pa-prompt-list" aria-label="Prompt status">
@@ -588,7 +588,11 @@ export default function AiAdminPage() {
               );
               if (next) {
                 setView(next);
-                setNote(`Saved a new version of ${agentLabel(promptKey)}.`);
+                setNote(
+                  next.published_to_langfuse
+                    ? `Published ${agentLabel(promptKey)} to Langfuse and saved the local fallback.`
+                    : `Saved ${agentLabel(promptKey)} locally. It is the fallback when Langfuse is off.`,
+                );
               }
               setSavingPrompt(false);
             }}

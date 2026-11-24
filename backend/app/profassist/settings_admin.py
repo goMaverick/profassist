@@ -8,8 +8,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.organization import OrganizationMember
+from app.db.models.organization import Organization, OrganizationMember
 from app.db.models.user import User
+from app.profassist.config import langfuse_enabled
 from app.profassist.lessons import condense_about
 from app.profassist.memory import list_memories
 from app.profassist.models import (
@@ -23,9 +24,18 @@ from app.profassist.models import (
     StyleProfile,
     SubjectOutline,
 )
+from app.profassist.observe import publish_prompt
 from app.profassist.providers import AGENTS
 from app.profassist.providers import catalog as provider_catalog
-from app.profassist.runtime import DEFAULT_PROMPTS, DEFAULT_TOOLS, bind_runtime, catalog, set_about
+from app.profassist.runtime import (
+    DEFAULT_PROMPTS,
+    DEFAULT_TOOLS,
+    bind_runtime,
+    catalog,
+    set_about,
+    set_professor,
+    set_soul,
+)
 
 
 async def _settings(db: AsyncSession, org_id: uuid.UUID) -> AiSettings:
@@ -86,12 +96,13 @@ async def _course_codes(
 async def professor_identity(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None
 ) -> dict[str, Any]:
-    """Name, org role, and the courses this professor owns evidence for."""
-    empty: dict[str, Any] = {"name": "", "role": "", "courses": []}
+    """Name, org role, university, and the courses this professor owns evidence for."""
+    empty: dict[str, Any] = {"name": "", "role": "", "organization": "", "courses": []}
     if user_id is None:
         return empty
     user = await db.get(User, user_id)
     name = (user.full_name or "").strip() if user and user.full_name else ""
+    organization = await db.get(Organization, org_id)
     membership = (
         (
             await db.execute(
@@ -124,13 +135,20 @@ async def professor_identity(
             if course_id:
                 owned_ids.add(course_id)
     courses = await _course_codes(db, org_id, owned_ids)
-    return {"name": name, "role": role, "courses": courses}
+    return {
+        "name": name,
+        "role": role,
+        "organization": (organization.name or "").strip() if organization else "",
+        "courses": courses,
+    }
 
 
 async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
     """Per professor, per university. Never the global prompt."""
     if user_id is None:
         set_about("")
+        set_professor({})
+        set_soul("")
         return
     profile = (
         await db.execute(
@@ -140,6 +158,10 @@ async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID |
         )
     ).scalar_one_or_none()
     identity = await professor_identity(db, org_id, user_id)
+    set_professor(identity)
+    from app.profassist.service import DEFAULT_SOUL
+
+    set_soul(profile.soul_md if profile and profile.soul_md else DEFAULT_SOUL)
     memories = await list_memories(db, org_id, user_id)
     saved = profile.about_md if profile else ""
     set_about(
@@ -369,7 +391,15 @@ async def save_prompt(
         )
     )
     await db.flush()
-    return await admin_view(db, org_id)
+    published = False
+    if langfuse_enabled():
+        try:
+            published = publish_prompt(agent_key, body) is not None
+        except Exception:
+            published = False
+    view = await admin_view(db, org_id)
+    view["published_to_langfuse"] = published
+    return view
 
 
 async def set_tool(

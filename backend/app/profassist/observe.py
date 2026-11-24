@@ -247,6 +247,35 @@ def production_prompt(name: str) -> tuple[str, int] | None:
     return text, version
 
 
+def publish_prompt(name: str, body: str) -> int | None:
+    """Publish a new production version of a global prompt to Langfuse.
+
+    Returns the new version, or ``None`` when Langfuse is off or the publish
+    fails. The database copy saved by the admin remains the offline fallback.
+    """
+    client = _client()
+    if client is None:
+        return None
+    try:
+        prompt = client.create_prompt(
+            name=name,
+            type="text",
+            prompt=body,
+            labels=["production"],
+            commit_message="Published from ProfAssist admin",
+        )
+        _prompt_cache.pop(name, None)
+        client.flush()
+        version = getattr(prompt, "version", None)
+        try:
+            return int(version) if version is not None else None
+        except (TypeError, ValueError):
+            return None
+    except Exception:
+        logger.info("Langfuse prompt %s was not published", name)
+        return None
+
+
 def prompt_status(name: str, database_text: str | None) -> dict[str, Any]:
     live = production_prompt(name)
     if live:

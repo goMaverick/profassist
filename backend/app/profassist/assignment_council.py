@@ -1,8 +1,8 @@
 """Assignment council: alignment, brief, and rubric reviewers, then a chair.
 
-The checks are deterministic and are the only findings. The chair may summarise
-them and set a tone, but it never invents a gap. A clean assignment comes back
-clean.
+Each enabled reviewer and the deterministic checks are evidence for the chair.
+The chair may summarise them and set a tone, but it never invents a gap. A clean
+assignment comes back clean.
 """
 
 import logging
@@ -369,12 +369,12 @@ def _assignment_roles(council_roles: list[dict[str, Any]] | None) -> list[dict[s
 def _custom_role_issues(
     roles: list[dict[str, Any]], payload: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Admin-added llm reviewers. Their findings sit beside the checks."""
+    """Every enabled llm reviewer with a prompt. Its findings sit beside the checks."""
     found: list[dict[str, Any]] = []
     for role in roles:
         if not isinstance(role, dict):
             continue
-        if role.get("kind") != "llm" or not role.get("custom") or not role.get("enabled"):
+        if role.get("kind") != "llm" or not role.get("enabled"):
             continue
         role_key = _text(role.get("role_key"))
         prompt = _text(role.get("persona_prompt"))
@@ -454,7 +454,7 @@ def _chair(state: AssignmentCouncilState) -> AssignmentCouncilState:
     try:
         drafted = llm.complete("assignment_review", request)
     except Exception as exc:
-        logger.info("Assignment chair fell back to the deterministic checks: %s", exc)
+        logger.info("Assignment chair failed; the checks and reviewer issues stand: %s", exc)
         return {"drafted": {}, "role_issues": role_issues, "degraded": True}
     if not isinstance(drafted, dict):
         return {"drafted": {}, "role_issues": role_issues, "degraded": True}
