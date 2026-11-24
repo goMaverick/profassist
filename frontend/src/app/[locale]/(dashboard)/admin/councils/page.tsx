@@ -1,7 +1,17 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  Bot,
+  Gavel,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { pa, run } from "@/components/profassist/bits";
 import {
@@ -25,6 +35,20 @@ import { cn } from "@/lib/utils";
 
 const FIRST_COUNCIL = "material";
 
+const ROLE_ICONS: Record<CouncilRole["kind"], typeof Sparkles> = {
+  creator: Sparkles,
+  deterministic: ShieldCheck,
+  llm: Bot,
+  chair: Gavel,
+};
+
+const ROLE_KIND_LABELS: Record<CouncilRole["kind"], string> = {
+  creator: "Creator",
+  deterministic: "Deterministic",
+  llm: "LLM",
+  chair: "Chair",
+};
+
 function Notice({
   variant = "default",
   title,
@@ -42,17 +66,87 @@ function Notice({
   );
 }
 
+/** Node order is speaking order, and the chair always speaks last. */
 function orderedRoles(roles: CouncilRole[]): CouncilRole[] {
-  return roles.map((role, index) => ({ ...role, position: index }));
+  const speaking = roles.filter((role) => role.kind !== "chair");
+  const chairs = roles.filter((role) => role.kind === "chair");
+  return [...speaking, ...chairs].map((role, index) => ({ ...role, position: index }));
 }
+
+function Connector() {
+  return (
+    <span aria-hidden="true" className="text-muted-foreground/60 flex shrink-0 items-center">
+      <span className="bg-border h-px w-4" />
+      <ArrowRight className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function FlowNode({
+  role,
+  selected,
+  onSelect,
+}: {
+  role: CouncilRole;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const Icon = ROLE_ICONS[role.kind] ?? Bot;
+  return (
+    <button
+      type="button"
+      aria-label={role.label}
+      aria-pressed={selected}
+      data-testid={`flow-node-${role.role_key}`}
+      data-role-key={role.role_key}
+      data-kind={role.kind}
+      data-enabled={role.enabled}
+      title={`${role.label} · ${ROLE_KIND_LABELS[role.kind] ?? role.kind}${
+        role.enabled ? "" : " · disabled"
+      }`}
+      onClick={onSelect}
+      className={cn(
+        "flex min-w-[112px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border px-4 py-3 text-xs font-medium transition-colors",
+        role.enabled
+          ? "bg-card border-border hover:border-primary shadow-sm"
+          : "border-muted-foreground/40 text-muted-foreground border-dashed line-through opacity-60",
+        selected && "ring-primary ring-2 ring-offset-2",
+      )}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      <span>{role.label}</span>
+      <span className="text-[10px] font-normal tracking-wide uppercase opacity-70">
+        {ROLE_KIND_LABELS[role.kind] ?? role.kind}
+      </span>
+    </button>
+  );
+}
+
+function AddAgentNode({ onAdd }: { onAdd: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Add agent"
+      onClick={onAdd}
+      className="border-muted-foreground/50 text-muted-foreground hover:border-primary hover:text-primary flex min-w-[112px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-4 py-3 text-xs font-medium transition-colors"
+    >
+      <Plus className="h-4 w-4" aria-hidden="true" />
+      <span>Add agent</span>
+      <span className="text-[10px] font-normal tracking-wide uppercase opacity-70">LLM</span>
+    </button>
+  );
+}
+
 export default function CouncilsAdminPage() {
   const [view, setView] = useState<CouncilsView | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Council>>({});
   const [activeKey, setActiveKey] = useState(FIRST_COUNCIL);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     pa<CouncilsView>("/admin/councils")
@@ -70,6 +164,14 @@ export default function CouncilsAdminPage() {
         setError(err instanceof Error ? err.message : "Could not load council settings"),
       );
   }, []);
+
+  useEffect(() => {
+    if (!selectedKey) return;
+    const card = cardRefs.current[selectedKey];
+    if (card && typeof card.scrollIntoView === "function") {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [selectedKey]);
 
   function replaceView(data: CouncilsView) {
     setView(data);
@@ -117,25 +219,40 @@ export default function CouncilsAdminPage() {
     setRoles(roles);
   }
 
+  function selectRole(roleKey: string) {
+    // The selection effect scrolls when the selection changes. Clicking the already
+    // selected node still brings its editor back into view.
+    if (roleKey === selectedKey) {
+      const card = cardRefs.current[roleKey];
+      if (card && typeof card.scrollIntoView === "function") {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+    setSelectedKey(roleKey);
+  }
+
   function addReviewer() {
     if (!council) return;
     let suffix = 1;
     while (council.roles.some((role) => role.role_key === `reviewer_${suffix}`)) suffix += 1;
-    setRoles([
-      ...council.roles,
-      {
-        role_key: `reviewer_${suffix}`,
-        label: `Reviewer ${suffix}`,
-        kind: "llm",
-        persona_prompt: "",
-        agent_key: "reviewer",
-        model: "",
-        position: council.roles.length,
-        enabled: true,
-        custom: true,
-        config: {},
-      },
-    ]);
+    const roleKey = `reviewer_${suffix}`;
+    const reviewer: CouncilRole = {
+      role_key: roleKey,
+      label: `Reviewer ${suffix}`,
+      kind: "llm",
+      persona_prompt: "",
+      agent_key: "reviewer",
+      model: "",
+      position: council.roles.length,
+      enabled: true,
+      custom: true,
+      config: {},
+    };
+    const chairIndex = council.roles.findIndex((role) => role.kind === "chair");
+    const insertAt = chairIndex === -1 ? council.roles.length : chairIndex;
+    setRoles([...council.roles.slice(0, insertAt), reviewer, ...council.roles.slice(insertAt)]);
+    setSelectedKey(roleKey);
   }
 
   function removeRole(index: number) {
@@ -145,6 +262,14 @@ export default function CouncilsAdminPage() {
 
   async function saveCouncil() {
     if (!council) return;
+    const missingPrompt = council.roles.find(
+      (role) => role.custom && !(role.persona_prompt ?? "").trim(),
+    );
+    if (missingPrompt) {
+      setError(`${missingPrompt.label} needs a persona prompt before you can save.`);
+      setNote("");
+      return;
+    }
     setSaving(true);
     setNote("");
     const next = await run(
@@ -172,6 +297,7 @@ export default function CouncilsAdminPage() {
     );
     if (next) {
       replaceView(next);
+      setSelectedKey(null);
       setNote(`${council.label} restored to defaults.`);
     }
     setResetting(false);
@@ -201,13 +327,18 @@ export default function CouncilsAdminPage() {
 
       <Card className="p-4">
         <h1 className="text-lg font-semibold">Council settings</h1>
-        <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
-          Choose which roles run, in what order, and which model and persona each role uses.
+        <p className="mt-1 max-w-3xl text-sm font-medium">
+          One builder for every AI loop: outline, material, assignment.
         </p>
-        <p className="mt-2 max-w-3xl text-sm">
-          This changes the actual graph. Langfuse still traces; prompt versions can still override
-          where configured.
-        </p>
+        <div className="text-muted-foreground mt-2 max-w-3xl space-y-1 text-sm">
+          <p>
+            Global agent prompts live in Langfuse. Council agent prompts live here, per university.
+          </p>
+          <p>
+            <strong className="text-foreground">Add agent</strong> creates a custom LLM reviewer
+            that runs in that loop, just before the chair.
+          </p>
+        </div>
       </Card>
 
       <Tabs value={activeKey} onValueChange={setActiveKey}>
@@ -221,40 +352,63 @@ export default function CouncilsAdminPage() {
 
         {view.councils.map((item) => {
           const draft = drafts[item.key] ?? item;
+          const chairIndex = draft.roles.findIndex((role) => role.kind === "chair");
+          const addIndex = chairIndex === -1 ? draft.roles.length : chairIndex;
+          const rail: React.ReactNode[] = [];
+
+          draft.roles.forEach((role, index) => {
+            if (draft.allow_custom && index === addIndex) {
+              if (rail.length > 0) rail.push(<Connector key={`connector-add-${index}`} />);
+              rail.push(<AddAgentNode key="add-agent" onAdd={addReviewer} />);
+            }
+            if (rail.length > 0) rail.push(<Connector key={`connector-${role.role_key}`} />);
+            rail.push(
+              <FlowNode
+                key={role.role_key}
+                role={role}
+                selected={selectedKey === role.role_key}
+                onSelect={() => selectRole(role.role_key)}
+              />,
+            );
+          });
+          if (draft.allow_custom && addIndex === draft.roles.length) {
+            if (rail.length > 0) rail.push(<Connector key="connector-add-end" />);
+            rail.push(<AddAgentNode key="add-agent" onAdd={addReviewer} />);
+          }
+
           return (
             <TabsContent key={item.key} value={item.key} className="space-y-4">
               <Card className="p-4">
                 <p className="text-muted-foreground max-w-3xl text-sm">{draft.description}</p>
-                <h2 className="mt-4 text-sm font-semibold">Flow preview</h2>
-                {draft.roles.length === 0 ? (
-                  <p className="text-muted-foreground mt-2 text-sm">
+                <div className="mt-4 flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold">Loop builder</h2>
+                    <p className="text-muted-foreground mt-1 max-w-3xl text-xs">
+                      Nodes run left to right. Click a node to edit its card. Disabled nodes are
+                      dashed and struck through.
+                    </p>
+                  </div>
+                </div>
+                {draft.roles.length === 0 && !draft.allow_custom ? (
+                  <p className="text-muted-foreground mt-3 text-sm">
                     No roles in this council yet.
                   </p>
                 ) : (
                   <div
-                    className="mt-2 flex flex-wrap items-center gap-1.5"
-                    aria-label={`${draft.label} flow preview`}
+                    role="group"
+                    aria-label={`${draft.label} flow`}
+                    className="mt-3 flex items-stretch gap-1 overflow-x-auto pb-2"
                   >
-                    {draft.roles.map((role, index) => (
-                      <Fragment key={`${role.role_key}-${index}`}>
-                        {index > 0 && (
-                          <span aria-hidden="true" className="text-muted-foreground">
-                            →
-                          </span>
-                        )}
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            role.enabled ? "" : "text-muted-foreground line-through opacity-60",
-                          )}
-                        >
-                          {role.label}
-                        </Badge>
-                      </Fragment>
-                    ))}
+                    {rail}
                   </div>
                 )}
+                {draft.allow_custom && (
+                  <p className="text-muted-foreground mt-2 text-xs">
+                    Add agent inserts a custom LLM reviewer before the chair for this university.
+                  </p>
+                )}
               </Card>
+
               {draft.roles.length === 0 ? (
                 <Card className="p-4">
                   <p className="text-sm">
@@ -264,10 +418,21 @@ export default function CouncilsAdminPage() {
               ) : (
                 draft.roles.map((role, index) => {
                   const custom = Boolean(role.custom);
-                  const usesModel = role.kind === "llm" || role.kind === "chair";
-                  const usesPrompt = usesModel || custom;
+                  const isChair = role.kind === "chair";
+                  const showsModel = role.kind !== "deterministic";
+                  const showsPrompt = role.kind !== "deterministic";
+                  const beforeChair = index === chairIndex - 1;
+                  const selected = selectedKey === role.role_key;
                   return (
-                    <Card key={`${role.role_key}-${index}`} className="p-4">
+                    <Card
+                      key={role.role_key}
+                      ref={(node) => {
+                        cardRefs.current[role.role_key] = node;
+                      }}
+                      data-testid={`role-card-${role.role_key}`}
+                      data-selected={selected}
+                      className={cn("p-4", selected && "ring-primary ring-2")}
+                    >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -289,7 +454,7 @@ export default function CouncilsAdminPage() {
                             variant="outline"
                             size="icon-sm"
                             aria-label={`Move ${role.label} up`}
-                            disabled={index === 0}
+                            disabled={index === 0 || isChair}
                             onClick={() => moveRole(index, -1)}
                           >
                             <ArrowUp />
@@ -299,7 +464,7 @@ export default function CouncilsAdminPage() {
                             variant="outline"
                             size="icon-sm"
                             aria-label={`Move ${role.label} down`}
-                            disabled={index === draft.roles.length - 1}
+                            disabled={index === draft.roles.length - 1 || isChair || beforeChair}
                             onClick={() => moveRole(index, 1)}
                           >
                             <ArrowDown />
@@ -323,10 +488,10 @@ export default function CouncilsAdminPage() {
                         </div>
                       </div>
                       <div className="mt-3 grid gap-3">
-                        {usesModel && (
+                        {showsModel && (
                           <FormField
                             label="Model"
-                            htmlFor={`model-${draft.key}-${index}`}
+                            htmlFor={`model-${draft.key}-${role.role_key}`}
                             description="For example gemini/gemini-3.5-flash-lite."
                           >
                             <Input
@@ -339,16 +504,22 @@ export default function CouncilsAdminPage() {
                         )}
                         {role.kind === "deterministic" ? (
                           <p className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs">
-                            Deterministic check {"\u2014"} prompt not used
+                            Deterministic check - prompt not used.
                           </p>
-                        ) : usesPrompt ? (
+                        ) : showsPrompt ? (
                           <FormField
                             label="Persona prompt"
-                            htmlFor={`persona-${draft.key}-${index}`}
-                            description="Prompt versions can still override this where configured."
+                            htmlFor={`persona-${draft.key}-${role.role_key}`}
+                            description={
+                              custom
+                                ? "Required. This reviewer's voice for this university."
+                                : "Prompt versions can still override this where configured."
+                            }
+                            required={custom}
                           >
                             <Textarea
                               rows={4}
+                              aria-label={`Persona prompt for ${role.label}`}
                               value={role.persona_prompt ?? ""}
                               onChange={(event) =>
                                 updateRole(index, { persona_prompt: event.target.value })
@@ -361,13 +532,8 @@ export default function CouncilsAdminPage() {
                   );
                 })
               )}
+
               <div className="flex flex-wrap items-center gap-2">
-                {draft.allow_custom && (draft.key === "material" || draft.key === "assignment") && (
-                  <Button type="button" variant="outline" onClick={addReviewer} disabled={busy}>
-                    <Plus />
-                    Add reviewer
-                  </Button>
-                )}
                 <Button type="button" onClick={() => void saveCouncil()} disabled={busy}>
                   {saving ? "Saving…" : "Save council"}
                 </Button>

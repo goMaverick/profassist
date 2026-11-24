@@ -10,6 +10,11 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "Draft course objectives and slides only from the professor's uploaded notes. "
         "The professor approves every draft."
     ),
+    "outline_generate": (
+        "Draft the whole subject outline from the professor's notes and instructions only. "
+        "Return the content sections as JSON; the template supplies the fixed policy text. "
+        "The professor approves every draft."
+    ),
     "rubric_designer": (
         "Design a rubric whose levels are beginning, developing, proficient, and advanced. "
         "Tie each criterion to a course learning outcome."

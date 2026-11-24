@@ -107,7 +107,7 @@ Four councils are configured per university. Defaults live in code; a saved rost
 
 **Edit them at `/admin/councils`.** The page is restricted to app admins and is scoped to the active organization. For each role the admin can enable or disable it, change its label, choose its provider/model, edit its persona prompt, and reorder it. Material and Assignment also accept custom LLM reviewer roles. **Reset** deletes the organization's rows so the code default speaks again. The page changes the actual graph, not a mock.
 
-**Langfuse boundary: prompts yes, roster no.** Prompt text is resolved in this order: Langfuse `production` label → database copy → code default. The council *roster* (which roles run, in what order, enabled/disabled, model, persona) is Postgres only; editing a Langfuse prompt cannot add or remove a council member. `/admin/ai` still controls the provider, model, tools, chat on/off, and shows which prompt copy is live; prompt text there is read-only. Traces are opened after the privacy gate, and the acting tenant/professor are stored as short hashes rather than emails.
+**Langfuse boundary: prompts yes, roster no.** Prompt text is resolved in this order: Langfuse `production` label → database copy → code default. For global agents, `/admin/ai` edits the prompt: each save writes a database version and, when Langfuse is enabled, publishes a new `production` version there. The database copy is the fallback when Langfuse is off or unreachable. The council *roster* (which roles run, in what order, enabled/disabled, model, persona) is Postgres only; editing a Langfuse prompt cannot add or remove a council member. `/admin/ai` also controls the provider, model, tools, chat on/off, and shows which prompt copy is live. Traces are opened after the privacy gate, and the acting tenant/professor are stored as short hashes rather than emails.
 
 Prompt URLs follow `http://localhost:3100/project/profassist-project/prompts/<name>`; trace URLs follow `.../traces/<id>`.
 
@@ -328,6 +328,7 @@ docker-compose.yml          # Full local stack
 - [ML](docs/ml.md) - dropout and passage-reuse contracts.
 - [Moodle connector](docs/moodle-connector.md) - token, SSRF, scope, activity logs.
 - [Memory](docs/memory.md) - Postgres, Qdrant, Mem0.
+- [Prompts](docs/prompts.md) - global prompt versioning, fallback order, council prompts.
 - [Permissions](docs/permissions.md), [Security](SECURITY.md), [Configuration](docs/configuration.md), [Commands](docs/commands.md).
 - [Status vs design](docs/STATUS_VS_DESIGN.md) - what is done, partial, stubbed, or not done against the architecture report.
 

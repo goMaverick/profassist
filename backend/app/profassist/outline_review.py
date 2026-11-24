@@ -1,6 +1,7 @@
 """Pre-approval review of a subject outline. Findings name a real section."""
 
 import json
+import logging
 import re
 import uuid
 from typing import Any
@@ -15,6 +16,10 @@ from app.profassist.outline import get_outline
 from app.profassist.outline_data import POLICIES
 from app.profassist.runtime import tool_enabled
 from app.profassist.service import capture_movement
+
+logger = logging.getLogger(__name__)
+
+MAX_CUSTOM_FINDINGS = 12
 
 BLOOM = (
     "design",
@@ -250,6 +255,85 @@ def apply_fix(body: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _custom_reviewers(roles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Admin-added model reviewers, in speaking order."""
+    return [
+        role
+        for role in roles
+        if isinstance(role, dict)
+        and role.get("kind") == "llm"
+        and role.get("custom")
+        and role.get("enabled")
+    ]
+
+
+def _custom_finding(raw: Any, role_key: str) -> dict[str, Any] | None:
+    """One model finding in the same shape as a deterministic finding."""
+    if not isinstance(raw, dict):
+        return None
+    message = str(raw.get("issue") or raw.get("message") or "").strip()
+    if not message:
+        return None
+    severity = str(raw.get("severity") or "").strip().lower()
+    if severity not in {"high", "medium", "low", "info"}:
+        severity = "medium"
+    section = str(raw.get("section") or "outline").strip() or "outline"
+    object_id = str(raw.get("object_id") or role_key).strip() or role_key
+    raw_fix = raw.get("fix")
+    if isinstance(raw_fix, dict):
+        fix = dict(raw_fix)
+    elif raw_fix:
+        fix = {"note": str(raw_fix).strip()}
+    else:
+        fix = {}
+    return {
+        "id": f"{section}:{object_id}",
+        "severity": severity,
+        "section": section,
+        "object_id": object_id,
+        "reviewer": role_key,
+        "message": message,
+        "fix": fix,
+        "applied": False,
+        "citation": str(raw.get("citation") or "").strip(),
+    }
+
+
+def _custom_findings(row: Any, roles: list[dict[str, Any]], complete: Any) -> list[dict[str, Any]]:
+    """Ask each enabled custom reviewer. A failure simply adds no finding."""
+    found: list[dict[str, Any]] = []
+    for role in _custom_reviewers(roles):
+        role_key = str(role.get("role_key") or "").strip()
+        prompt = str(role.get("persona_prompt") or "").strip()
+        if not role_key or not prompt:
+            continue
+        request: dict[str, Any] = {
+            "outline": row.body or {},
+            "instructions": row.instructions or "",
+            "prompt_override": prompt,
+        }
+        model = str(role.get("model") or "").strip()
+        if model:
+            request["model"] = model
+        try:
+            reply = complete("council_review", request)
+        except Exception as exc:
+            logger.info("Outline reviewer %s failed: %s", role_key, exc)
+            continue
+        if not isinstance(reply, dict):
+            continue
+        raw = reply.get("issues")
+        if not isinstance(raw, list):
+            raw = reply.get("findings")
+        for item in raw or []:
+            finding = _custom_finding(item, role_key)
+            if finding is not None:
+                found.append(finding)
+        if len(found) >= MAX_CUSTOM_FINDINGS:
+            break
+    return found[:MAX_CUSTOM_FINDINGS]
+
+
 async def run_review(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -268,7 +352,8 @@ async def run_review(
     chosen = [reviewer] if mode == "single" else list(enabled)
     chosen = [name for name in chosen if name in enabled]
     chosen = [name for name in chosen if tool_enabled("outline_review", name)]
-    if not chosen:
+    custom_roles = _custom_reviewers(roles)
+    if not chosen and not custom_roles:
         raise ProfassistError(
             400,
             "No outline reviewer is enabled. Turn one on in the council settings, then review.",
@@ -278,6 +363,7 @@ async def run_review(
         for item in review_outline(row.body or {}, row.instructions or "")
         if item["reviewer"] in chosen
     ]
+    findings.extend(_custom_findings(row, custom_roles, complete))
     debate = []
     if mode == "council" and tool_enabled("outline_review", "debate") and findings:
         debate.append(

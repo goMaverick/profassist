@@ -91,8 +91,15 @@ COUNCILS: dict[str, dict[str, Any]] = {
     },
     "outline": {
         "label": "Outline",
-        "allow_custom": False,
+        "allow_custom": True,
         "roles": (
+            (
+                "creator",
+                "Creator",
+                "creator",
+                DEFAULT_PROMPTS["outline_generate"],
+                "course_designer",
+            ),
             (
                 "curriculum",
                 "Curriculum",

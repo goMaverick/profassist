@@ -33,7 +33,7 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | Privacy gate | Partial | Regex removal plus an optional Presidio pass. Docling is a hook only. |
 | Per-professor memory | Partial | Postgres and Qdrant always. Mem0 only when the library and a model key are present. Lessons update a matching row instead of appending forever. |
 | soul.md | Done | Her voice. A reflection changes it only after she accepts the suggestion. |
-| Prompt management | Done | Langfuse `production` prompts, then the database, then the code default. `/admin/ai` does not edit prompt text. |
+| Prompt management | Done | Langfuse `production` prompts, then the database, then the code default. `/admin/ai` edits global prompt text and publishes a new `production` version when Langfuse is on; the database copy is the fallback. |
 | Langfuse traces | Done | Nested spans after the privacy gate, with the About section labelled on the prompt. |
 | Grade calibrator | Stubbed | The page and the endpoint return `not_trained` and no score. |
 | At-risk early warning | Stubbed | The page lists the 14 upstream course-withdrawal features. The public model repo has no training CSV or saved model in git, so no score is shown. A score would stay advisory. |

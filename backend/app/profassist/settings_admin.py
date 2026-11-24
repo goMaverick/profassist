@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.organization import OrganizationMember
 from app.db.models.user import User
+from app.profassist.config import langfuse_enabled
 from app.profassist.lessons import condense_about
 from app.profassist.memory import list_memories
 from app.profassist.models import (
@@ -23,6 +24,7 @@ from app.profassist.models import (
     StyleProfile,
     SubjectOutline,
 )
+from app.profassist.observe import publish_prompt
 from app.profassist.providers import AGENTS
 from app.profassist.providers import catalog as provider_catalog
 from app.profassist.runtime import DEFAULT_PROMPTS, DEFAULT_TOOLS, bind_runtime, catalog, set_about
@@ -369,7 +371,15 @@ async def save_prompt(
         )
     )
     await db.flush()
-    return await admin_view(db, org_id)
+    published = False
+    if langfuse_enabled():
+        try:
+            published = publish_prompt(agent_key, body) is not None
+        except Exception:
+            published = False
+    view = await admin_view(db, org_id)
+    view["published_to_langfuse"] = published
+    return view
 
 
 async def set_tool(
