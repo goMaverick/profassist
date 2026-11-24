@@ -11,6 +11,7 @@ import pytest
 import app.api.routes.v1.studio_collab as studio_collab
 import app.profassist.slide_collab as slide_collab
 from app.profassist import agents, service
+from app.profassist.council_config import default_roles
 from app.profassist.errors import ProfassistError
 
 CITED = "Retrieval grounds the answer in the course notes (lecture.pdf)."
@@ -52,6 +53,8 @@ def test_slide_checks_carry_stable_codes() -> None:
 
 def test_llm_only_issues_may_have_no_code(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if task != "slide_review":
+            return {"issues": []}
         return {
             "verdict": "revise",
             "issues": [
@@ -65,8 +68,10 @@ def test_llm_only_issues_may_have_no_code(monkeypatch: pytest.MonkeyPatch) -> No
         }
 
     monkeypatch.setattr(agents.llm, "complete", fake_complete)
+    roles = default_roles("material")
+    next(role for role in roles if role["role_key"] == "design")["kind"] = "deterministic"
 
-    review = agents.run_slide_review(_deck([{"title": "", "bullets": []}]))
+    review = agents.run_slide_review(_deck([{"title": "", "bullets": []}]), council_roles=roles)
 
     llm_issue = next(item for item in review["issues"] if item["issue"] == "The flow is abrupt.")
     assert "code" not in llm_issue

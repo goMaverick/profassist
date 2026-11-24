@@ -316,14 +316,15 @@ def _slide_preferences_note(payload: dict[str, Any]) -> str:
 
 
 def _assignment_review_note(payload: dict[str, Any]) -> str:
-    """The assignment chair reads the deterministic checks as evidence, not prompts."""
+    """The assignment chair reads the checks and reviewer issues as evidence."""
     checks = payload.get("checks")
     count = len(checks) if isinstance(checks, list) else 0
     return (
         "\n\n## Assignment council\n"
-        f"The deterministic `checks` list has {count} finding(s) and is the only evidence. "
-        "Do not invent an issue, section, criterion, CLO, weight, due date, or student name. "
-        "A clean assignment has no findings; return verdict pass and do not manufacture one. "
+        f"The built-in `checks` list has {count} finding(s); reviewer issues are merged "
+        "beside it. Do not invent an issue, section, criterion, CLO, weight, due date, "
+        "source, or student name. A clean assignment has no findings; return verdict pass "
+        "and do not manufacture one. "
         'Return JSON only as {"verdict": "pass"|"revise", "summary": string, '
         '"strengths": [string]}.'
     )

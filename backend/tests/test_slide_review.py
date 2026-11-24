@@ -226,9 +226,10 @@ def test_run_slide_review_passes_a_clean_cited_deck(monkeypatch: pytest.MonkeyPa
     assert review["strengths"] == ["Every bullet cites a file."]
     assert review["degraded"] is False
     assert review["trace_url"] == ""
-    assert calls[0][0] == "slide_review"
-    assert calls[0][1]["dossier"] == {"summary": "AI design."}
-    assert calls[0][1]["checks"] == review["checks"]
+    assert calls[-1][0] == "slide_review"
+    chair_call = calls[-1][1]
+    assert chair_call["dossier"] == {"summary": "AI design."}
+    assert chair_call["checks"] == review["checks"]
 
 
 def test_run_slide_review_merges_dedupes_and_caps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,7 +266,7 @@ def test_run_slide_review_merges_dedupes_and_caps(monkeypatch: pytest.MonkeyPatc
     assert review["degraded"] is False
 
 
-def test_run_slide_review_degrades_to_the_deterministic_checks(
+def test_run_slide_review_degrades_without_any_code_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     deck = _deck(slides=[{"title": "", "bullets": []}])
@@ -274,10 +275,11 @@ def test_run_slide_review_degrades_to_the_deterministic_checks(
     review = agents.run_slide_review(deck)
 
     assert review["degraded"] is True
-    assert review["issues"] == review["checks"]
+    assert review["issues"] == []
+    assert review["checks"] == []
     assert review["strengths"] == []
-    assert review["verdict"] == "revise"
-    assert review["score"] < 70
+    assert review["verdict"] == "pass"
+    assert review["score"] == 100
 
 
 def test_run_slide_review_treats_a_non_dict_reply_as_degraded(

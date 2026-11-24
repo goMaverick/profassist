@@ -43,10 +43,10 @@ const VIEW = {
         {
           role_key: "curriculum",
           label: "Curriculum",
-          kind: "deterministic",
-          persona_prompt: "",
+          kind: "llm",
+          persona_prompt: "Check the curriculum.",
           agent_key: "curriculum",
-          model: "",
+          model: "gemini/gemini-3.5-flash-lite",
           position: 1,
           enabled: true,
           custom: false,
@@ -129,6 +129,110 @@ const VIEW = {
   ],
 };
 
+/** Every code default is an LLM seat: creator, LLM reviewer, or chair. */
+function defaultRole(
+  role_key: string,
+  label: string,
+  kind: "creator" | "llm" | "chair",
+  prompt: string,
+  position: number,
+): Record<string, unknown> {
+  return {
+    role_key,
+    label,
+    kind,
+    persona_prompt: prompt,
+    agent_key: role_key,
+    model: "gemini/gemini-3.5-flash-lite",
+    position,
+    enabled: true,
+    custom: false,
+    config: {},
+  };
+}
+
+const DEFAULT_ROLES_VIEW = {
+  councils: [
+    {
+      key: "material",
+      label: "Material",
+      description: "Builds and checks course material.",
+      allow_custom: true,
+      roles: [
+        defaultRole("creator", "Creator", "creator", "Draft the material.", 0),
+        defaultRole("curriculum", "Curriculum", "llm", "Check the curriculum.", 1),
+        defaultRole("evidence", "Evidence", "llm", "Quote the material.", 2),
+        defaultRole("design", "Design", "llm", "Check the design.", 3),
+        defaultRole("chair", "Chair", "chair", "Decide.", 4),
+      ],
+    },
+    {
+      key: "assignment",
+      label: "Assignment",
+      description: "Builds and reviews assignments.",
+      allow_custom: true,
+      roles: [
+        defaultRole("creator", "Creator", "creator", "Draft the assignment.", 0),
+        defaultRole("alignment", "Alignment", "llm", "Check alignment.", 1),
+        defaultRole("brief", "Brief", "llm", "Check the brief.", 2),
+        defaultRole("rubric", "Rubric", "llm", "Check the rubric.", 3),
+        defaultRole("chair", "Chair", "chair", "Decide.", 4),
+      ],
+    },
+    {
+      key: "outline",
+      label: "Outline",
+      description: "Builds and reviews subject outlines.",
+      allow_custom: true,
+      roles: [
+        defaultRole("creator", "Creator", "creator", "Draft the outline.", 0),
+        defaultRole("curriculum", "Curriculum", "llm", "Check the curriculum.", 1),
+        defaultRole("alignment", "Alignment", "llm", "Check alignment.", 2),
+        defaultRole("balance", "Balance", "llm", "Check balance.", 3),
+        defaultRole("student", "Student", "llm", "Check student load.", 4),
+        defaultRole("chair", "Chair", "chair", "Decide.", 5),
+      ],
+    },
+  ],
+};
+
+const LEGACY_VIEW = {
+  councils: [
+    {
+      key: "material",
+      label: "Material",
+      description: "A saved council from before LLM-only defaults.",
+      allow_custom: true,
+      roles: [
+        {
+          role_key: "curriculum",
+          label: "Curriculum",
+          kind: "deterministic",
+          persona_prompt: "",
+          agent_key: "curriculum",
+          model: "",
+          position: 1,
+          enabled: true,
+          custom: false,
+          config: {},
+        },
+        {
+          role_key: "chair",
+          label: "Chair",
+          kind: "chair",
+          persona_prompt: "Decide.",
+          agent_key: "chair",
+          model: "gemini/gemini-3.5-flash-lite",
+          position: 2,
+          enabled: true,
+          custom: false,
+          config: {},
+        },
+      ],
+    },
+  ],
+};
+
 function inspector() {
   return screen.getByTestId("role-inspector");
 }
@@ -142,6 +246,20 @@ beforeEach(() => {
 });
 
 describe("councils admin page", () => {
+  it("describes every reviewer as an LLM agent, with no default code check", async () => {
+    pa.mockResolvedValue(VIEW);
+    render(<CouncilsAdminPage />);
+
+    expect(
+      await screen.findByText(
+        /Every reviewer is an LLM agent with its own prompt and model\. The Chair reconciles\. Global prompts live in Langfuse; council prompts live here, per university\./,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Code check reviewers run deterministic backend rules/),
+    ).not.toBeInTheDocument();
+  });
+
   it("loads every council and saves a reordered, disabled role payload", async () => {
     pa.mockResolvedValue(VIEW);
     render(<CouncilsAdminPage />);
@@ -200,12 +318,56 @@ describe("councils admin page", () => {
 
     expect(screen.getByTestId("flow-node-curriculum")).toHaveAttribute("data-enabled", "false");
     expect(screen.getByTestId("flow-node-curriculum").className).toContain("line-through");
-    expect(within(inspector()).getAllByText("Code check").length).toBeGreaterThan(0);
+    expect(within(inspector()).getByLabelText("Model for Curriculum")).toHaveValue(
+      "gemini/gemini-3.5-flash-lite",
+    );
+    expect(within(inspector()).getByLabelText("Persona prompt for Curriculum")).toHaveValue(
+      "Check the curriculum.",
+    );
+    expect(within(inspector()).queryByText("Legacy code check")).not.toBeInTheDocument();
+  });
+
+  it("shows a model and persona prompt for every default role", async () => {
+    pa.mockResolvedValue(DEFAULT_ROLES_VIEW);
+    render(<CouncilsAdminPage />);
+
+    await screen.findByRole("heading", { name: "Creator" });
+
+    const councils = [
+      ["Material", "Material", ["Creator", "Curriculum", "Evidence", "Design", "Chair"]],
+      ["Assignment", "Assignment", ["Creator", "Alignment", "Brief", "Rubric", "Chair"]],
+      ["Outline", "Outline", ["Creator", "Curriculum", "Alignment", "Balance", "Student", "Chair"]],
+    ] as const;
+
+    for (const [tab, flow, names] of councils) {
+      await selectTab(tab);
+      const rail = await screen.findByRole("group", { name: `${flow} flow` });
+      for (const name of names) {
+        fireEvent.click(within(rail).getByRole("button", { name }));
+        expect(within(inspector()).getByLabelText(`Model for ${name}`)).toBeInTheDocument();
+        expect(
+          within(inspector()).getByLabelText(`Persona prompt for ${name}`),
+        ).toBeInTheDocument();
+        expect(within(inspector()).queryByText("Legacy code check")).not.toBeInTheDocument();
+        expect(within(inspector()).queryByText(/Code check/)).not.toBeInTheDocument();
+      }
+    }
+  });
+
+  it("shows a legacy fallback only for a saved deterministic role", async () => {
+    pa.mockResolvedValue(LEGACY_VIEW);
+    render(<CouncilsAdminPage />);
+
+    const notice = await screen.findByTestId("legacy-code-check");
+    expect(within(notice).getByText("Legacy code check")).toBeInTheDocument();
     expect(
-      within(inspector()).getByText(/This reviewer runs deterministic backend rules/),
+      within(notice).getByText(
+        /This saved role predates LLM-only councils; reset to defaults to replace it\./,
+      ),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Persona prompt for Curriculum")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Model for Curriculum")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Persona prompt for Curriculum")).not.toBeInTheDocument();
+    expect(within(inspector()).queryByText("Code check")).not.toBeInTheDocument();
   });
 
   it("selects a node and highlights the inspector", async () => {

@@ -8,7 +8,13 @@ from typing import Any, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.profassist import llm
-from app.profassist.council_config import chair_of, default_roles, enabled_keys, message_roles
+from app.profassist.council_config import (
+    chair_of,
+    default_roles,
+    enabled_keys,
+    message_roles,
+    role_of,
+)
 from app.profassist.errors import ProfassistError
 from app.profassist.grading import needs_debate, reconcile
 from app.profassist.observe import invoke_graph
@@ -911,12 +917,12 @@ def _role_issue(raw: Any, role_key: str) -> dict[str, Any] | None:
 def _custom_role_findings(
     roles: list[dict[str, Any]], payload: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Run an admin-added llm reviewer. A failure simply adds no finding."""
+    """Run every enabled llm reviewer with a prompt. A failure adds no finding."""
     findings: list[dict[str, Any]] = []
     for role in roles:
         if not isinstance(role, dict):
             continue
-        if role.get("kind") != "llm" or not role.get("custom") or not role.get("enabled"):
+        if role.get("kind") != "llm" or not role.get("enabled"):
             continue
         role_key = str(role.get("role_key") or "").strip()
         prompt = str(role.get("persona_prompt") or "").strip()
@@ -964,7 +970,8 @@ def _check_slide_deck(state: SlideReviewState) -> SlideReviewState:
     roles = _material_roles(state.get("council_roles"))
     deck = state.get("deck") or {}
     checks = slide_checks(deck, state.get("outline") or {}, state.get("chunks") or [])
-    gaps = _deck_gaps(deck) if "evidence" in enabled_keys(roles, "deterministic") else []
+    evidence = role_of(roles, "evidence")
+    gaps = _deck_gaps(deck) if evidence and evidence.get("enabled") else []
     return {
         "checks": _deterministic_findings(checks, roles),
         "gaps": gaps,
@@ -973,7 +980,7 @@ def _check_slide_deck(state: SlideReviewState) -> SlideReviewState:
 
 
 def _review_slide_deck(state: SlideReviewState) -> SlideReviewState:
-    """Ask the custom reviewers and the chair. A failure leaves the checks standing."""
+    """Ask the enabled llm reviewers and the chair. A failure leaves the checks standing."""
     roles = _material_roles(state.get("council_roles"))
     payload = {
         "deck": state.get("deck") or {},
@@ -996,7 +1003,7 @@ def _review_slide_deck(state: SlideReviewState) -> SlideReviewState:
 
 
 def _merge_slide_review(state: SlideReviewState) -> SlideReviewState:
-    """Deterministic findings first, then custom reviewers, then the chair's view."""
+    """Deterministic findings first, then llm reviewers, then the chair's view."""
     drafted = state.get("drafted") or {}
     roles = _material_roles(state.get("council_roles"))
     role_keys = message_roles(roles)

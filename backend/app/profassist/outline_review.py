@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.profassist.council_config import chair_of, enabled_keys, load_council_roles
+from app.profassist.council_config import chair_of, load_council_roles
 from app.profassist.errors import ProfassistError
 from app.profassist.models import OutlineReview
 from app.profassist.outline import get_outline
@@ -257,19 +257,16 @@ def apply_fix(body: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
 
 
 def _custom_reviewers(roles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Admin-added model reviewers, in speaking order."""
+    """Every enabled model reviewer, seeded or custom, in speaking order."""
     return [
         role
         for role in roles
-        if isinstance(role, dict)
-        and role.get("kind") == "llm"
-        and role.get("custom")
-        and role.get("enabled")
+        if isinstance(role, dict) and role.get("kind") == "llm" and role.get("enabled")
     ]
 
 
 def _custom_finding(raw: Any, role_key: str) -> dict[str, Any] | None:
-    """One model finding in the same shape as a deterministic finding."""
+    """One model finding in the same shape as a built-in finding."""
     if not isinstance(raw, dict):
         return None
     message = str(raw.get("issue") or raw.get("message") or "").strip()
@@ -301,7 +298,7 @@ def _custom_finding(raw: Any, role_key: str) -> dict[str, Any] | None:
 
 
 def _custom_findings(row: Any, roles: list[dict[str, Any]], complete: Any) -> list[dict[str, Any]]:
-    """Ask each enabled custom reviewer. A failure simply adds no finding."""
+    """Ask each enabled model reviewer. A failure simply adds no finding."""
     found: list[dict[str, Any]] = []
     for role in _custom_reviewers(roles):
         role_key = str(role.get("role_key") or "").strip()
@@ -350,12 +347,23 @@ async def run_review(
     row = await get_outline(db, org_id, user_id, outline_id)
     await load_runtime(db, org_id, user_id)
     roles = await load_council_roles(db, org_id, "outline")
-    enabled = [name for name in enabled_keys(roles, "deterministic") if name in REVIEWERS]
-    chosen = [reviewer] if mode == "single" else list(enabled)
-    chosen = [name for name in chosen if name in enabled]
-    chosen = [name for name in chosen if tool_enabled("outline_review", name)]
-    custom_roles = _custom_reviewers(roles)
-    if not chosen and not custom_roles:
+    reviewers = [
+        role
+        for role in roles
+        if isinstance(role, dict)
+        and role.get("enabled")
+        and role.get("kind") in {"deterministic", "llm"}
+        and str(role.get("role_key") or "").strip()
+    ]
+    chosen = [role for role in reviewers if mode != "single" or role["role_key"] == reviewer]
+    chosen = [role for role in chosen if tool_enabled("outline_review", str(role["role_key"]))]
+    deterministic = {
+        str(role["role_key"])
+        for role in chosen
+        if role.get("kind") == "deterministic" and role["role_key"] in REVIEWERS
+    }
+    llm_roles = [role for role in chosen if role.get("kind") == "llm"]
+    if not deterministic and not llm_roles:
         raise ProfassistError(
             400,
             "No outline reviewer is enabled. Turn one on in the council settings, then review.",
@@ -363,9 +371,9 @@ async def run_review(
     findings = [
         item
         for item in review_outline(row.body or {}, row.instructions or "")
-        if item["reviewer"] in chosen
+        if item["reviewer"] in deterministic
     ]
-    findings.extend(_custom_findings(row, custom_roles, complete))
+    findings.extend(_custom_findings(row, llm_roles, complete))
     debate = []
     if mode == "council" and tool_enabled("outline_review", "debate") and findings:
         debate.append(

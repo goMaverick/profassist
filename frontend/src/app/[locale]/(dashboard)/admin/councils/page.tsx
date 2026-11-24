@@ -7,7 +7,6 @@ import {
   ArrowUp,
   Bot,
   Gavel,
-  Info,
   Plus,
   ShieldCheck,
   Sparkles,
@@ -38,7 +37,7 @@ const FIRST_COUNCIL = "material";
 
 const ROLE_KIND_LABELS: Record<CouncilRole["kind"], string> = {
   creator: "Creator",
-  deterministic: "Code check",
+  deterministic: "Legacy code check",
   llm: "LLM",
   chair: "Chair",
 };
@@ -336,19 +335,9 @@ export default function CouncilsAdminPage() {
             <p className="text-sm font-medium">
               One builder for every AI loop: outline, material, assignment.
             </p>
-            <p className="text-muted-foreground text-sm">
-              Global prompts live in Langfuse. Council agent prompts live here, per university.
-            </p>
-            <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                <span className="text-foreground font-medium">Code check</span> reviewers run
-                deterministic backend rules with no prompt and no model call.{" "}
-                <span className="text-foreground font-medium">Creator</span>,{" "}
-                <span className="text-foreground font-medium">LLM</span> and{" "}
-                <span className="text-foreground font-medium">Chair</span> roles make model calls
-                and use the prompt in the inspector.
-              </span>
+            <p className="text-muted-foreground max-w-3xl text-sm">
+              Every reviewer is an LLM agent with its own prompt and model. The Chair reconciles.
+              Global prompts live in Langfuse; council prompts live here, per university.
             </p>
           </div>
           <TabsList className="h-auto flex-wrap justify-start">
@@ -661,14 +650,17 @@ export default function CouncilsAdminPage() {
                           </div>
 
                           {deterministic ? (
-                            <div className="bg-muted/40 rounded-md border border-dashed p-3">
+                            <div
+                              data-testid="legacy-code-check"
+                              className="bg-muted/40 rounded-md border border-dashed p-3"
+                            >
                               <p className="flex items-center gap-1.5 text-sm font-medium">
                                 <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                                Code check
+                                Legacy code check
                               </p>
                               <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-                                This reviewer runs deterministic backend rules. It has no prompt and
-                                makes no model call. Disable it to skip its check.
+                                This saved role predates LLM-only councils; reset to defaults to
+                                replace it.
                               </p>
                             </div>
                           ) : (
