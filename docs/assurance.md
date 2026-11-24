@@ -47,14 +47,14 @@ Real in this run:
 
 - The professor signs in and the outline, assignment, groups, and submissions are stored in Postgres.
 - PDF and DOCX files are built on this machine and opened in the viewer.
-- Council review, ideas, and exemplars come from the offline drafter and are saved.
+- Council review, ideas, and exemplars come from the configured model and are saved.
 - The grade push goes through the same Moodle door as a live push.
 
 Faked or synthetic, on purpose:
 
 - **Moodle is in fake mode.** `MOODLE_MODE=fake`. Sync and push are recorded here. Nothing is sent to a university Moodle. The screen says so.
 - **The class list is synthetic.** Eight names (Sara Al Maktoum, Omar Haddad, and the others) are demo students, not a real roster.
-- **The drafter is deterministic.** No model API key is set, so suggestions, ideas, exemplars, and the grade bands come from the built-in demo drafter, not a live model.
+- **The drafter needs a model.** There is no built-in fallback: without a model key, suggestions, ideas, exemplars, and grade bands stop with an explicit error.
 - **At-risk scores are synthetic.** The page is labelled "Synthetic, demo only". It does not change a mark.
 - **Home charts** that say "Synthetic term, demo only" are illustrations, not this course's grades.
 - **Integrity sentences** for the new assignment are a fixed pair of shared lines so the document view has something real to highlight. They are not a plagiarism engine.

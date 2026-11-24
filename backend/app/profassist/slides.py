@@ -49,7 +49,7 @@ def _bullet_text(bullet: Any) -> str:
 
 
 def _notes(slide: dict, fallback: str) -> str:
-    notes = slide.get("notes") or fallback
+    notes = slide.get("speaker_notes") or slide.get("notes") or fallback
     citations = slide.get("citations") or []
     if citations:
         notes = f"{notes}\nSources: {', '.join(citations)}"

@@ -2,8 +2,9 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckmarkFilled, Flag, Incomplete, Send } from "@carbon/icons-react";
+import { CheckCircle2, CircleDashed, Flag, Send } from "lucide-react";
 import { pa } from "@/lib/profassist";
+import { HomeBriefing } from "@/components/profassist/home-briefing";
 import { HomeChat } from "@/components/profassist/home-chat";
 
 interface Home {
@@ -17,25 +18,14 @@ interface Home {
   principle: string;
 }
 
-const WEEK = [
-  { day: "Mon", views: 18 },
-  { day: "Tue", views: 26 },
-  { day: "Wed", views: 22 },
-  { day: "Thu", views: 31 },
-  { day: "Fri", views: 14 },
-];
-const GRADE_SLICES = [
-  { name: "Draft", value: 6, color: "#0f62fe" },
-  { name: "Approved", value: 3, color: "#78a9ff" },
-  { name: "Pushed", value: 2, color: "#a6c8ff" },
-];
-
 export default function HomePage() {
   const [home, setHome] = useState<Home | null>(null);
   const [tasks, setTasks] = useState<Array<{ name: string; due?: string; number?: string }>>([]);
   const [error, setError] = useState("");
   const [courseId, setCourseId] = useState("");
-  const [board, setBoard] = useState<Array<{ course: string; slug: string; status: string; flagged_pairs: number }>>([]);
+  const [board, setBoard] = useState<
+    Array<{ course: string; slug: string; status: string; flagged_pairs: number }>
+  >([]);
 
   useEffect(() => {
     pa<Home>("/home")
@@ -43,11 +33,17 @@ export default function HomePage() {
         setHome(data);
         setCourseId(data.courses[0]?.id || "");
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load home"));
-    pa<{ items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }> }>("/outlines")
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not load home"),
+      );
+    pa<{
+      items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }>;
+    }>("/outlines")
       .then((data) => setTasks(data.items[0]?.body?.tasks || []))
       .catch(() => setTasks([]));
-    pa<{ items: Array<{ course: string; slug: string; status: string; flagged_pairs: number }> }>("/integrity/overview?course=all")
+    pa<{ items: Array<{ course: string; slug: string; status: string; flagged_pairs: number }> }>(
+      "/integrity/overview?course=all",
+    )
       .then((data) => setBoard(data.items || []))
       .catch(() => setBoard([]));
   }, []);
@@ -58,16 +54,27 @@ export default function HomePage() {
   const flagged = board.filter((item) => item.status !== "Clear");
   const cases = flagged.reduce((sum, item) => sum + (item.flagged_pairs || 0), 0);
   const selected = compact(course?.code);
-  const inThisCourse = flagged.some((item) => compact(item.slug) === selected || compact(item.course) === selected);
-  const copyingLabel = cases === 0
-    ? "No copying cases"
-    : inThisCourse
-      ? `${cases} possible copying case${cases === 1 ? "" : "s"}`
-      : `${cases} copying cases in other courses`;
+  const inThisCourse = flagged.some(
+    (item) => compact(item.slug) === selected || compact(item.course) === selected,
+  );
+  const copyingLabel =
+    cases === 0
+      ? "No copying cases"
+      : inThisCourse
+        ? `${cases} possible copying case${cases === 1 ? "" : "s"}`
+        : `${cases} copying cases in other courses`;
+
+  const progress = [
+    { name: "Draft", value: home?.drafts || 0, color: "#0f62fe" },
+    { name: "Approved", value: home?.approved || 0, color: "#78a9ff" },
+    { name: "Pushed", value: home?.pushed || 0, color: "#a6c8ff" },
+  ];
+  const hasProgress = progress.some((item) => item.value > 0);
 
   if (!home && !error) {
     return (
       <div className="pa-dash" aria-busy="true">
+        <h1 className="sr-only">Home</h1>
         <div className="pa-skel" />
         <div className="pa-kpi-row">
           <div className="pa-skel" />
@@ -81,48 +88,84 @@ export default function HomePage() {
 
   return (
     <div className="pa-dash">
+      <h1 className="sr-only">Home</h1>
       {error && <p role="alert">{error}</p>}
+      <HomeBriefing />
       <HomeChat courses={home?.courses || []} courseId={course?.id} onCourse={setCourseId} />
       <section>
         <h2 style={{ margin: "0 0 8px", fontSize: "1.25rem", fontWeight: 400 }}>To do</h2>
         <div className="pa-todo">
-          <Link href="/grade"><span>{waiting} grade{waiting === 1 ? "" : "s"} waiting for approval</span><strong>Review</strong></Link>
-          <Link href="/integrity"><span>{copyingLabel}</span><strong>Look</strong></Link>
-          <Link href="/outline"><span>Outline {course?.code || "MAAI 903"} needs learning outcomes</span><strong>Continue</strong></Link>
+          <Link href="/grade">
+            <span>
+              {waiting} grade{waiting === 1 ? "" : "s"} waiting for approval
+            </span>
+            <strong>Review</strong>
+          </Link>
+          <Link href="/integrity">
+            <span>{copyingLabel}</span>
+            <strong>Look</strong>
+          </Link>
+          <Link href="/outline">
+            <span>
+              {course?.code
+                ? `Outline ${course.code} needs learning outcomes`
+                : "Continue your course outline"}
+            </span>
+            <strong>Continue</strong>
+          </Link>
         </div>
       </section>
       <div className="pa-kpi-row">
-        <Stat icon={<Incomplete size={16} />} label="Submissions" value={home?.submissions || 0} delta="in the queue" />
-        <Stat icon={<CheckmarkFilled size={16} />} label="Awaiting you" value={waiting} delta="drafts not approved" />
-        <Stat icon={<Flag size={16} />} label="Open flags" value={cases} delta="for you to look at" />
-        <Stat icon={<Send size={16} />} label="Pushed" value={home?.pushed || 0} delta="saved on this computer" />
+        <Stat
+          icon={<CircleDashed className="h-4 w-4" />}
+          label="Submissions"
+          value={home?.submissions || 0}
+          delta="in the queue"
+        />
+        <Stat
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          label="Awaiting you"
+          value={waiting}
+          delta="drafts not approved"
+        />
+        <Stat
+          icon={<Flag className="h-4 w-4" />}
+          label="Open flags"
+          value={cases}
+          delta="for you to look at"
+        />
+        <Stat
+          icon={<Send className="h-4 w-4" />}
+          label="Pushed"
+          value={home?.pushed || 0}
+          delta="marked pushed"
+        />
       </div>
       <div className="pa-chart-row">
         <section className="pa-panel">
           <h2>Grading progress</h2>
-          <p style={{ margin: "-8px 0 12px", color: "#6f6f6f", fontSize: "0.75rem" }}>Synthetic term, demo only.</p>
-          <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
-            <Donut slices={GRADE_SLICES} />
-            <ul className="pa-list" style={{ flex: 1 }}>
-              {GRADE_SLICES.map((item) => (
-                <li key={item.name}>
-                  <span>{item.name}</span>
-                  <strong style={{ color: item.color }}>{item.value}</strong>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {hasProgress ? (
+            <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+              <Donut slices={progress} />
+              <ul className="pa-list" style={{ flex: 1 }}>
+                {progress.map((item) => (
+                  <li key={item.name}>
+                    <span>{item.name}</span>
+                    <strong style={{ color: item.color }}>{item.value}</strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="pa-empty">
+              <span>No grade data yet.</span>
+            </div>
+          )}
         </section>
         <section className="pa-panel">
           <h2>Weekly activity</h2>
-          <p style={{ margin: "-8px 0 8px", color: "#6f6f6f", fontSize: "0.75rem" }}>Synthetic week, demo only.</p>
-          <div className="pa-bars" aria-label="Views by weekday">
-            {WEEK.map((item) => (
-              <div key={item.day}>
-                <div style={{ height: `${item.views * 4}px` }} />
-                <span>{item.day}</span>
-              </div>
-            ))}
+          <div className="pa-empty">
+            <span>No activity data yet.</span>
           </div>
         </section>
       </div>
@@ -131,13 +174,15 @@ export default function HomePage() {
           <h2>Needs your approval</h2>
           {waiting === 0 ? (
             <div className="pa-empty">
-              <CheckmarkFilled size={20} />
+              <CheckCircle2 className="h-5 w-5" />
               <span>Nothing is waiting. Drafts stay drafts until you approve them.</span>
             </div>
           ) : (
             <ul className="pa-list">
               <li>
-                <span>{waiting} grade draft{waiting === 1 ? "" : "s"}</span>
+                <span>
+                  {waiting} grade draft{waiting === 1 ? "" : "s"}
+                </span>
                 <Link href="/grade">Review</Link>
               </li>
             </ul>
@@ -179,7 +224,13 @@ function Donut({ slices }: { slices: Array<{ name: string; value: number; color:
     return arc;
   });
   return (
-    <svg width="148" height="148" viewBox="0 0 148 148" role="img" aria-label={slices.map((item) => `${item.name} ${item.value}`).join(", ")}>
+    <svg
+      width="148"
+      height="148"
+      viewBox="0 0 148 148"
+      role="img"
+      aria-label={slices.map((item) => `${item.name} ${item.value}`).join(", ")}
+    >
       {arcs.map((item) => (
         <circle
           key={item.name}

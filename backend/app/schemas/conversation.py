@@ -133,7 +133,6 @@ class ConversationUpdate(BaseSchema):
 
     title: str | None = Field(default=None, max_length=255)
     is_archived: bool | None = None
-    is_demo: bool | None = None
     active_knowledge_base_ids: list[UUID] | None = Field(
         default=None,
         description="null=no change, []=RAG disabled, [id,...]=explicit KB selection",
@@ -201,24 +200,4 @@ class ConversationAdminList(BaseSchema):
 
 class ConversationExport(BaseSchema):
     conversations: list[Any]
-    total: int
-
-
-class DemoConversationSummary(BaseSchema):
-    """Lightweight card for the public demo gallery."""
-
-    id: UUID
-    title: str | None = None
-    message_count: int = 0
-    preview: str | None = Field(
-        default=None, description="First user prompt, truncated to 200 chars"
-    )
-    created_at: datetime
-    updated_at: datetime | None = None
-
-
-class DemoConversationList(BaseSchema):
-    """Paginated list of public demo conversations."""
-
-    items: list[DemoConversationSummary]
     total: int

@@ -83,7 +83,7 @@ export default function GlobalError({
             </button>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
-              href="/"
+              href="/login"
               style={{
                 padding: "0.625rem 1rem",
                 fontSize: "0.875rem",
@@ -95,7 +95,7 @@ export default function GlobalError({
                 textDecoration: "none",
               }}
             >
-              Go home
+              Sign in
             </a>
           </div>
         </div>

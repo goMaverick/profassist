@@ -38,7 +38,7 @@ export default function Error({
           Go back
         </Button>
         <Button variant="outline" asChild>
-          <Link href={ROUTES.HOME}>Go home</Link>
+          <Link href={ROUTES.LOGIN}>Sign in</Link>
         </Button>
       </div>
     </div>

@@ -1,4 +1,4 @@
-"""Runtime settings that are safe to leave empty in the demo."""
+"""Runtime settings read from the environment."""
 
 import os
 
@@ -38,10 +38,24 @@ def moodle_push_enabled() -> bool:
 
 
 def moodle_mode() -> str:
-    mode = (_flag("MOODLE_MODE") or "fake").lower()
-    if mode not in {"fake", "real"}:
-        return "fake"
-    return mode
+    """``real`` unless MOODLE_MODE is explicitly ``fake`` (automated tests only)."""
+    mode = (_flag("MOODLE_MODE") or "real").lower()
+    return "fake" if mode == "fake" else "real"
+
+
+def moodle_allow_private() -> bool:
+    """Allow a local Moodle in development. Never on in production."""
+    return _flag("MOODLE_ALLOW_PRIVATE").lower() in {"1", "true", "yes", "on"}
+
+
+def moodle_base_url() -> str:
+    """Environment fallback used only when an org has no connection row."""
+    return _flag("MOODLE_BASE_URL").rstrip("/")
+
+
+def moodle_ws_token() -> str:
+    """Environment fallback used only when an org has no connection row."""
+    return _flag("MOODLE_WS_TOKEN")
 
 
 def langfuse_enabled() -> bool:
@@ -51,15 +65,3 @@ def langfuse_enabled() -> bool:
         "no",
         "off",
     }
-
-
-def demo_email() -> str:
-    return _flag("DEMO_PROFESSOR_EMAIL") or "professor@demo.uowd.ac.ae"
-
-
-def demo_password() -> str:
-    return _flag("DEMO_PROFESSOR_PASSWORD") or "ProfAssist-demo-1"
-
-
-def auto_seed() -> bool:
-    return _flag("PROFASSIST_AUTO_SEED").lower() in {"1", "true", "yes"}

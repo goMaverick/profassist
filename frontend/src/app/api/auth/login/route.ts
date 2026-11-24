@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setAuthCookies } from "@/lib/auth-cookies";
 import { backendFetch, BackendApiError } from "@/lib/server-api";
+import { normalizeErrorMessage } from "@/lib/error-message";
 import type { LoginResponse } from "@/types";
 
 export async function POST(request: NextRequest) {
@@ -40,8 +41,18 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     if (error instanceof BackendApiError) {
-      const detail = (error.data as { detail?: string })?.detail || "Login failed";
-      return NextResponse.json({ detail }, { status: error.status });
+      const normalized = normalizeErrorMessage(error.data, error.status);
+      const detail =
+        error.status === 401 && normalized === `Request failed (${error.status})`
+          ? "Invalid email or password"
+          : normalized;
+
+      // Preserve the rate-limit countdown for the client.
+      const headers: Record<string, string> = {};
+      const retryAfter = error.headers?.get("Retry-After");
+      if (retryAfter) headers["Retry-After"] = retryAfter;
+
+      return NextResponse.json({ detail }, { status: error.status, headers });
     }
     return NextResponse.json({ detail: "Internal server error" }, { status: 500 });
   }

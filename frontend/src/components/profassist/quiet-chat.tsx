@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Checkmark } from "@carbon/icons-react";
+import { Check } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 
 interface CaseRow {
@@ -65,7 +65,8 @@ function badgeClass(percent: number) {
 function spokenCode(code: string) {
   const compact = code.replace(/[^A-Za-z0-9]/g, "");
   const match = compact.match(/^([A-Za-z]+)(\d+)$/);
-  return match ? `${match[1].toUpperCase()} ${match[2]}` : code;
+  if (!match) return code;
+  return `${(match[1] ?? "").toUpperCase()} ${match[2] ?? ""}`;
 }
 
 export function IntegrityAnswer({ output }: { output: unknown }) {
@@ -175,7 +176,7 @@ export function QuietTool({ name, output }: { name: string; output: unknown }) {
   return (
     <div className="pa-quiet-tool">
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <Checkmark size={16} />
+        <Check className="size-4" />
         <span>
           {toolLabel(name)} · details
         </span>

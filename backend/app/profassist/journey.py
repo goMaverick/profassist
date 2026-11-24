@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.profassist.config import moodle_mode
 from app.profassist.errors import ProfassistError
 from app.profassist.models import Course, GradeDraft, GroupAssignment, Student, Submission
 
@@ -159,6 +160,11 @@ async def form_class(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assignment_id: uuid.UUID
 ) -> dict[str, Any]:
     """Pair a synthetic class list into four groups and give each group an idea."""
+    if moodle_mode() != "fake":
+        raise ProfassistError(
+            400,
+            "The synthetic class list is demo scaffolding. Set MOODLE_MODE=fake to use it.",
+        )
     from app.profassist.groupwork import allocate, assignment_view, save_groups
 
     row = await _assignment(db, org_id, user_id, assignment_id)
@@ -173,7 +179,7 @@ async def form_class(
         }
         for letter, members in PAIRS
     ]
-    await save_groups(db, org_id, user_id, course.id, groups)
+    await save_groups(db, org_id, user_id, course.id, groups, assignment_id=assignment_id)
     view = await assignment_view(db, org_id, user_id, assignment_id)
     if view["ideas"]:
         view = await allocate(db, org_id, user_id, assignment_id)
@@ -326,7 +332,7 @@ async def _find_course(db: AsyncSession, org_id: uuid.UUID, course_code: str) ->
 async def send_grade(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, course_code: str, group: str
 ) -> dict[str, Any]:
-    """Approve the draft if needed, push it through the fake connector, mark complete."""
+    """Approve the draft if needed, push it, and complete assignments only on a real push."""
     from app.profassist.service import approve_draft, push_draft
 
     course = await _find_course(db, org_id, course_code)
@@ -367,27 +373,38 @@ async def send_grade(
         pushed = await push_draft(db, org_id, user_id, draft.id)
         receipt = pushed.get("receipt") or {}
     elif draft.status == "pushed":
+        mode = moodle_mode()
         receipt = {
-            "mode": "fake",
-            "moodle_response": "Already recorded. Moodle was not contacted.",
+            "mode": mode,
+            "moodle_response": (
+                "Already recorded. Moodle was not contacted."
+                if mode == "fake"
+                else "Already accepted by Moodle."
+            ),
         }
-    assignments = (
-        await db.execute(
-            select(GroupAssignment).where(
-                GroupAssignment.organization_id == org_id,
-                GroupAssignment.owner_user_id == user_id,
-                GroupAssignment.course_id == course.id,
+    mode = receipt.get("mode") or moodle_mode()
+    real_push = mode == "real" and draft.status == "pushed"
+    if real_push:
+        assignments = (
+            await db.execute(
+                select(GroupAssignment).where(
+                    GroupAssignment.organization_id == org_id,
+                    GroupAssignment.owner_user_id == user_id,
+                    GroupAssignment.course_id == course.id,
+                )
             )
-        )
-    ).scalars()
-    for item in assignments:
-        item.status = "complete"
-    await db.flush()
+        ).scalars()
+        for item in assignments:
+            item.status = "complete"
+        await db.flush()
+    if real_push:
+        note = receipt.get("moodle_response") or "Accepted by Moodle."
+    else:
+        note = "Recorded in ProfAssist. Moodle was not contacted."
     return {
-        "message": "Sent to Moodle",
-        "note": receipt.get("moodle_response")
-        or "Recorded in ProfAssist. Moodle was not contacted.",
-        "mode": receipt.get("mode") or "fake",
-        "assignment_status": "complete",
+        "message": "Sent to Moodle" if real_push else "Recorded in ProfAssist",
+        "note": note,
+        "mode": mode,
+        "assignment_status": "complete" if real_push else "unchanged",
         "group": group,
     }

@@ -180,6 +180,8 @@ class TestUserServiceRegistrationWithOrg:
         db.add = MagicMock()
         db.flush = AsyncMock()
         db.refresh = AsyncMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
         return db
 
     @pytest.mark.anyio
@@ -198,3 +200,4 @@ class TestUserServiceRegistrationWithOrg:
             await svc.register(UserCreate(email="new@example.com", password="password123"))
 
         mock_create_org.assert_called_once()
+        mock_db.commit.assert_awaited_once()

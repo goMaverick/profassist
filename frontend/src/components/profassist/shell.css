@@ -1,26 +1,7 @@
-/* Carbon g10 surfaces, blue-60 accent, 8px spacing, Plex type scale. */
+/* Plex type scale. */
 
-.cds--g10,
-.cds--g100,
-.cds--header,
-.cds--side-nav,
-.cds--content,
-.cds--text-input,
-.cds--label,
-.cds--btn,
 .pa-content {
   font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
-}
-
-.cds--header {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 8000;
-  height: 3rem;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
 }
 
 .pa-sync-strip {
@@ -127,15 +108,10 @@
   background: #e8e8e8;
 }
 
-.cds--side-nav.cds--side-nav--expanded {
-  position: fixed;
-  top: 3rem;
-  bottom: 0;
-  left: 0;
-  z-index: 7000;
-  width: 16rem;
-  background: #fff;
-  border-right: 1px solid #e0e0e0;
+.pa-menu-error {
+  margin: 4px 16px 0;
+  color: #da1e28;
+  font-size: 0.75rem;
 }
 
 .pa-nav-label {
@@ -193,22 +169,26 @@ mark {
   font-weight: 600;
 }
 
-.cds--content.pa-content {
-  box-sizing: border-box;
-  min-height: 100vh;
-  font-size: 1rem;
-  margin-top: 3rem;
-  margin-left: 16rem;
-  width: calc(100vw - 16rem);
-  max-width: calc(100vw - 16rem);
-  padding: 24px;
-  overflow-x: clip;
-  background: #f4f4f4;
-}
-
 .pa-frame {
   width: min(1120px, 100%);
   margin: 0;
+}
+
+.pa-desktop-gate {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: #f4f4f4;
+  color: #161616;
+}
+
+.pa-desktop-gate p {
+  max-width: 28rem;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .pa-frame:has(.pa-wizard) {
@@ -422,11 +402,6 @@ mark {
   min-width: 0;
 }
 
-.pa-wizard .cds--tile {
-  width: 100%;
-  max-width: none;
-}
-
 .pa-step-head {
   display: flex;
   align-items: flex-start;
@@ -593,10 +568,6 @@ mark {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-}
-
-.cds--structured-list-row.is-current {
-  background: #edf5ff;
 }
 
 .pa-stepper {
@@ -855,7 +826,7 @@ mark {
 }
 
 .pa-grade-panel .pa-view-sub,
-.pa-doc-close.cds--btn {
+.pa-doc-close {
   display: none !important;
 }
 
@@ -885,10 +856,6 @@ mark {
   html,
   body {
     overflow-x: hidden;
-  }
-
-  .cds--header {
-    overflow: hidden;
   }
 
   .pa-brand img,
@@ -922,8 +889,7 @@ mark {
     font-size: 1rem;
   }
 
-  .pa-page-actions,
-  .pa-page-actions .cds--btn {
+  .pa-page-actions {
     width: 100%;
     max-width: 100%;
   }
@@ -936,16 +902,6 @@ mark {
   .pa-grade-panel .pa-view-sub {
     display: inline-flex !important;
     margin: 0 0 12px;
-  }
-
-  .cds--side-nav {
-    display: none !important;
-  }
-
-  .cds--content {
-    margin-inline-start: 0 !important;
-    width: 100% !important;
-    padding-left: 0;
   }
 
   .pa-doc-wrap {
@@ -962,7 +918,7 @@ mark {
     background: #fff;
   }
 
-  .pa-doc-wrap.is-open .pa-doc-close.cds--btn {
+  .pa-doc-wrap.is-open .pa-doc-close {
     display: inline-flex !important;
     margin-bottom: 8px;
   }
@@ -1323,10 +1279,7 @@ mark {
   background: #fff;
 }
 
-.pa-schedule input,
-.pa-fields .cds--text-input,
-.pa-fields .cds--text-area,
-.pa-fields .cds--form-item {
+.pa-schedule input {
   width: 100%;
   max-width: none;
 }
@@ -1370,34 +1323,6 @@ mark {
   font-size: 0.875rem;
 }
 
-.pa-drop .cds--file,
-.pa-drop .cds--file__drop-container {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  border: 0;
-  background: transparent;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 16px;
-}
-
-.pa-drop .cds--file-browse-btn {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 auto;
-  width: auto;
-  height: 32px;
-  margin-bottom: 8px;
-  padding: 0 16px;
-  border: 1px solid #0f62fe;
-  background: #fff;
-  color: #0f62fe;
-}
-
 .pa-file-list {
   list-style: none;
   margin: 0;
@@ -1431,10 +1356,6 @@ mark {
   white-space: nowrap;
 }
 
-.pa-file-row .cds--progress-bar {
-  width: 120px;
-}
-
 .pa-file-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1446,7 +1367,7 @@ mark {
   gap: 8px;
 }
 
-.pa-instruct .cds--text-area {
+.pa-instruct textarea {
   min-height: 96px;
 }
 
@@ -1987,9 +1908,9 @@ mark {
 
 .pa-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
+  overflow-x: visible;
   padding-bottom: 8px;
 }
 
@@ -2116,11 +2037,6 @@ mark {
 }
 
 @media (max-width: 66rem) {
-  .cds--content.pa-content {
-    margin-left: 0;
-    width: 100vw;
-    max-width: 100vw;
-  }
   .pa-kpi-row,
   .pa-chart-row,
   .pa-split,
@@ -2134,5 +2050,888 @@ mark {
 @media (prefers-reduced-motion: reduce) {
   .pa-skel {
     animation: none;
+  }
+}
+
+/* Subject outline: one conversation, then one document. */
+.pa-frame:has(.pa-outline-chat),
+.pa-frame:has(.pa-outline-doc) {
+  width: 100%;
+  max-width: none;
+}
+
+.pa-outline-chat {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 900px;
+  min-height: calc(100vh - 3rem - 120px);
+  margin: 0 auto;
+}
+
+.pa-outline-thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 8px 0 32px;
+}
+
+.pa-outline-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 86%;
+}
+
+.pa-outline-msg.is-ai {
+  align-self: flex-start;
+}
+
+.pa-outline-msg.is-professor {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.pa-outline-meta {
+  margin: 0;
+  color: #525252;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-body {
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  color: #161616;
+  font-size: 1rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.pa-outline-msg.is-professor .pa-outline-body {
+  background: #edf5ff;
+  border-color: #a6c8ff;
+}
+
+.pa-outline-msg.is-system {
+  align-self: center;
+  max-width: 100%;
+}
+
+.pa-outline-msg.is-system .pa-outline-body {
+  padding: 4px 12px;
+  color: #525252;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-typing {
+  margin: 0;
+  color: #525252;
+  font-size: 0.875rem;
+}
+
+.pa-outline-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 12px 0 24px;
+  background: #f4f4f4;
+  border-top: 1px solid #e0e0e0;
+}
+
+.pa-outline-error {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  background: #fff1f1;
+  border-left: 3px solid #da1e28;
+  color: #a2191f;
+  font-size: 0.875rem;
+}
+
+.pa-outline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pa-outline-chip {
+  padding: 2px 8px;
+  background: #e8f0ff;
+  border: 1px solid #a6c8ff;
+  color: #0043ce;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-notes {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pa-outline-chip-state {
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.32px;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.pa-outline-chip.is-processing {
+  background: #f4f4f4;
+  border-color: #c6c6c6;
+  color: #525252;
+}
+
+.pa-outline-chip.is-quarantined,
+.pa-outline-chip.is-error {
+  background: #fff1f1;
+  border-color: #da1e28;
+  color: #a2191f;
+}
+
+.pa-outline-chip.is-focus {
+  background: #e8f0ff;
+  border-color: #0043ce;
+  color: #002d9c;
+}
+
+.pa-outline-warn {
+  margin: 0 0 6px;
+  color: #a2191f;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.pa-doc-sources {
+  margin: 8px 0 0;
+  color: #525252;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.pa-outline-progress {
+  margin: 0 0 8px;
+  color: #525252;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-input {
+  background: #fff;
+  border: 1px solid #8d8d8d;
+}
+
+.pa-outline-input textarea {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  color: #161616;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.pa-outline-input textarea:focus {
+  outline: 2px solid #0f62fe;
+  outline-offset: -2px;
+}
+
+.pa-outline-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.pa-outline-hint {
+  flex: 1;
+  color: #6f6f6f;
+  font-size: 0.75rem;
+}
+
+.pa-outline-file {
+  display: none;
+}
+
+.pa-outline-start {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 3rem - 160px);
+  padding: 24px;
+}
+
+.pa-outline-card {
+  display: grid;
+  gap: 12px;
+  width: min(520px, 100%);
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  text-align: left;
+}
+
+.pa-outline-card h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+}
+
+.pa-outline-card p {
+  margin: 0;
+  color: #525252;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.pa-outline-doc {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding-bottom: 64px;
+}
+
+.pa-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pa-doc-page {
+  padding: 56px 64px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  color: #161616;
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* The artifact Card is the page; the inner document only supplies typography. */
+.pa-doc-page.pa-doc-artifact {
+  padding: 48px 56px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pa-doc-head {
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.pa-doc-kicker {
+  margin: 0 0 4px;
+  color: #525252;
+  font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+  text-transform: uppercase;
+}
+
+.pa-doc-page h1 {
+  margin: 0 0 8px;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.pa-doc-meta {
+  margin: 0;
+  color: #525252;
+  font-size: 0.875rem;
+}
+
+.pa-doc-section {
+  margin-top: 32px;
+}
+
+.pa-doc-section h2 {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.pa-doc-section h3 {
+  margin: 20px 0 4px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.pa-doc-section p {
+  margin: 0 0 12px;
+}
+
+.pa-doc-outcomes {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.pa-doc-outcomes li {
+  margin: 6px 0;
+}
+
+.pa-doc-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.pa-doc-table th,
+.pa-doc-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e0e0e0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pa-doc-table th {
+  color: #525252;
+  font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.32px;
+  text-transform: uppercase;
+}
+
+.pa-doc-empty {
+  color: #6f6f6f;
+  font-style: italic;
+}
+
+.pa-doc-policy + .pa-doc-policy {
+  margin-top: 16px;
+}
+
+.pa-doc-edit {
+  font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.pa-doc-edit .pa-doc-section h2 {
+  font-size: 1rem;
+}
+
+.pa-doc-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.pa-doc-edit input,
+.pa-doc-edit textarea {
+  width: 100%;
+  max-width: none;
+}
+
+.pa-doc-edit .pa-doc-wide {
+  grid-column: 1 / -1;
+}
+
+.pa-doc-row-inputs {
+  display: grid;
+  gap: 12px;
+}
+
+.pa-doc-edit input.pa-doc-input,
+.pa-doc-edit textarea.pa-doc-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #8d8d8d;
+  background: #fff;
+  color: #161616;
+  font: inherit;
+}
+
+.pa-doc-edit input.pa-doc-input {
+  min-height: 34px;
+}
+
+.pa-doc-edit textarea.pa-doc-input {
+  min-height: 72px;
+  resize: vertical;
+}
+
+/* Subject outline document: the faculty Word template tables. */
+.pa-doc-table.is-keyval th[scope="row"] {
+  width: 34%;
+  color: #161616;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pa-doc-table.is-keyval th,
+.pa-doc-table.is-keyval td {
+  border-bottom: 1px solid #d8d8d8;
+}
+
+.pa-doc-table-scroll {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.pa-doc-table.is-matrix th,
+.pa-doc-table.is-matrix td {
+  border: 1px solid #d8d8d8;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pa-doc-table.is-matrix th:nth-child(2),
+.pa-doc-table.is-matrix td:nth-child(2) {
+  min-width: 18rem;
+  text-align: left;
+  white-space: normal;
+}
+
+.pa-doc-mark {
+  font-weight: 600;
+}
+
+.pa-doc-body-text {
+  white-space: pre-wrap;
+}
+
+.pa-doc-note {
+  color: #525252;
+  font-size: 0.9375rem;
+}
+
+.pa-doc-readings {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.pa-doc-readings li {
+  margin: 6px 0;
+}
+
+.pa-doc-row-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pa-doc-cell-tool {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.pa-doc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+
+.pa-doc-edit .pa-doc-table input.pa-doc-input {
+  min-height: 30px;
+}
+
+.pa-doc-edit .pa-doc-readings textarea.pa-doc-input {
+  width: 100%;
+  margin: 4px 0;
+}
+
+/* Sub-headings that also sit outside a .pa-doc-section (5.2 to 5.5). */
+.pa-doc-page .pa-doc-subhead {
+  margin: 24px 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* 5.2 assessment task detail and the four-band rubric table. */
+.pa-doc-task {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.pa-doc-task-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.pa-doc-task-head {
+  margin: 16px 0 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.16px;
+  text-transform: uppercase;
+}
+
+.pa-doc-table.is-rubric {
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.pa-doc-table.is-rubric th,
+.pa-doc-table.is-rubric td {
+  padding: 6px 8px;
+  border: 1px solid #d8d8d8;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pa-doc-table.is-rubric thead th {
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pa-doc-table.is-rubric th[scope="row"] {
+  width: 18%;
+  color: #161616;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pa-doc-table.is-rubric th:last-child,
+.pa-doc-table.is-rubric td:last-child {
+  width: 8%;
+  text-align: right;
+}
+
+@media print {
+  .pa-doc-actions,
+  .pa-outline-error {
+    display: none;
+  }
+
+  .pa-outline-doc {
+    max-width: none;
+    padding-bottom: 0;
+  }
+
+  .pa-doc-page {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .pa-doc-page.pa-doc-artifact {
+    padding: 0;
+  }
+
+  .pa-doc-table-scroll {
+    overflow: visible;
+  }
+}
+@media (max-width: 66rem) {
+  .pa-outline-msg {
+    max-width: 100%;
+  }
+
+  .pa-outline-chat {
+    min-height: calc(100vh - 3rem - 80px);
+  }
+
+  .pa-doc-page {
+    padding: 28px 20px;
+  }
+
+  .pa-doc-page.pa-doc-artifact {
+    padding: 28px 20px;
+  }
+
+  .pa-doc-fields {
+    grid-template-columns: 1fr;
+  }
+}
+.pa-outline-head {
+  padding: 8px 0 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.pa-outline-kicker {
+  margin: 0;
+  color: #525252;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+  text-transform: uppercase;
+}
+
+.pa-outline-course-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 0;
+  color: #161616;
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.pa-outline-course-name.is-pending {
+  color: #6f6f6f;
+}
+
+.pa-outline-course-code {
+  color: #525252;
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-context {
+  margin: 6px 0 0;
+  color: #525252;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-outline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0 8px;
+}
+
+/* Enhance balloon: anchored bottom-right, tail points down at the Enhance button. */
+.pa-enhance-bubble {
+  position: relative;
+  overflow: visible;
+}
+
+.pa-enhance-bubble::after {
+  position: absolute;
+  right: 26px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  content: "";
+  background: var(--color-popover);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  transform: rotate(45deg);
+}
+
+@media print {
+  .pa-enhance-bubble {
+    display: none;
+  }
+}
+
+/* =========================================================================
+   AI Elements tokens (moved from the retired ai-carbon.css).
+   These stay scoped to `.pa-ai` so the assistant surfaces keep the
+   ProfAssist palette now that Carbon's stylesheet is gone.
+   ========================================================================= */
+
+.pa-ai {
+  --color-background: #ffffff;
+  --color-foreground: #161616;
+  --color-card: #ffffff;
+  --color-card-foreground: #161616;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #161616;
+  --color-primary: #8a3ffc;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e0e0e0;
+  --color-secondary-foreground: #161616;
+  --color-muted: #f4f4f4;
+  --color-muted-foreground: #525252;
+  --color-accent: #d0e2ff;
+  --color-accent-foreground: #161616;
+  --color-destructive: #da1e28;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e0e0e0;
+  --color-input: #e0e0e0;
+  --color-ring: #8a3ffc;
+  --radius: 0px;
+  color: #161616;
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+.pa-ai :focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-ai * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* =========================================================================
+   Preflight compatibility.
+   `tailwindcss/preflight` resets `ul`/`ol` markers. These document, chat and
+   grade lists were written against browser defaults, so restore just what
+   they need (their own padding/margin rules are untouched).
+   ========================================================================= */
+
+.pa-doc-readings,
+.pa-answer ol {
+  list-style: decimal;
+}
+
+.pa-answer ul,
+.pa-quiet-detail ul,
+.council-verdict-card ul {
+  list-style: disc;
+}
+
+.council-verdict-card ul {
+  padding-left: 1.25rem;
+}
+
+/* Paginated outline artifact: bounded scroll of A4-like pages. */
+.pa-artifact-scroll {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding: 20px;
+  background: #f4f4f4;
+}
+
+.pa-paper-page {
+  position: relative;
+  width: 100%;
+  max-width: 760px;
+  min-height: 900px;
+  margin: 0 auto 20px;
+  padding: 48px 56px;
+  background: #fff;
+  color: #161616;
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.pa-paper-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 24px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e0e0e0;
+  color: #525252;
+  font-family: var(--font-plex), "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+}
+
+.pa-paper-course {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pa-paper-folio {
+  flex: none;
+  text-transform: uppercase;
+}
+
+/* Saved highlights, painted with the CSS Custom Highlight API. */
+::highlight(pa-annotations) {
+  background-color: #f1c21b;
+  color: #161616;
+}
+
+.pa-selection-toolbar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+@media (max-width: 66rem) {
+  .pa-artifact-scroll {
+    padding: 12px;
+  }
+
+  .pa-paper-page {
+    min-height: 0;
+    padding: 28px 20px;
+  }
+}
+
+@media print {
+  .pa-artifact-scroll {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    background: #fff;
+  }
+
+  .pa-paper-page {
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    break-after: page;
+  }
+
+  .pa-selection-toolbar {
+    display: none;
+  }
+}
+
+/* Landscape sheets for slide decks. */
+.pa-paper-page.is-landscape {
+  max-width: 1120px;
+  min-height: 760px;
+}
+
+@media (max-width: 66rem) {
+  .pa-paper-page.is-landscape {
+    min-height: 0;
+    padding: 28px 20px;
+  }
+}
+
+@media print {
+  @page deck-landscape {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+
+  .pa-paper-page.is-landscape {
+    page: deck-landscape;
+    max-width: none;
+    min-height: 0;
   }
 }

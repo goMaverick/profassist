@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from app.api.deps import CurrentUser, FileUploadSvc
 from app.core.exceptions import NotFoundError
 from app.schemas.file import FileInfo, FileUploadResponse
+from app.services.file_storage import MAX_UPLOAD_SIZE
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -19,8 +20,17 @@ async def upload_file(
     current_user: CurrentUser,
     file: UploadFile = File(...),
 ) -> Any:
-    """Upload a file for use in chat."""
-    data = await file.read()
+    """Upload a file for use in chat.
+
+    Read one byte past the limit so an oversized body is rejected before the
+    rest of it is buffered; the service re-validates the size it receives.
+    """
+    data = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(data) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB.",
+        )
     chat_file = await file_upload_svc.upload(
         user_id=current_user.id,
         file_data=data,

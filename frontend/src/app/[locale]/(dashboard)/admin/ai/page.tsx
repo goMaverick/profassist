@@ -1,18 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Button,
-  InlineNotification,
-  Select,
-  SelectItem,
-  Tag,
-  TextArea,
-  TextInput,
-  Tile,
-  Toggle,
-} from "@carbon/react";
+
 import { pa, run } from "@/components/profassist/bits";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
+  Button,
+  Card,
+  FormField,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+} from "@/components/ui";
 
 interface Source {
   agent: string;
@@ -95,6 +103,55 @@ function agentLabel(agent: string) {
 
 function toolName(tool: string) {
   return tool.replaceAll("_", " ");
+}
+
+const BADGE_TONE = {
+  green: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
+  blue: "border-blue-500/40 bg-blue-500/10 text-blue-700",
+  gray: "border-border bg-muted text-muted-foreground",
+} as const;
+
+function Notice({
+  variant = "default",
+  title,
+  children,
+}: {
+  variant?: "default" | "destructive" | "success";
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Alert variant={variant}>
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>{children}</AlertDescription>
+    </Alert>
+  );
+}
+
+function ToggleRow({
+  id,
+  label,
+  labelA,
+  labelB,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  labelA: string;
+  labelB: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="space-y-0.5">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-muted-foreground text-xs">{checked ? labelB : labelA}</p>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
 }
 
 const TOOL_HELP: Record<string, string> = {
@@ -185,8 +242,14 @@ export default function AiAdminPage() {
   }, []);
 
   if (!view && !error) return <p>Loading AI settings…</p>;
-  if (!view) return <InlineNotification kind="error" title="AI settings" subtitle={error} hideCloseButton />;
+  if (!view)
+    return (
+      <Notice variant="destructive" title="AI settings">
+        {error}
+      </Notice>
+    );
 
+  const current = view;
   const connections = view.connections;
   const chosen = (view.prompt_sources || []).find((item) => item.agent === promptKey);
   const versions = (view.prompts || []).filter((item) => item.agent === promptKey);
@@ -197,18 +260,18 @@ export default function AiAdminPage() {
         pa<View>("/admin/ai", {
           method: "PUT",
           body: JSON.stringify({
-            chat_enabled: view.chat_enabled,
-            provider: view.provider,
-            model: view.model,
-            base_url: view.base_url,
-            debate_enabled: view.debate_enabled,
-            debate_threshold: view.debate_threshold,
-            debate_max_rounds: view.debate_max_rounds,
-            agent_models: view.agent_models,
-            moodle_sync_paused: view.moodle_sync_paused,
-            moodle_sync_minutes: view.moodle_sync_minutes,
-            moodle_nightly_enabled: view.moodle_nightly_enabled,
-            moodle_nightly_hour: view.moodle_nightly_hour,
+            chat_enabled: current.chat_enabled,
+            provider: current.provider,
+            model: current.model,
+            base_url: current.base_url,
+            debate_enabled: current.debate_enabled,
+            debate_threshold: current.debate_threshold,
+            debate_max_rounds: current.debate_max_rounds,
+            agent_models: current.agent_models,
+            moodle_sync_paused: current.moodle_sync_paused,
+            moodle_sync_minutes: current.moodle_sync_minutes,
+            moodle_nightly_enabled: current.moodle_nightly_enabled,
+            moodle_nightly_hour: current.moodle_nightly_hour,
           }),
         }),
       setError,
@@ -220,145 +283,198 @@ export default function AiAdminPage() {
   }
 
   return (
-    <div className="pa-dash" style={{ display: "grid", gap: 16 }}>
-      {error && <InlineNotification kind="error" title="Check this" subtitle={error} hideCloseButton />}
-      {note && <InlineNotification kind="success" title="Saved" subtitle={note} hideCloseButton lowContrast />}
-      <Tile id="ai-council">
-        <p style={{ maxWidth: 720, marginTop: 0 }}>
+    <div className="pa-dash grid gap-4">
+      {error && (
+        <Notice variant="destructive" title="Check this">
+          {error}
+        </Notice>
+      )}
+      {note && (
+        <Notice variant="success" title="Saved">
+          {note}
+        </Notice>
+      )}
+      <Card id="ai-council" className="p-4">
+        <p className="mt-0 max-w-3xl">
           Turn the assistant on, pick a model for each agent, and see which servers are connected.
           Secret keys stay in the server environment. This page never shows a key.
         </p>
-        <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-          <Toggle
+        <div className="mt-4 grid gap-3">
+          <ToggleRow
             id="chat-enabled"
-            labelText="Chat"
+            label="Chat"
             labelA="Chat is off"
             labelB="Chat is on"
-            toggled={view.chat_enabled}
-            onToggle={(checked) => setView({ ...view, chat_enabled: checked })}
+            checked={view.chat_enabled}
+            onCheckedChange={(checked) => setView({ ...view, chat_enabled: checked })}
           />
-          <p>When chat is off, the professor can still use the pages. The chat bar will not call a model.</p>
-          <Toggle
+          <p>
+            When chat is off, the professor can still use the pages. The chat bar will not call a
+            model.
+          </p>
+          <ToggleRow
             id="debate-enabled"
-            labelText="Council debate"
+            label="Council debate"
             labelA="Graders do not debate"
             labelB="Graders debate when they disagree"
-            toggled={view.debate_enabled}
-            onToggle={(checked) => setView({ ...view, debate_enabled: checked })}
+            checked={view.debate_enabled}
+            onCheckedChange={(checked) => setView({ ...view, debate_enabled: checked })}
           />
-          <TextInput
-            id="debate-threshold"
-            labelText="How far apart the graders must be before they debate"
-            helperText="0 means any disagreement. 3 means they debate only when the bands are far apart."
-            type="number"
-            min={0}
-            max={3}
-            value={String(view.debate_threshold)}
-            onChange={(event) => setView({ ...view, debate_threshold: Number(event.target.value) })}
-          />
-          <TextInput
-            id="debate-rounds"
-            labelText="How many debate rounds"
-            helperText="The chair stops after this many rounds, from 0 to 3."
-            type="number"
-            min={0}
-            max={3}
-            value={String(view.debate_max_rounds)}
-            onChange={(event) => setView({ ...view, debate_max_rounds: Number(event.target.value) })}
-          />
-          <TextInput
-            id="default-model"
-            labelText="Default model"
-            helperText="Used when an agent below does not name its own model. The environment can also set LLM_MODEL."
-            value={view.model}
-            onChange={(event) => setView({ ...view, model: event.target.value })}
-          />
-          <Button kind="primary" onClick={() => void saveSettings()}>Save these choices</Button>
+          <FormField
+            label="How far apart the graders must be before they debate"
+            htmlFor="debate-threshold"
+            description="0 means any disagreement. 3 means they debate only when the bands are far apart."
+          >
+            <Input
+              id="debate-threshold"
+              type="number"
+              min={0}
+              max={3}
+              value={String(view.debate_threshold)}
+              onChange={(event) =>
+                setView({ ...view, debate_threshold: Number(event.target.value) })
+              }
+            />
+          </FormField>
+          <FormField
+            label="How many debate rounds"
+            htmlFor="debate-rounds"
+            description="The chair stops after this many rounds, from 0 to 3."
+          >
+            <Input
+              id="debate-rounds"
+              type="number"
+              min={0}
+              max={3}
+              value={String(view.debate_max_rounds)}
+              onChange={(event) =>
+                setView({ ...view, debate_max_rounds: Number(event.target.value) })
+              }
+            />
+          </FormField>
+          <FormField
+            label="Default model"
+            htmlFor="default-model"
+            description="Used when an agent below does not name its own model. The environment can also set LLM_MODEL."
+          >
+            <Input
+              id="default-model"
+              value={view.model}
+              onChange={(event) => setView({ ...view, model: event.target.value })}
+            />
+          </FormField>
+          <div>
+            <Button onClick={() => void saveSettings()}>Save these choices</Button>
+          </div>
         </div>
-      </Tile>
+      </Card>
 
-      <Tile id="ai-agents">
+      <Card id="ai-agents" className="p-4">
         <h2 className="pa-card-title">Model for each agent</h2>
         <p>
-          The three council graders can each use a different provider. The chair does not have its own row.
-          The chair uses the default model above.
+          The three council graders can each use a different provider. The chair does not have its
+          own row. The chair uses the default model above.
         </p>
-        <div style={{ display: "grid", gap: 16 }}>
+        <div className="grid gap-4">
           {view.agents.map((agent) => {
-            const choice = view.agent_models[agent] || { provider: view.provider, model: view.model };
+            const choice = view.agent_models[agent] || {
+              provider: view.provider,
+              model: view.model,
+            };
             return (
-              <div key={agent} style={{ display: "grid", gap: 8, borderTop: "1px solid #e0e0e0", paddingTop: 12 }}>
+              <div key={agent} className="border-border grid gap-2 border-t pt-3">
                 <strong>{agentLabel(agent)}</strong>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Select
-                  id={`provider-${agent}`}
-                  labelText="Provider"
-                  value={choice.provider}
-                  onChange={(event) =>
-                    setView({
-                      ...view,
-                      agent_models: {
-                        ...view.agent_models,
-                        [agent]: { ...choice, provider: event.target.value },
-                      },
-                    })
-                  }
-                >
-                  {view.providers.map((provider) => (
-                    <SelectItem key={provider.id} value={provider.id} text={provider.label} />
-                  ))}
-                </Select>
-                <TextInput
-                  id={`model-${agent}`}
-                  labelText="Model"
-                  value={choice.model}
-                  onChange={(event) =>
-                    setView({
-                      ...view,
-                      agent_models: {
-                        ...view.agent_models,
-                        [agent]: { ...choice, model: event.target.value },
-                      },
-                    })
-                  }
-                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Provider" htmlFor={`provider-${agent}`}>
+                    <Select
+                      value={choice.provider}
+                      onValueChange={(provider) =>
+                        setView({
+                          ...view,
+                          agent_models: {
+                            ...view.agent_models,
+                            [agent]: { ...choice, provider },
+                          },
+                        })
+                      }
+                    >
+                      <SelectTrigger id={`provider-${agent}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {view.providers.map((provider) => (
+                          <SelectItem key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField label="Model" htmlFor={`model-${agent}`}>
+                    <Input
+                      id={`model-${agent}`}
+                      value={choice.model}
+                      onChange={(event) =>
+                        setView({
+                          ...view,
+                          agent_models: {
+                            ...view.agent_models,
+                            [agent]: { ...choice, model: event.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </FormField>
                 </div>
               </div>
             );
           })}
         </div>
-        <div style={{ marginTop: 12 }}>
-          <Button kind="secondary" onClick={() => void saveSettings()}>Save agent models</Button>
+        <div className="mt-3">
+          <Button variant="secondary" onClick={() => void saveSettings()}>
+            Save agent models
+          </Button>
         </div>
-      </Tile>
+      </Card>
 
-      <Tile id="ai-providers">
+      <Card id="ai-providers" className="p-4">
         <h2 className="pa-card-title">Provider connections</h2>
         <p>
-          A key is either “not set” or “set, hidden”. Add a missing key as an environment variable and restart the server.
-          This page cannot type a key in.
+          A key is either “not set” or “set, hidden”. Add a missing key as an environment variable
+          and restart the server. This page cannot type a key in.
         </p>
-        {testNote && <InlineNotification kind="info" title="Connection test" subtitle={testNote} hideCloseButton lowContrast />}
+        {testNote && <Notice title="Connection test">{testNote}</Notice>}
         {view.providers.map((provider) => (
-          <div key={provider.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "8px 0", borderTop: "1px solid #e0e0e0" }}>
+          <div
+            key={provider.id}
+            className="border-border flex items-center justify-between gap-3 border-t py-2"
+          >
             <div>
               <strong>{provider.label}</strong>
-              <p style={{ margin: "4px 0" }}>
-                <Tag type={provider.configured ? "green" : "gray"} size="sm">
+              <div className="my-1">
+                <Badge
+                  variant="outline"
+                  className={provider.configured ? BADGE_TONE.green : BADGE_TONE.gray}
+                >
                   {provider.configured ? "key set, hidden" : "no key"}
-                </Tag>
+                </Badge>
+              </div>
+              <p className="text-muted-foreground m-0">
+                Looks for {provider.env.join(" or ")}. Default model {provider.default_model}.
               </p>
-              <p style={{ margin: 0, color: "#525252" }}>Looks for {provider.env.join(" or ")}. Default model {provider.default_model}.</p>
             </div>
             <Button
-              kind="tertiary"
+              variant="outline"
               size="sm"
               onClick={async () => {
                 const result = await run(
                   () =>
                     pa<{ ok: boolean; detail: string }>("/admin/ai/test", {
                       method: "POST",
-                      body: JSON.stringify({ provider: provider.id, model: provider.default_model }),
+                      body: JSON.stringify({
+                        provider: provider.id,
+                        model: provider.default_model,
+                      }),
                     }),
                   setError,
                 );
@@ -369,18 +485,21 @@ export default function AiAdminPage() {
             </Button>
           </div>
         ))}
-      </Tile>
+      </Card>
 
-      <Tile id="ai-prompts">
+      <Card id="ai-prompts" className="p-4">
         <h2 className="pa-card-title">Prompts</h2>
         <p>
           Each agent has one instruction. If Langfuse is connected, the production label there wins.
-          If Langfuse is off, a version you save here is used for this university. Older versions stay in the list.
+          If Langfuse is off, a version you save here is used for this university. Older versions
+          stay in the list.
         </p>
         <h3 className="pa-card-sub">Every prompt</h3>
         <ul className="pa-prompt-list" aria-label="Prompt status">
           {(view.prompt_sources || []).map((source) => {
-            const saved = (view.prompts || []).find((item) => item.agent === source.agent && item.active);
+            const saved = (view.prompts || []).find(
+              (item) => item.agent === source.agent && item.active,
+            );
             return (
               <li key={source.agent}>
                 <button
@@ -392,31 +511,48 @@ export default function AiAdminPage() {
                 >
                   {agentLabel(source.agent)}
                 </button>
-                <Tag type={source.source === "langfuse" ? "blue" : saved ? "green" : "gray"} size="sm">
+                <Badge
+                  variant="outline"
+                  className={
+                    source.source === "langfuse"
+                      ? BADGE_TONE.blue
+                      : saved
+                        ? BADGE_TONE.green
+                        : BADGE_TONE.gray
+                  }
+                >
                   {promptStatus(source, saved)}
-                </Tag>
+                </Badge>
               </li>
             );
           })}
         </ul>
-        <Select
-          id="prompt-agent"
-          labelText="Which prompt"
-          value={promptKey}
-          onChange={(event) => {
-            const key = event.target.value;
-            const source = (view.prompt_sources || []).find((item) => item.agent === key);
-            setPromptKey(key);
-            setDraft(source?.text || "");
-          }}
-        >
-          {(view.prompt_sources || []).map((source) => (
-            <SelectItem key={source.agent} value={source.agent} text={agentLabel(source.agent)} />
-          ))}
-        </Select>
+        <div className="space-y-1.5">
+          <Label htmlFor="prompt-agent">Which prompt</Label>
+          <Select
+            value={promptKey}
+            onValueChange={(key) => {
+              const source = (view.prompt_sources || []).find((item) => item.agent === key);
+              setPromptKey(key);
+              setDraft(source?.text || "");
+            }}
+          >
+            <SelectTrigger id="prompt-agent">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(view.prompt_sources || []).map((source) => (
+                <SelectItem key={source.agent} value={source.agent}>
+                  {agentLabel(source.agent)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {chosen && (
           <p>
-            Using the {chosen.source} copy{chosen.version ? `, version ${chosen.version}` : ""} ({chosen.label}).
+            Using the {chosen.source} copy{chosen.version ? `, version ${chosen.version}` : ""} (
+            {chosen.label}).
             {chosen.url && (
               <>
                 {" "}
@@ -425,164 +561,233 @@ export default function AiAdminPage() {
             )}
           </p>
         )}
-        <TextArea
-          id="prompt-body"
-          labelText="Prompt text"
-          helperText="Saving makes a new version. It does not delete the previous one."
-          rows={6}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <Button
-          kind="primary"
-          disabled={savingPrompt || !draft.trim()}
-          onClick={async () => {
-            setSavingPrompt(true);
-            const next = await run(
-              () =>
-                pa<View>("/admin/ai/prompts", {
-                  method: "POST",
-                  body: JSON.stringify({ agent: promptKey, body: draft }),
-                }),
-              setError,
-            );
-            if (next) {
-              setView(next);
-              setNote(`Saved a new version of ${agentLabel(promptKey)}.`);
-            }
-            setSavingPrompt(false);
-          }}
+        <FormField
+          label="Prompt text"
+          htmlFor="prompt-body"
+          description="Saving makes a new version. It does not delete the previous one."
         >
-          Save a new version
-        </Button>
+          <Textarea
+            id="prompt-body"
+            rows={6}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </FormField>
+        <div className="mt-3">
+          <Button
+            disabled={savingPrompt || !draft.trim()}
+            onClick={async () => {
+              setSavingPrompt(true);
+              const next = await run(
+                () =>
+                  pa<View>("/admin/ai/prompts", {
+                    method: "POST",
+                    body: JSON.stringify({ agent: promptKey, body: draft }),
+                  }),
+                setError,
+              );
+              if (next) {
+                setView(next);
+                setNote(`Saved a new version of ${agentLabel(promptKey)}.`);
+              }
+              setSavingPrompt(false);
+            }}
+          >
+            Save a new version
+          </Button>
+        </div>
         <h3 className="pa-card-sub">Versions saved here</h3>
-        {versions.length === 0 && <p>No saved versions yet. The text above is the built-in default.</p>}
-        <ul style={{ paddingLeft: 18 }}>
+        {versions.length === 0 && (
+          <p>No saved versions yet. The text above is the built-in default.</p>
+        )}
+        <ul className="pl-5">
           {versions.map((row) => (
             <li key={`${row.agent}-${row.version}`}>
               Version {row.version} {row.active ? "· in use" : "· kept"}
             </li>
           ))}
         </ul>
-      </Tile>
+      </Card>
 
-      <Tile id="ai-tools">
+      <Card id="ai-tools" className="p-4">
         <h2 className="pa-card-title">Tools and the MCP server</h2>
         <p>
           FastMCP serves the same tools the chat can call, at {connections?.mcp_path || "/mcp"}.
           {connections?.mcp_installed
             ? " The FastMCP package is installed, so that address is mounted."
-            : " The FastMCP package is not installed, so that address is not mounted."}
-          {" "}Turning a tool off here stops the chat from calling it. It does not delete the tool.
+            : " The FastMCP package is not installed, so that address is not mounted."}{" "}
+          Turning a tool off here stops the chat from calling it. It does not delete the tool.
         </p>
         {Array.from(new Set(view.tools.map((tool) => tool.agent))).map((agent) => (
           <section key={agent} className="pa-tool-group">
             <h3 className="pa-card-sub">{agentLabel(agent)}</h3>
-            {view.tools.filter((tool) => tool.agent === agent).map((tool) => (
-              <div key={`${tool.agent}.${tool.tool}`} className="pa-tool-row">
-                <div>
-                  <strong>{toolName(tool.tool)}</strong>
-                  <p>{toolHelp(tool.agent, tool.tool)}</p>
+            {view.tools
+              .filter((tool) => tool.agent === agent)
+              .map((tool) => (
+                <div key={`${tool.agent}.${tool.tool}`} className="pa-tool-row">
+                  <div>
+                    <strong>{toolName(tool.tool)}</strong>
+                    <p>{toolHelp(tool.agent, tool.tool)}</p>
+                  </div>
+                  <Switch
+                    id={`tool-${tool.agent}-${tool.tool}`}
+                    aria-label={toolName(tool.tool)}
+                    checked={tool.enabled}
+                    onCheckedChange={async (checked) => {
+                      const next = await run(
+                        () =>
+                          pa<View>("/admin/ai/tools", {
+                            method: "POST",
+                            body: JSON.stringify({
+                              agent: tool.agent,
+                              tool: tool.tool,
+                              enabled: checked,
+                            }),
+                          }),
+                        setError,
+                      );
+                      if (next) setView(next);
+                    }}
+                  />
                 </div>
-                <Toggle
-                  id={`tool-${tool.agent}-${tool.tool}`}
-                  labelText={toolName(tool.tool)}
-                  hideLabel
-                  labelA="Off"
-                  labelB="On"
-                  toggled={tool.enabled}
-                  onToggle={async (checked) => {
-                    const next = await run(
-                      () =>
-                        pa<View>("/admin/ai/tools", {
-                          method: "POST",
-                          body: JSON.stringify({ agent: tool.agent, tool: tool.tool, enabled: checked }),
-                        }),
-                      setError,
-                    );
-                    if (next) setView(next);
-                  }}
-                />
-              </div>
-            ))}
+              ))}
           </section>
         ))}
-      </Tile>
+      </Card>
 
-      <Tile id="ai-moodle">
+      <Card id="ai-moodle" className="p-4">
         <h2 className="pa-card-title">Moodle connection</h2>
-        <p>These values come from the server environment. Change them there and restart. This page cannot edit them.</p>
-        <p><strong>Mode.</strong> {connections?.moodle_mode === "fake" ? "Fake. Moodle is not contacted. Sync and push are recorded on this computer." : "Real. The server will call the university Moodle."}</p>
-        <p><strong>Grade push (MOODLE_PUSH_ENABLED).</strong> {connections?.moodle_push_enabled ? "On. An approved grade can be written to Moodle." : "Off. Approving a grade does not write it to Moodle."}</p>
-        <p><strong>Moodle address (MOODLE_BASE_URL).</strong> {connections?.moodle_base_url}</p>
-        <p><strong>Moodle token (MOODLE_WS_TOKEN).</strong> {connections?.secrets.find((item) => item.name === "MOODLE_WS_TOKEN")?.state}</p>
+        <p>
+          These values come from the server environment. Change them there and restart. This page
+          cannot edit them.
+        </p>
+        <p>
+          <strong>Mode.</strong>{" "}
+          {connections?.moodle_mode === "fake"
+            ? "Fake. Moodle is not contacted. Sync and push are recorded on this computer."
+            : "Real. The server will call the university Moodle."}
+        </p>
+        <p>
+          <strong>Grade push (MOODLE_PUSH_ENABLED).</strong>{" "}
+          {connections?.moodle_push_enabled
+            ? "On. An approved grade can be written to Moodle."
+            : "Off. Approving a grade does not write it to Moodle."}
+        </p>
+        <p>
+          <strong>Moodle address (MOODLE_BASE_URL).</strong> {connections?.moodle_base_url}
+        </p>
+        <p>
+          <strong>Moodle token (MOODLE_WS_TOKEN).</strong>{" "}
+          {connections?.secrets.find((item) => item.name === "MOODLE_WS_TOKEN")?.state}
+        </p>
         <h3 className="pa-card-sub">Sync schedule</h3>
         <p>The regular pull is the main path. “Sync now” on the grading page is only a backup.</p>
-        <Toggle
+        <ToggleRow
           id="sync-running"
-          labelText="Regular sync"
+          label="Regular sync"
           labelA="Paused"
           labelB="Running"
-          toggled={!view.moodle_sync_paused}
-          onToggle={(checked) => setView({ ...view, moodle_sync_paused: !checked })}
+          checked={!view.moodle_sync_paused}
+          onCheckedChange={(checked) => setView({ ...view, moodle_sync_paused: !checked })}
         />
-        <Select
-          id="sync-minutes"
-          labelText="How often to pull"
-          value={String(view.moodle_sync_minutes)}
-          onChange={(event) => setView({ ...view, moodle_sync_minutes: Number(event.target.value) })}
+        <div className="mt-3 space-y-1.5">
+          <Label htmlFor="sync-minutes">How often to pull</Label>
+          <Select
+            value={String(view.moodle_sync_minutes)}
+            onValueChange={(value) => setView({ ...view, moodle_sync_minutes: Number(value) })}
+          >
+            <SelectTrigger id="sync-minutes">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[15, 30, 60, 120].map((minutes) => (
+                <SelectItem key={minutes} value={String(minutes)}>
+                  Every {minutes} minutes
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="mt-3">
+          <ToggleRow
+            id="nightly"
+            label="Nightly full sync"
+            labelA="Off"
+            labelB="On"
+            checked={view.moodle_nightly_enabled}
+            onCheckedChange={(checked) => setView({ ...view, moodle_nightly_enabled: checked })}
+          />
+        </div>
+        <FormField
+          label="Nightly hour"
+          htmlFor="nightly-hour"
+          description={dubaiLine(view.moodle_nightly_hour)}
         >
-          {[15, 30, 60, 120].map((minutes) => (
-            <SelectItem key={minutes} value={String(minutes)} text={`Every ${minutes} minutes`} />
-          ))}
-        </Select>
-        <Toggle
-          id="nightly"
-          labelText="Nightly full sync"
-          labelA="Off"
-          labelB="On"
-          toggled={view.moodle_nightly_enabled}
-          onToggle={(checked) => setView({ ...view, moodle_nightly_enabled: checked })}
-        />
-        <TextInput
-          id="nightly-hour"
-          labelText="Nightly hour"
-          helperText={dubaiLine(view.moodle_nightly_hour)}
-          type="number"
-          min={0}
-          max={23}
-          value={String(view.moodle_nightly_hour)}
-          onChange={(event) => setView({ ...view, moodle_nightly_hour: Number(event.target.value) })}
-        />
-        <Button kind="secondary" onClick={() => void saveSettings()}>Save the sync schedule</Button>
-      </Tile>
+          <Input
+            id="nightly-hour"
+            type="number"
+            min={0}
+            max={23}
+            value={String(view.moodle_nightly_hour)}
+            onChange={(event) =>
+              setView({ ...view, moodle_nightly_hour: Number(event.target.value) })
+            }
+          />
+        </FormField>
+        <div className="mt-3">
+          <Button variant="secondary" onClick={() => void saveSettings()}>
+            Save the sync schedule
+          </Button>
+        </div>
+      </Card>
 
-      <Tile id="ai-tracing">
+      <Card id="ai-tracing" className="p-4">
         <h2 className="pa-card-title">Tracing, search, and keys</h2>
         <p>
-          Langfuse records each agent step after personal data has been removed. Qdrant stores the search index for notes and memory.
-          Both are read from the environment.
+          Langfuse records each agent step after personal data has been removed. Qdrant stores the
+          search index for notes and memory. Both are read from the environment.
         </p>
-        <p><strong>Langfuse.</strong> {connections?.langfuse_enabled ? "On." : "Off. Traces stay in the server log only."} Host {connections?.langfuse_host}.</p>
-        <p><strong>Langfuse public key.</strong> {connections?.secrets.find((item) => item.name === "LANGFUSE_PUBLIC_KEY")?.state}</p>
-        <p><strong>Langfuse secret key.</strong> {connections?.secrets.find((item) => item.name === "LANGFUSE_SECRET_KEY")?.state}</p>
-        <p><strong>Qdrant.</strong> {connections?.qdrant_host}:{connections?.qdrant_port}. API key {connections?.secrets.find((item) => item.name === "QDRANT_API_KEY")?.state}.</p>
-        <p><strong>Model from the environment (LLM_MODEL).</strong> {connections?.model_from_env}</p>
-        <p><strong>Model server URL (LLM_BASE_URL).</strong> {connections?.base_url}</p>
+        <p>
+          <strong>Langfuse.</strong>{" "}
+          {connections?.langfuse_enabled ? "On." : "Off. Traces stay in the server log only."} Host{" "}
+          {connections?.langfuse_host}.
+        </p>
+        <p>
+          <strong>Langfuse public key.</strong>{" "}
+          {connections?.secrets.find((item) => item.name === "LANGFUSE_PUBLIC_KEY")?.state}
+        </p>
+        <p>
+          <strong>Langfuse secret key.</strong>{" "}
+          {connections?.secrets.find((item) => item.name === "LANGFUSE_SECRET_KEY")?.state}
+        </p>
+        <p>
+          <strong>Qdrant.</strong> {connections?.qdrant_host}:{connections?.qdrant_port}. API key{" "}
+          {connections?.secrets.find((item) => item.name === "QDRANT_API_KEY")?.state}.
+        </p>
+        <p>
+          <strong>Model from the environment (LLM_MODEL).</strong> {connections?.model_from_env}
+        </p>
+        <p>
+          <strong>Model server URL (LLM_BASE_URL).</strong> {connections?.base_url}
+        </p>
         <h3 className="pa-card-sub">Every secret this server looks for</h3>
-        <ul style={{ paddingLeft: 18 }}>
+        <ul className="pl-5">
           {(connections?.secrets || []).map((item) => (
-            <li key={item.name}><strong>{item.name}.</strong> {item.state}</li>
+            <li key={item.name}>
+              <strong>{item.name}.</strong> {item.state}
+            </li>
           ))}
         </ul>
         <h3 className="pa-card-sub">Recent prompt and setting changes</h3>
         {view.audit.length === 0 && <p>No edits yet.</p>}
-        <ul style={{ paddingLeft: 18 }}>
+        <ul className="pl-5">
           {view.audit.map((row, index) => (
-            <li key={`${row.agent}-${row.version}-${index}`}>{row.action} · {agentLabel(row.agent)} · version {row.version}</li>
+            <li key={`${row.agent}-${row.version}-${index}`}>
+              {row.action} · {agentLabel(row.agent)} · version {row.version}
+            </li>
           ))}
         </ul>
-      </Tile>
+      </Card>
     </div>
   );
 }

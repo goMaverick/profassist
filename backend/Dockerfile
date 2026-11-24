@@ -6,8 +6,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+# Install uv (pinned so the build is reproducible)
+COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
@@ -24,6 +24,13 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# spaCy model Mem0 needs on its first write. Baked in at build time: mem0 calls
+# spacy.cli.download when the model is missing, and that raises SystemExit, which
+# used to take the ASGI worker down. The wheel matches spaCy 3.8.x from uv.lock.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python \
+    https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
 
 # Runtime stage
 FROM python:3.12-slim
@@ -32,17 +39,18 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app /app
+# Create the non-root user and the writable directories before copying, so the
+# application tree can be copied with the right owner in one layer.
+RUN adduser --disabled-password --gecos "" appuser && \
+    mkdir -p /app/media /app/data /app/chroma_data /app/models_cache && \
+    chown appuser:appuser /app/media /app/data /app/chroma_data /app/models_cache
+
+# Copy the whole built tree (including .venv) with its final owner.
+COPY --from=builder --chown=appuser:appuser /app /app
 
 # Add venv to path
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Create non-root user and writable directories
-RUN adduser --disabled-password --gecos "" appuser && \
-    mkdir -p /app/media /app/data /app/chroma_data /app/models_cache && \
-    chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000

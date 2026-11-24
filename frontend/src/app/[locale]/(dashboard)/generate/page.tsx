@@ -1,17 +1,31 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Column, Grid, InlineNotification, Tag, Tile } from "@carbon/react";
-import { Add, MagicWand } from "@carbon/icons-react";
-import { pa, run } from "@/components/profassist/bits";
+import { Plus, WandSparkles } from "lucide-react";
+
 import { AiSuggestion } from "@/components/profassist/ai-suggestion";
+import { pa, run } from "@/components/profassist/bits";
 import { CouncilStage } from "@/components/profassist/council-stage";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Label,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 interface Outline {
   id: string;
   code: string;
   name: string;
-  body: { clos?: Array<{ code: string; text: string }>; tasks?: Array<{ number: string; name: string; weight: number }> };
+  body: {
+    clos?: Array<{ code: string; text: string }>;
+    tasks?: Array<{ number: string; name: string; weight: number }>;
+  };
 }
 interface Suggestion {
   number: string;
@@ -23,6 +37,13 @@ interface Suggestion {
   brief: string;
   criteria: Array<{ name: string; weight: number }>;
 }
+
+const BADGE_TONE = {
+  purple: "border-purple-500/40 bg-purple-500/10 text-purple-700",
+  blue: "border-blue-500/40 bg-blue-500/10 text-blue-700",
+  teal: "border-teal-500/40 bg-teal-500/10 text-teal-700",
+  green: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
+} as const;
 
 export default function GeneratePage() {
   const [outlines, setOutlines] = useState<Outline[]>([]);
@@ -45,23 +66,33 @@ export default function GeneratePage() {
   const clos = current?.body.clos || [];
 
   return (
-    <Grid>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,11fr)]">
       {error && (
-        <Column lg={16}>
-          <InlineNotification kind="error" title="Assessments" subtitle={error} hideCloseButton />
-        </Column>
+        <div className="lg:col-span-2">
+          <Alert variant="destructive">
+            <AlertTitle>Assessments</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </div>
       )}
       {note && (
-        <Column lg={16}>
-          <InlineNotification kind="success" title="Saved" subtitle={note} hideCloseButton lowContrast />
-        </Column>
+        <div className="lg:col-span-2">
+          <Alert variant="success">
+            <AlertTitle>Saved</AlertTitle>
+            <AlertDescription>{note}</AlertDescription>
+          </Alert>
+        </div>
       )}
-      <Column lg={5} md={4} sm={4}>
-        <h2 style={{ fontSize: "1rem" }}>Course</h2>
+      <div>
+        <h2 className="text-base">Course</h2>
         {outlines.map((item) => (
-          <Tile key={item.id} style={{ marginBottom: "0.5rem", outline: current?.id === item.id ? "2px solid #0f62fe" : undefined }}>
+          <Card
+            key={item.id}
+            className={cn("mb-2 p-4", current?.id === item.id && "ring-primary ring-2")}
+          >
             <button
-              style={{ all: "unset", cursor: "pointer" }}
+              type="button"
+              className="w-full cursor-pointer text-left"
               onClick={() => {
                 setCurrent(item);
                 setSelected([]);
@@ -71,29 +102,33 @@ export default function GeneratePage() {
               <strong>{item.code}</strong>
               <div>{item.name}</div>
             </button>
-          </Tile>
+          </Card>
         ))}
-      </Column>
-      <Column lg={11} md={4} sm={4}>
-        <h2 style={{ fontSize: "1rem" }}>Course learning outcomes</h2>
+      </div>
+      <div>
+        <h2 className="text-base">Course learning outcomes</h2>
         {clos.map((item) => (
-          <Checkbox
-            key={item.code}
-            id={item.code}
-            labelText={`${item.code} ${item.text}`}
-            checked={selected.includes(item.code)}
-            onChange={(_, { checked }) =>
-              setSelected((currentCodes) =>
-                checked ? [...currentCodes, item.code] : currentCodes.filter((code) => code !== item.code),
-              )
-            }
-          />
+          <div key={item.code} className="flex items-start gap-2 py-1">
+            <Checkbox
+              id={item.code}
+              className="mt-0.5"
+              checked={selected.includes(item.code)}
+              onCheckedChange={(checked) =>
+                setSelected((currentCodes) =>
+                  checked
+                    ? [...currentCodes, item.code]
+                    : currentCodes.filter((code) => code !== item.code),
+                )
+              }
+            />
+            <Label htmlFor={item.code} className="leading-5 font-normal">
+              {`${item.code} ${item.text}`}
+            </Label>
+          </div>
         ))}
-        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+        <div className="mt-4 flex gap-2">
           <Button
-            kind="primary"
             data-ask-council=""
-            renderIcon={MagicWand}
             disabled={!current || selected.length === 0}
             onClick={async () => {
               if (!current) return;
@@ -110,12 +145,12 @@ export default function GeneratePage() {
               setTalking(false);
             }}
           >
+            <WandSparkles />
             Ask the council
           </Button>
           <Button
-            kind="secondary"
+            variant="secondary"
             data-accept-assessments=""
-            renderIcon={Add}
             disabled={!current || suggestions.length === 0}
             onClick={async () => {
               if (!current) return;
@@ -130,10 +165,13 @@ export default function GeneratePage() {
               if (next) {
                 setCurrent(next);
                 setOutlines((items) => items.map((item) => (item.id === next.id ? next : item)));
-                setNote("The assignment is numbered and linked to the outcomes. Open Rubric or Grade to use it.");
+                setNote(
+                  "The assignment is numbered and linked to the outcomes. Open Rubric or Grade to use it.",
+                );
               }
             }}
           >
+            <Plus />
             Accept
           </Button>
         </div>
@@ -143,8 +181,9 @@ export default function GeneratePage() {
             title="Assessment suggestion"
             description="The council drafted a task from the outcomes you picked."
             body={
-              suggestions.map((item) => `${item.name} (${item.weight}%). ${item.brief}`).join("\n\n") ||
-              "The council is reading the outcomes."
+              suggestions
+                .map((item) => `${item.name} (${item.weight}%). ${item.brief}`)
+                .join("\n\n") || "The council is reading the outcomes."
             }
             busy={talking}
             onRegenerate={() => {
@@ -156,29 +195,39 @@ export default function GeneratePage() {
           />
         )}
         {suggestions.map((item) => (
-          <Tile key={item.name} style={{ marginTop: "1rem" }}>
-            <Tag type="purple">{item.task_type}</Tag>
-            <Tag type="blue">{item.weight}%</Tag>
-            <Tag type="teal">{item.due}</Tag>
-            <h3 style={{ marginBottom: "0.25rem" }}>{item.name}</h3>
+          <Card key={item.name} className="mt-4 p-4">
+            <div className="mb-2 flex flex-wrap gap-1">
+              <Badge variant="outline" className={BADGE_TONE.purple}>
+                {item.task_type}
+              </Badge>
+              <Badge variant="outline" className={BADGE_TONE.blue}>
+                {item.weight}%
+              </Badge>
+              <Badge variant="outline" className={BADGE_TONE.teal}>
+                {item.due}
+              </Badge>
+            </div>
+            <h3 className="mb-1 font-medium">{item.name}</h3>
             <p>{item.brief}</p>
-            <p style={{ color: "#525252" }}>Outcomes: {item.lo_codes.join(", ")}</p>
-            <ul>
+            <p className="text-muted-foreground">Outcomes: {item.lo_codes.join(", ")}</p>
+            <ul className="list-disc pl-5">
               {item.criteria.map((criterion) => (
                 <li key={criterion.name}>
                   {criterion.name} ({criterion.weight}%)
                 </li>
               ))}
             </ul>
-          </Tile>
+          </Card>
         ))}
-        <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Already on this course</h2>
-        {(current?.body.tasks || []).map((item) => (
-          <Tag key={item.number} type="green">
-            {item.number} {item.name} {item.weight}%
-          </Tag>
-        ))}
-      </Column>
-    </Grid>
+        <h2 className="mt-6 text-base">Already on this course</h2>
+        <div className="flex flex-wrap gap-1">
+          {(current?.body.tasks || []).map((item) => (
+            <Badge key={item.number} variant="outline" className={BADGE_TONE.green}>
+              {item.number} {item.name} {item.weight}%
+            </Badge>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

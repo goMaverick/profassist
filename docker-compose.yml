@@ -31,9 +31,11 @@ services:
       - S3_ACCESS_KEY=profassist
       - S3_SECRET_KEY=profassist-secret
       - S3_BUCKET=profassist
-      - MOODLE_MODE=fake
+      - MOODLE_MODE=real
       - MOODLE_PUSH_ENABLED=false
-      - PROFASSIST_AUTO_SEED=true
+      - MOODLE_BASE_URL=http://moodle-mock:8090
+      - MOODLE_WS_TOKEN=demo-token
+      - MOODLE_ALLOW_PRIVATE=true
       - LLM_API_KEY=${LLM_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
@@ -58,7 +60,7 @@ services:
       qdrant:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 15s
@@ -67,6 +69,24 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  moodle-mock:
+    image: profassist_backend:dev
+    pull_policy: never
+    container_name: profassist_moodle_mock
+    command: ["uvicorn", "mock_moodle.main:app", "--host", "0.0.0.0", "--port", "8090"]
+    volumes:
+      - ./backend/mock_moodle:/app/mock_moodle:ro
+    ports:
+      - "8090:8090"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   db:
     image: postgres:16-alpine
@@ -162,9 +182,11 @@ services:
       - POSTGRES_HOST=db
       - POSTGRES_PASSWORD=postgres
       - PREFECT_API_URL=http://prefect-server:4200/api
-      - MOODLE_MODE=fake
+      - MOODLE_MODE=real
       - MOODLE_PUSH_ENABLED=false
-      - PROFASSIST_AUTO_SEED=false
+      - MOODLE_BASE_URL=http://moodle-mock:8090
+      - MOODLE_WS_TOKEN=demo-token
+      - MOODLE_ALLOW_PRIVATE=true
     networks:
       - backend
     depends_on:
@@ -188,6 +210,11 @@ services:
       - minio_data:/data
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   langfuse-db:
@@ -237,7 +264,7 @@ services:
       NEXTAUTH_SECRET: profassist-langfuse-nextauth-secret
       DATABASE_URL: postgresql://postgres:postgres@langfuse-db:5432/langfuse
       SALT: profassist-langfuse-salt
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000001
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
       TELEMETRY_ENABLED: "false"
       CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
       CLICKHOUSE_URL: http://clickhouse:8123
@@ -281,7 +308,7 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   langfuse-worker:
@@ -295,12 +322,37 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  db-init:
+    # Idempotently creates the separate MLflow database. It never touches the
+    # application database, so MLflow's alembic_version cannot collide with the
+    # app's migrations.
+    image: postgres:16-alpine
+    container_name: profassist_db_init
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        psql -h db -U ${POSTGRES_USER:-postgres} -d postgres -tAc
+        "SELECT 1 FROM pg_database WHERE datname='mlflow'" | grep -q 1
+        || psql -h db -U ${POSTGRES_USER:-postgres} -d postgres
+        -c "CREATE DATABASE mlflow"
+    networks:
+      - backend
+    restart: "no"
+
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.22.0
+    build:
+      context: ./backend
+      dockerfile: mlflow.Dockerfile
+    image: profassist_mlflow:dev
     container_name: profassist_mlflow
     command: >
       mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri postgresql+psycopg2://postgres:postgres@db:5432/profassist
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/mlflow
       --default-artifact-root s3://profassist/mlflow
     environment:
       - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
@@ -313,8 +365,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
       minio:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     restart: unless-stopped
 
   frontend:
@@ -322,9 +382,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
-        - NEXT_PUBLIC_WS_URL=ws://localhost:8000
-        - NEXT_PUBLIC_SITE_URL=http://localhost:3000
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://${PUBLIC_HOST:-localhost}:8000}
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://${PUBLIC_HOST:-localhost}:8000}
+        - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-http://${PUBLIC_HOST:-localhost}:3000}
         - NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=50
         - NEXT_PUBLIC_RAG_ENABLED=true
     container_name: profassist_frontend
@@ -340,6 +400,19 @@ services:
       app:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      # The oven/bun image has no curl/wget, so probe with bun's built-in fetch.
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
 
 networks:
   backend:

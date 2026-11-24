@@ -1,5 +1,6 @@
 """Pre-approval review of a subject outline. Findings name a real section."""
 
+import json
 import re
 import uuid
 from typing import Any
@@ -7,10 +8,13 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.profassist.council_config import chair_of, enabled_keys, load_council_roles
+from app.profassist.errors import ProfassistError
 from app.profassist.models import OutlineReview
 from app.profassist.outline import get_outline
 from app.profassist.outline_data import POLICIES
 from app.profassist.runtime import tool_enabled
+from app.profassist.service import capture_movement
 
 BLOOM = (
     "design",
@@ -134,9 +138,9 @@ def review_outline(
                 )
             )
 
-    present = {item.get("key") for item in body.get("policies") or []}
+    present = {key: bool(body.get(key)) for key in REQUIRED_POLICIES}
     for key in REQUIRED_POLICIES:
-        if key not in present:
+        if not present[key]:
             title = next(item["title"] for item in POLICIES if item["key"] == key)
             findings.append(
                 _finding(
@@ -210,7 +214,7 @@ def apply_fix(body: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
     updated["clos"] = [dict(item) for item in body.get("clos") or []]
     updated["tasks"] = [dict(item) for item in body.get("tasks") or []]
     updated["weeks"] = [dict(item) for item in body.get("weeks") or []]
-    updated["policies"] = [dict(item) for item in body.get("policies") or []]
+    updated["policies"] = list(body.get("policies") or [])
     fix = finding.get("fix") or {}
     if "map_plo" in fix:
         for item in updated["clos"]:
@@ -240,7 +244,7 @@ def apply_fix(body: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
                 ]
     if "policy" in fix:
         policy = next(item for item in POLICIES if item["key"] == fix["policy"])
-        updated["policies"].append(policy)
+        updated[fix["policy"]] = policy["body"]
     if "append" in fix:
         updated["description"] = ((updated.get("description") or "") + "\n" + fix["append"]).strip()
     return updated
@@ -256,11 +260,19 @@ async def run_review(
     reviewer: str,
 ) -> dict[str, Any]:
     from app.profassist.llm import complete
-    from app.profassist.observe import trace_url
+    from app.profassist.observe import step_trace_url
 
     row = await get_outline(db, org_id, user_id, outline_id)
-    chosen = [reviewer] if mode == "single" else list(REVIEWERS)
+    roles = await load_council_roles(db, org_id, "outline")
+    enabled = [name for name in enabled_keys(roles, "deterministic") if name in REVIEWERS]
+    chosen = [reviewer] if mode == "single" else list(enabled)
+    chosen = [name for name in chosen if name in enabled]
     chosen = [name for name in chosen if tool_enabled("outline_review", name)]
+    if not chosen:
+        raise ProfassistError(
+            400,
+            "No outline reviewer is enabled. Turn one on in the council settings, then review.",
+        )
     findings = [
         item
         for item in review_outline(row.body or {}, row.instructions or "")
@@ -274,14 +286,26 @@ async def run_review(
                 "note": "Reviewers compared severities and kept the stricter reading where they disagreed.",
             }
         )
-    summary = complete(
-        "outline_review",
-        {
-            "instructions": row.instructions or "",
-            "mode": mode,
-            "reviewer": reviewer,
-            "findings": findings,
-        },
+    chair = chair_of(roles)
+    chair_request: dict[str, Any] = {}
+    if chair is not None:
+        if str(chair.get("persona_prompt") or "").strip():
+            chair_request["prompt_override"] = str(chair["persona_prompt"]).strip()
+        if str(chair.get("model") or "").strip():
+            chair_request["model"] = str(chair["model"]).strip()
+    summary = (
+        complete(
+            "outline_review",
+            {
+                "instructions": row.instructions or "",
+                "mode": mode,
+                "reviewer": reviewer,
+                "findings": findings,
+                **chair_request,
+            },
+        )
+        if chair is not None
+        else {}
     )
     version = (
         await db.execute(
@@ -302,7 +326,7 @@ async def run_review(
         findings=findings,
         debate=debate,
         summary=summary.get("summary") or "",
-        trace_url=trace_url(None) or "",
+        trace_url=step_trace_url() or "",
     )
     db.add(stored)
     await db.flush()
@@ -329,11 +353,21 @@ async def apply_review_fix(
         from app.profassist.errors import ProfassistError
 
         raise ProfassistError(404, "That finding is not in this review.")
+    before_text = json.dumps(outline.body or {}, sort_keys=True, ensure_ascii=False)
     outline.body = apply_fix(outline.body or {}, target)
     target["applied"] = True
     review.findings = findings
     review.score = score_of(findings)
     await db.flush()
+    await capture_movement(
+        db,
+        org_id,
+        user_id,
+        "objective",
+        before_text,
+        json.dumps(outline.body or {}, sort_keys=True, ensure_ascii=False),
+        "outline-review-fix",
+    )
     return _public(review)
 
 

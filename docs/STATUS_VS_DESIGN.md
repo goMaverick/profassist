@@ -38,7 +38,7 @@ This table compares the UOWD MAAI903 ProfAssist design with what this repository
 | Grade calibrator | Stubbed | The page and the endpoint return `not_trained` and no score. |
 | At-risk early warning | Stubbed | The page lists the 14 upstream course-withdrawal features. The public model repo has no training CSV or saved model in git, so no score is shown. A score would stay advisory. |
 | Fake Moodle | Done | Assignments with files and a workshop. A Prefect job is the main pull, every 30 minutes unless the university pauses it or picks another interval. A separate nightly full sync is on by default. Sync now is the backup. |
-| Real Moodle | Partial | Reads courses, people, assignments, submission files, rubrics, and workshops through the web service. Grade push calls `mod_assign_save_grade` only when `MOODLE_PUSH_ENABLED=true`. |
+| Real Moodle | Partial | One encrypted connection per university on **Admin ? Moodle**. Reads courses, people, assignments, submission files, rubrics, and workshops through the web service. Grade push calls `mod_assign_save_grade` only when the workspace push toggle is on (or `MOODLE_PUSH_ENABLED=true` for the env fallback). Activity-log ingestion waits on a reviewed plugin spec. |
 | Manual submission upload | Done | A zip of files can be attached to an assignment when Moodle is not available. |
 | Tenant isolation | Partial | A university is an organization. Professor-owned rows are filtered in the app. Postgres RLS exists, but the compose database role is a superuser, so the app filter is what holds. |
 | Qdrant, Postgres, MinIO, Prefect | Done | Notes, memory, files, and the grade batch worker. |

@@ -240,8 +240,23 @@ async def _update_status(
         logger.warning("Failed to update RAGDocument status: %s", e)
 
 
+async def _document_organization_id(rag_document_id: str) -> str | None:
+    """Look up the owning workspace so status events can be tenant-scoped."""
+    from app.services.rag_document import RAGDocumentService
+
+    async with get_worker_db_context() as db:
+        doc = await RAGDocumentService(db).get_document(rag_document_id)
+        return str(doc.organization_id) if doc.organization_id else None
+
+
 async def _notify_ws(rag_document_id: str, status: str, filename: str) -> None:
     try:
+        organization_id = await _document_organization_id(rag_document_id)
+        if organization_id is None:
+            logger.warning(
+                "RAG status event dropped: document %s has no organization", rag_document_id
+            )
+            return
         r = aioredis.from_url(
             f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
         )  # type: ignore[no-untyped-call]
@@ -252,6 +267,7 @@ async def _notify_ws(rag_document_id: str, status: str, filename: str) -> None:
                     "document_id": rag_document_id,
                     "status": status,
                     "filename": filename,
+                    "organization_id": organization_id,
                 }
             ),
         )

@@ -122,3 +122,21 @@ Tests don't hit a real database. The `client` fixture in `tests/conftest.py` ove
 
 For tests that need to exercise real SQL, instantiate your own async engine/session
 inside the test rather than relying on a shared fixture.
+
+
+### Migration tests (destructive)
+
+`tests/test_migrations.py` runs `alembic upgrade head` / `downgrade base`. It
+is destructive, so it never uses `DATABASE_URL`: it refuses the `profassist`
+database and skips unless a dedicated test database is configured.
+
+```bash
+createdb profassist_test   # optional: the tests create it if missing
+export TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/profassist_test
+pytest tests/test_migrations.py
+```
+
+The URL may use `+asyncpg` (the default above) or a plain `postgresql://`; the
+tests derive both the async and sync drivers and pin the Alembic subprocesses
+to it. The guard tests (`TestTestDatabaseGuard`) always run and assert that the
+`profassist` database name is refused.

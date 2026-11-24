@@ -110,16 +110,24 @@ class UserService:
         is_first_user = await self._is_first_user()
 
         hashed_password = get_password_hash(user_in.password)
-        user = await user_repo.create(
-            self.db,
-            email=user_in.email,
-            hashed_password=hashed_password,
-            full_name=user_in.full_name,
-            role=UserRole.ADMIN.value if is_first_user else user_in.role.value,
-            is_app_admin=is_first_user,
-        )
-        org_service = OrganizationService(self.db)
-        await org_service.create_personal_org(user.id, user_in.email)
+        try:
+            user = await user_repo.create(
+                self.db,
+                email=user_in.email,
+                hashed_password=hashed_password,
+                full_name=user_in.full_name,
+                role=UserRole.ADMIN.value if is_first_user else user_in.role.value,
+                is_app_admin=is_first_user,
+            )
+            org_service = OrganizationService(self.db)
+            await org_service.create_personal_org(user.id, user_in.email)
+            # Commit before returning: get_db_session commits only after the
+            # response is sent, so an immediate login (a fresh request/session)
+            # would otherwise 401 because the new row is not yet visible.
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
         return user
 
     async def authenticate(self, email: str, password: str) -> User:

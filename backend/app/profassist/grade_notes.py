@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
-from app.profassist.config import moodle_push_enabled
 
 RUBRIC = [
     {
@@ -282,38 +281,22 @@ def save_feedback(
 def release_feedback(
     user_id: str, group: str, course: str = "MAAI903", number: str = "1"
 ) -> dict[str, Any]:
-    """Approve keeps the notes private unless push is explicitly enabled."""
-    notes = load_feedback(user_id, group, course, number)
-    audit = {
-        "target_type": "grade_feedback",
-        "action": "approved",
-        "note": "Feedback approved with the grade. Nothing was sent until push is enabled.",
-    }
-    if not moodle_push_enabled():
-        notes["release"] = "held"
-        _path(user_id, group, course).write_text(json.dumps(notes))
-        return {
-            "pushed": False,
-            "message": "Saved with the grade. Moodle was not contacted because push is off.",
-            "audit": audit,
-        }
-    from app.profassist.moodle import get_connector
+    """Approval never pushes, even when ``MOODLE_PUSH_ENABLED`` is on.
 
-    receipt = get_connector().push(
-        {
-            "type": "grade",
-            "group": group,
-            "feedback": notes.get("overall") or "",
-            "rubric": notes.get("rubric") or [],
-            "comments": notes.get("comments") or [],
-        }
-    )
-    notes["release"] = "pushed"
+    Approving holds the feedback locally and records the audit note. The only
+    code paths allowed to contact Moodle are ``push_draft`` / ``push_record``,
+    invoked explicitly by ``POST /drafts/{id}/push``.
+    """
+    notes = load_feedback(user_id, group, course, number)
+    notes["release"] = "held"
     _path(user_id, group, course).write_text(json.dumps(notes))
-    audit["note"] = "Feedback pushed with the grade. Moodle was not contacted."
+    note = "Approved. Nothing sent until push."
     return {
-        "pushed": True,
-        "message": receipt.get("moodle_response", ""),
-        "receipt": receipt,
-        "audit": audit,
+        "pushed": False,
+        "message": note,
+        "audit": {
+            "target_type": "grade_feedback",
+            "action": "approved",
+            "note": note,
+        },
     }

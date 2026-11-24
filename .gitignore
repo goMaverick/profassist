@@ -92,9 +92,13 @@ cython_debug/
 # Logs
 *.log
 logs/
+# Keep the Next.js BFF route directory that happens to be named "logs" tracked.
+!frontend/src/app/api/v1/rag/sync/logs/
 
 # Docker
 .docker/
+# Local compose override may hold live API keys; never commit it.
+docker-compose.override.yml
 
 # OS
 .DS_Store
@@ -109,8 +113,17 @@ Thumbs.db
 
 # Project specific
 node_modules/
+# Backend runtime media created by tests.
+backend/media/
+# Local fastembed model downloads (EMBEDDING_PROVIDER=local).
+backend/models_cache/
 .next/
 out/
 coverage/
 playwright-report/
 test-results/
+
+# Screenshot captures, runtime media, and PDF scratch output.
+frontend/screenshots*/
+media/
+.tmp-pdf/

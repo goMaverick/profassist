@@ -1,6 +1,6 @@
 # A model for chat and the council
 
-The built-in offline drafter answers when no provider key is set. A `GEMINI_API_KEY` on the API process is used when the saved provider has no key. The Google Gemini default in AI settings is `gemini-3.5-flash-lite`. `gemini-2.0-flash` is retired, and `gemini-2.5-flash` is refused for new keys. Put the key only in the process environment or an untracked `.env` file. Do not commit it.
+With no provider key configured, drafting raises an explicit `503` error instead of inventing a draft. A `GEMINI_API_KEY` on the API process is used when the saved provider has no key. The Google Gemini default in AI settings is `gemini-3.5-flash-lite`. `gemini-2.0-flash` is retired, and `gemini-2.5-flash` is refused for new keys. Put the key only in the process environment or an untracked `.env` file. Do not commit it.
 
 Ollama is an optional local fallback, used only when no cloud key is set. Nothing here changes the committed provider default, and no key is stored in the repo.
 

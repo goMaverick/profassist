@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.profassist import agents
 from app.profassist.errors import ProfassistError
 from app.profassist.models import Assessment, CourseDesign, Objective
-from app.profassist.moodle import CLOS
 from app.profassist.pii import scrub
 from app.profassist.service import (
     _chunks,
@@ -112,7 +111,7 @@ async def draft_design(
         query=cleaned.text or "course outline",
         message=cleaned.text,
         chunks=chunks[:4],
-        clos=course.clos or CLOS,
+        clos=course.clos or [],
         soul=soul,
     )
     row = await _row(db, org_id, course_id, user_id, create=True)

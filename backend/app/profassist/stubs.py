@@ -20,8 +20,17 @@ def grade_calibrator(features: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def at_risk_snapshot(students: list[dict[str, Any]], *, course_code: str = "") -> dict[str, Any]:
+def at_risk_snapshot(
+    students: list[dict[str, Any]],
+    *,
+    course_code: str = "",
+    features_by_student: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Early-warning page data. The dropout adapter decides whether a model is loaded."""
     from app.profassist.ml.dropout import predict
 
-    return predict(students, course_code=course_code)
+    return predict(
+        students,
+        course_code=course_code,
+        features_by_student=features_by_student,
+    )

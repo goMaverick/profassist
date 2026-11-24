@@ -32,17 +32,19 @@ export default function QualityPage() {
           <dl className="mt-4 grid grid-cols-2 gap-3">
             <div>
               <dt className="text-foreground/50 text-xs uppercase">Suggested level</dt>
-              <dd className="mt-1">—</dd>
+              <dd className="mt-1">{data.level ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-foreground/50 text-xs uppercase">p(you keep it)</dt>
-              <dd className="mt-1">—</dd>
+              <dd className="mt-1">{data.p_keep == null ? "—" : `${Math.round(data.p_keep * 100)}%`}</dd>
             </div>
           </dl>
-          <p className="text-foreground/60 mt-4">
-            Agreement, override rate and the calibration gap will appear here after a model is trained
-            on your own marks. Until then the council level is only a suggestion.
-          </p>
+          {!data.trained && (
+            <p className="text-foreground/60 mt-4">
+              Agreement, override rate and the calibration gap will appear here after a model is trained
+              on your own marks. Until then the council level is only a suggestion.
+            </p>
+          )}
           <Link href="/grade" className="mt-4 inline-block underline">
             Go to review and grade
           </Link>

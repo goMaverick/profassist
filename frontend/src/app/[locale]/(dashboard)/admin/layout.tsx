@@ -2,7 +2,16 @@
 
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { Activity, Bot, LayoutDashboard, MessageSquare, Star, Users } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  LayoutDashboard,
+  MessageSquare,
+  Network,
+  Plug,
+  Star,
+  Users,
+} from "lucide-react";
 
 import { ROUTES } from "@/lib/constants";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -15,15 +24,20 @@ const ADMIN_TABS: PageTab[] = [
   { label: "Ratings", href: ROUTES.ADMIN_RATINGS, icon: Star },
   { label: "System", href: ROUTES.ADMIN_SYSTEM, icon: Activity },
   { label: "AI settings", href: "/admin/ai", icon: Bot },
+  { label: "Councils", href: "/admin/councils", icon: Network },
+  { label: "Moodle", href: "/admin/integrations/moodle", icon: Plug },
   { label: "Models", href: "/admin/models", icon: Activity },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const path = usePathname() || "";
   const aiSettings = path === "/admin/ai" || path.endsWith("/admin/ai");
+  const moodleSettings =
+    path === "/admin/integrations/moodle" || path.endsWith("/admin/integrations/moodle");
+  const councilsSettings = path === "/admin/councils" || path.endsWith("/admin/councils");
   return (
     <div className="space-y-6 pb-8">
-      {!aiSettings && (
+      {!aiSettings && !moodleSettings && !councilsSettings && (
         <PageHeader
           eyebrow="Admin"
           title="Workspace administration"

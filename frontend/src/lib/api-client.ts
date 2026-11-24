@@ -6,15 +6,33 @@
 
 import { useAuthStore } from "@/stores";
 
+import { normalizeErrorMessage } from "./error-message";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public message: string,
     public data?: unknown,
+    /** Seconds from the `Retry-After` header, when the backend sent one. */
+    public retryAfter?: number | null,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/** Parse a `Retry-After` header (seconds or HTTP date) into whole seconds. */
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.floor(seconds);
+  }
+  const date = Date.parse(value);
+  if (!Number.isNaN(date)) {
+    return Math.max(0, Math.ceil((date - Date.now()) / 1000));
+  }
+  return null;
 }
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
@@ -95,7 +113,7 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      let errorData;
+      let errorData: unknown = null;
       try {
         errorData = await response.json();
       } catch {
@@ -103,8 +121,9 @@ class ApiClient {
       }
       throw new ApiError(
         response.status,
-        errorData?.detail || errorData?.message || "Request failed",
+        normalizeErrorMessage(errorData, response.status),
         errorData,
+        parseRetryAfter(response.headers.get("Retry-After")),
       );
     }
 

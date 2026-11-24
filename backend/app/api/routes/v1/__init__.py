@@ -7,7 +7,7 @@ from app.api.routes.v1 import health
 from app.api.routes.v1 import admin_users, auth, users
 from app.api.routes.v1 import admin_ratings
 from app.api.routes.v1 import sessions
-from app.api.routes.v1 import conversations, public_demos
+from app.api.routes.v1 import conversations
 from app.api.routes.v1 import admin_conversations
 from app.api.routes.v1 import agent
 from app.api.routes.v1 import rag
@@ -22,6 +22,14 @@ from app.api.routes.v1 import me_slash_commands
 from app.api.routes.v1 import admin_stats
 from app.api.routes.v1 import org_integrations
 from app.api.routes.v1 import profassist
+from app.api.routes.v1 import outline_ai
+from app.api.routes.v1 import assignment_ai
+from app.api.routes.v1 import assignment_groups
+from app.api.routes.v1 import deck_ai
+from app.api.routes.v1 import studio_collab
+from app.api.routes.v1 import moodle_connection
+from app.api.routes.v1 import ml_admin
+from app.api.routes.v1 import council_admin
 
 v1_router = APIRouter()
 
@@ -35,7 +43,6 @@ v1_router.include_router(admin_ratings.router, prefix="/admin/ratings", tags=["a
 v1_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
 
 v1_router.include_router(conversations.router, prefix="/conversations", tags=["conversations"])
-v1_router.include_router(public_demos.router, prefix="/demos", tags=["demos"])
 
 v1_router.include_router(agent.router, tags=["agent"])
 
@@ -63,3 +70,19 @@ v1_router.include_router(
     org_integrations.router, prefix="/org/integrations", tags=["org:integrations"]
 )
 v1_router.include_router(profassist.router, prefix="/profassist", tags=["profassist"])
+v1_router.include_router(deck_ai.router, prefix="/profassist", tags=["profassist:deck-ai"])
+v1_router.include_router(
+    studio_collab.router, prefix="/profassist", tags=["profassist:studio-collab"]
+)
+v1_router.include_router(outline_ai.router, prefix="/profassist", tags=["profassist:outline-ai"])
+v1_router.include_router(
+    assignment_groups.router, prefix="/profassist", tags=["profassist:assignment-groups"]
+)
+v1_router.include_router(
+    assignment_ai.router, prefix="/profassist", tags=["profassist:assignment-ai"]
+)
+v1_router.include_router(moodle_connection.router, prefix="/profassist", tags=["profassist:moodle"])
+v1_router.include_router(ml_admin.router, prefix="/profassist", tags=["profassist:ml-admin"])
+v1_router.include_router(
+    council_admin.router, prefix="/profassist/admin", tags=["profassist:council-admin"]
+)

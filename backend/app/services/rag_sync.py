@@ -1,5 +1,6 @@
 """RAG sync service."""
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -10,6 +11,8 @@ from app.db.models.sync_log import SyncLog
 from app.repositories import sync_log_repo
 from app.schemas.rag import RAGSyncLogItem, RAGSyncLogList
 from app.worker.tasks.rag_tasks import sync_collection_flow
+
+_BACKGROUND_TASKS: set[asyncio.Task[object]] = set()
 
 
 class RAGSyncService:
@@ -78,9 +81,7 @@ class RAGSyncService:
             collection_name=collection_name,
             mode=mode,
         )
-        import asyncio
-
-        asyncio.create_task(
+        task = asyncio.create_task(
             sync_collection_flow(
                 sync_log_id=str(sync_log.id),
                 source="local",
@@ -89,6 +90,8 @@ class RAGSyncService:
                 path=path,
             )
         )
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
         return sync_log
 
     async def complete_sync(

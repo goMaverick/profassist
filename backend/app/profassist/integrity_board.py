@@ -1,192 +1,14 @@
-"""Synthetic integrity drill-down for the professor.
+"""Integrity board for recognized submissions. Empty until real submissions are registered."""
 
-Two courses, several assignments, and a mix of clear, review, and concern
-pairs. A shared sentence that also appears in the brief is marked as a common
-source and is not treated as copying. Actions are notes for the professor.
-Nothing here is sent to Moodle or to a student.
-"""
-
+import re
 from typing import Any
 
-COURSES: list[dict[str, Any]] = [
-    {
-        "code": "MAAI 903",
-        "slug": "MAAI903",
-        "title": "AI Solutions Design & MLOps",
-        "assignments": [
-            {
-                "number": "1",
-                "title": "Workshops",
-                "groups": ["A", "B", "C", "D", "E"],
-                "pairs": [
-                    {
-                        "left": "A",
-                        "right": "B",
-                        "percent": 86,
-                        "passages": [
-                            {
-                                "id": "m1",
-                                "percent": 92,
-                                "common": False,
-                                "writing": "Medium",
-                                "left": "The shared draft still contains the typo sustanability.",
-                                "right": "The shared draft still contains the typo sustanability.",
-                            },
-                            {
-                                "id": "m2",
-                                "percent": 78,
-                                "common": False,
-                                "writing": "Low",
-                                "left": "We interviewed facilities staff and mapped meters to floors.",
-                                "right": "We interviewed facilities staff and mapped meters to floors.",
-                            },
-                            {
-                                "id": "m2b",
-                                "percent": 100,
-                                "common": True,
-                                "writing": "Low",
-                                "left": "The brief asks each group to name one campus process and measure it for four weeks.",
-                                "right": "The brief asks each group to name one campus process and measure it for four weeks.",
-                            },
-                        ],
-                    },
-                    {
-                        "left": "C",
-                        "right": "D",
-                        "percent": 48,
-                        "passages": [
-                            {
-                                "id": "m3",
-                                "percent": 70,
-                                "common": True,
-                                "writing": "Low",
-                                "left": "The brief asks for a measurable operational problem.",
-                                "right": "The brief asks for a measurable operational problem.",
-                            },
-                            {
-                                "id": "m3b",
-                                "percent": 48,
-                                "common": False,
-                                "writing": "Low",
-                                "left": "Peak use follows the afternoon class change.",
-                                "right": "Peak use follows the afternoon class change.",
-                            },
-                        ],
-                    },
-                ],
-            },
-            {
-                "number": "2",
-                "title": "Architecture report",
-                "groups": ["A", "B", "C", "D", "E"],
-                "pairs": [
-                    {
-                        "left": "B",
-                        "right": "E",
-                        "percent": 62,
-                        "passages": [
-                            {
-                                "id": "m4",
-                                "percent": 64,
-                                "common": False,
-                                "writing": "Medium",
-                                "left": "The rollback plan names who to call if the API fails.",
-                                "right": "The rollback plan names who to call if the API fails.",
-                            }
-                        ],
-                    }
-                ],
-            },
-            {
-                "number": "3",
-                "title": "Group project",
-                "groups": ["A", "B", "C", "D", "E", "F"],
-                "pairs": [
-                    {
-                        "left": "A",
-                        "right": "C",
-                        "percent": 22,
-                        "passages": [],
-                    },
-                    {
-                        "left": "D",
-                        "right": "F",
-                        "percent": 18,
-                        "passages": [
-                            {
-                                "id": "m5",
-                                "percent": 18,
-                                "common": False,
-                                "writing": "High",
-                                "left": "The system optimises throughput across heterogeneous nodes.",
-                                "right": "The system optimises throughput across heterogeneous nodes.",
-                            }
-                        ],
-                    },
-                ],
-            },
-        ],
-    },
-    {
-        "code": "MAAI 901",
-        "slug": "MAAI901",
-        "title": "Applied Machine Learning",
-        "assignments": [
-            {
-                "number": "1",
-                "title": "Problem set",
-                "groups": ["A", "B", "C", "D"],
-                "pairs": [
-                    {
-                        "left": "A",
-                        "right": "C",
-                        "percent": 78,
-                        "passages": [
-                            {
-                                "id": "m6",
-                                "percent": 81,
-                                "common": False,
-                                "writing": "High",
-                                "left": "The loss falls after epoch four because the learning rate was halved.",
-                                "right": "The loss falls after epoch four because the learning rate was halved.",
-                            }
-                        ],
-                    }
-                ],
-            },
-            {
-                "number": "2",
-                "title": "Lab notes",
-                "groups": ["A", "B", "C", "D"],
-                "pairs": [
-                    {
-                        "left": "B",
-                        "right": "D",
-                        "percent": 41,
-                        "passages": [
-                            {
-                                "id": "m7",
-                                "percent": 66,
-                                "common": True,
-                                "writing": "Low",
-                                "left": "Students record the seed and the data version in the lab note.",
-                                "right": "Students record the seed and the data version in the lab note.",
-                            },
-                            {
-                                "id": "m7b",
-                                "percent": 41,
-                                "common": False,
-                                "writing": "Low",
-                                "left": "The lab note stops before the error bars.",
-                                "right": "The lab note stops before the error bars.",
-                            },
-                        ],
-                    }
-                ],
-            },
-        ],
-    },
-]
+from sqlalchemy import select
+
+from app.profassist.models import Assessment, Course, GroupAssignment, IntegrityFlag, Submission
+from app.profassist.similarity import compare_submissions
+
+COURSES: list[dict[str, Any]] = []
 
 
 ROSTER: dict[str, dict[str, str]] = {
@@ -325,6 +147,74 @@ def register_course(course: dict[str, Any]) -> None:
 def unregister_course(slug: str) -> None:
     wanted = _norm(slug)
     COURSES[:] = [item for item in COURSES if item["slug"] != wanted]
+
+
+def _group_letter(name: str) -> str:
+    text = (name or "").strip()
+    if text.lower().startswith("group "):
+        return text[6:].strip().upper()[:1]
+    return text.upper()[:1] if len(text) == 1 else ""
+
+
+def register_synced_submissions(
+    code: str, title: str, assignments: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Show the pairs from a Moodle sync on the integrity board.
+
+    Each assignment item is ``{"number", "title", "submissions": [...]}`` where a
+    submission has ``group_name``, ``topic``, and already-scrubbed ``text``. Only
+    non-clear pairs are kept, so a course with no shared wording is not added.
+    The board is in-memory, exactly like the seeded demo board.
+    """
+    from app.profassist.similarity import compare_submissions
+
+    items: list[dict[str, Any]] = []
+    for item in assignments:
+        rows = [row for row in item.get("submissions") or [] if isinstance(row, dict)]
+        if len(rows) < 2:
+            continue
+        groups = sorted(
+            {letter for row in rows if (letter := _group_letter(row.get("group_name") or ""))}
+        )
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for flag in compare_submissions(rows):
+            left = _group_letter(flag.get("left_group") or "")
+            right = _group_letter(flag.get("right_group") or "")
+            if not left or not right or left == right:
+                continue
+            key = (left, right) if left < right else (right, left)
+            percent = max(1, min(100, round(float(flag.get("score") or 0) * 100)))
+            pair = grouped.setdefault(
+                key,
+                {"left": key[0], "right": key[1], "percent": 0, "passages": []},
+            )
+            pair["percent"] = max(int(pair["percent"]), percent)
+            pair["passages"].append(
+                {
+                    "id": f"{flag.get('section') or 'body'}-{len(pair['passages']) + 1}",
+                    "percent": percent,
+                    "common": False,
+                    "writing": "Medium" if percent >= 50 else "Low",
+                    "left": flag.get("passage_a") or "",
+                    "right": flag.get("passage_b") or "",
+                }
+            )
+        if grouped:
+            items.append(
+                {
+                    "number": str(item.get("number") or "1"),
+                    "title": str(item.get("title") or "Synced assignment"),
+                    "groups": groups,
+                    "pairs": sorted(
+                        grouped.values(), key=lambda pair: int(pair["percent"]), reverse=True
+                    ),
+                }
+            )
+    if not items:
+        return None
+    board = {"code": code, "slug": _norm(code) or "COURSE", "title": title, "assignments": items}
+    register_course(board)
+    return board
 
 
 def _course(code: str) -> dict[str, Any] | None:
@@ -605,10 +495,13 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
     if missing:
         pair_count = sum(int(item["flagged_pairs"]) for item in worrying)
         assignment_count = len({(item["slug"], str(item["number"])) for item in worrying})
-        lines.append(
-            f"{_spoken_code(named)} has no copying cases yet. "
-            f"{pair_count} cases need a look across {assignment_count} assignments in other courses."
-        )
+        if pair_count:
+            lines.append(
+                f"{_spoken_code(named)} has no copying cases yet. "
+                f"{pair_count} cases need a look across {assignment_count} assignments in other courses."
+            )
+        else:
+            lines.append(f"{_spoken_code(named)} has no copying cases yet.")
     for item in picked:
         if worrying and item["status"] == "Clear":
             continue
@@ -670,4 +563,640 @@ def concerns(code: str, number: str = "") -> dict[str, Any]:
         "matches": match_rows,
         "href": href,
         "message": "\n".join(lines),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Durable board backed by Submission / IntegrityFlag rows.
+# ---------------------------------------------------------------------------
+
+
+async def _load_all(db: Any, statement: Any) -> list[Any]:
+    result = await db.execute(statement)
+    return list(result.scalars().all())
+
+
+def _owned_clause(model: Any, user_id: Any) -> Any:
+    return (model.owner_user_id == user_id) | (model.owner_user_id.is_(None))
+
+
+async def _db_catalog(
+    db: Any, org_id: Any, user_id: Any
+) -> tuple[list[Any], list[Any], list[Any], list[Any], list[Any]]:
+    """Courses, assessments, group assignments, submissions, and flags.
+
+    Five queries in this order. Tests replace ``db.execute`` with a small queue.
+    """
+    courses = await _load_all(db, select(Course).where(Course.organization_id == org_id))
+    assessments = await _load_all(
+        db,
+        select(Assessment).where(
+            Assessment.organization_id == org_id,
+            _owned_clause(Assessment, user_id),
+        ),
+    )
+    group_assignments = await _load_all(
+        db,
+        select(GroupAssignment).where(
+            GroupAssignment.organization_id == org_id,
+            _owned_clause(GroupAssignment, user_id),
+        ),
+    )
+    submissions = await _load_all(
+        db,
+        select(Submission).where(Submission.organization_id == org_id),
+    )
+    flags = await _load_all(
+        db,
+        select(IntegrityFlag).where(
+            IntegrityFlag.organization_id == org_id,
+            _owned_clause(IntegrityFlag, user_id),
+        ),
+    )
+    # The SQL already scopes, but keep the boundary in Python too so a mocked
+    # or reused session can never widen the board.
+    courses = [row for row in courses if _same(getattr(row, "organization_id", org_id), org_id)]
+    assessments = [
+        row
+        for row in assessments
+        if _same(getattr(row, "organization_id", org_id), org_id) and _owner_ok(row, user_id)
+    ]
+    group_assignments = [
+        row
+        for row in group_assignments
+        if _same(getattr(row, "organization_id", org_id), org_id) and _owner_ok(row, user_id)
+    ]
+    submissions = [
+        row for row in submissions if _same(getattr(row, "organization_id", org_id), org_id)
+    ]
+    flags = [
+        row
+        for row in flags
+        if _same(getattr(row, "organization_id", org_id), org_id) and _owner_ok(row, user_id)
+    ]
+    return courses, assessments, group_assignments, submissions, flags
+
+
+def _same(value: Any, expected: Any) -> bool:
+    return str(value) == str(expected)
+
+
+def _owner_ok(row: Any, user_id: Any) -> bool:
+    owner = getattr(row, "owner_user_id", None)
+    return owner is None or _same(owner, user_id)
+
+
+def _course_slug(course: Any) -> str:
+    return (
+        _norm(str(getattr(course, "code", "") or ""))
+        or _norm(str(getattr(course, "external_id", "") or ""))
+        or "COURSE"
+    )
+
+
+def _course_matches(course: Any, wanted: str | None) -> bool:
+    if not wanted:
+        return True
+    values = {
+        _course_slug(course),
+        _norm(str(getattr(course, "code", "") or "")),
+        _norm(str(getattr(course, "external_id", "") or "")),
+    }
+    return wanted in values
+
+
+def _find_course(courses: list[Any], wanted: str) -> Any | None:
+    target = _norm(wanted)
+    for course in courses:
+        if _course_matches(course, target):
+            return course
+    return None
+
+
+def _assessment_refs(
+    courses: list[Any], assessments: list[Any], group_assignments: list[Any]
+) -> list[dict[str, Any]]:
+    """One display row per assessment, enriched by a published group assignment."""
+    by_assessment: dict[str, Any] = {}
+    for assignment in group_assignments:
+        key = str(getattr(assignment, "assessment_id", "") or "")
+        if key and key not in by_assessment:
+            by_assessment[key] = assignment
+    refs: list[dict[str, Any]] = []
+    for course in courses:
+        rows = [
+            assessment
+            for assessment in assessments
+            if str(getattr(assessment, "course_id", "")) == str(getattr(course, "id", ""))
+        ]
+        rows.sort(
+            key=lambda row: (
+                str(getattr(row, "created_at", "") or ""),
+                str(getattr(row, "id", "")),
+            )
+        )
+        for index, assessment in enumerate(rows, start=1):
+            published = by_assessment.get(str(getattr(assessment, "id", "")))
+            external = str(getattr(assessment, "external_id", "") or "")
+            number = str(getattr(published, "number", "") or external or index)
+            title = str(
+                getattr(published, "title", "") or getattr(assessment, "title", "") or "Assignment"
+            )
+            refs.append(
+                {
+                    "course": course,
+                    "slug": _course_slug(course),
+                    "assessment": assessment,
+                    "number": number,
+                    "title": title,
+                    "order": index,
+                }
+            )
+    return refs
+
+
+def _group_labels(rows: list[Any]) -> dict[str, str]:
+    """Map each stored group name to a short label. Group A and A both become A."""
+    names = sorted({str(getattr(row, "group_name", "") or "").strip() for row in rows})
+    names.sort(key=lambda name: not bool(_group_letter(name)))
+    labels: dict[str, str] = {}
+    used: set[str] = set()
+    for name in names:
+        letter = _group_letter(name)
+        if not letter:
+            letter = next(
+                (candidate for candidate in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if candidate not in used),
+                f"G{len(used) + 1}",
+            )
+        labels[name] = letter
+        used.add(letter)
+    return labels
+
+
+def _assessment_rows(assessment: Any, submissions: list[Any]) -> list[Any]:
+    key = str(getattr(assessment, "id", ""))
+    return [row for row in submissions if str(getattr(row, "assessment_id", "")) == key]
+
+
+def _as_percent(score: Any) -> int:
+    try:
+        value = float(score or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value <= 0:
+        return 0
+    return max(1, min(100, round(value * 100)))
+
+
+def _pair_entry(left: str, right: str) -> dict[str, Any]:
+    return {"left": left, "right": right, "percent": 0, "passages": []}
+
+
+def _group_of(row: Any, labels: dict[str, str]) -> str:
+    return labels.get(str(getattr(row, "group_name", "") or "").strip(), "")
+
+
+def _pair_map(
+    rows: list[Any], flags: list[Any], labels: dict[str, str]
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Pair scores from stored flags, with a deterministic computed fallback."""
+    by_id = {str(getattr(row, "id", "")): row for row in rows}
+    pairs: dict[tuple[str, str], dict[str, Any]] = {}
+    for flag in flags:
+        left = by_id.get(str(getattr(flag, "left_submission_id", "")))
+        right = by_id.get(str(getattr(flag, "right_submission_id", "")))
+        if left is None or right is None:
+            continue
+        left_label = _group_of(left, labels)
+        right_label = _group_of(right, labels)
+        if not left_label or not right_label or left_label == right_label:
+            continue
+        key = (left_label, right_label) if left_label < right_label else (right_label, left_label)
+        percent = _as_percent(getattr(flag, "score", 0))
+        entry = pairs.setdefault(key, _pair_entry(key[0], key[1]))
+        entry["percent"] = max(int(entry["percent"]), percent)
+        writing = str(getattr(flag, "kind", "") or "").lower() == "writing"
+        entry["passages"].append(
+            {
+                "id": f"{getattr(flag, 'section', '') or 'body'}-{len(entry['passages']) + 1}",
+                "percent": percent,
+                "common": False,
+                "writing": "High" if writing else ("Medium" if percent >= 50 else "Low"),
+                "left": str(getattr(flag, "passage_a", "") or ""),
+                "right": str(getattr(flag, "passage_b", "") or ""),
+            }
+        )
+    stored = set(pairs)
+    computed = compare_submissions(
+        [
+            {
+                "id": str(getattr(row, "id", "")),
+                "group_name": str(getattr(row, "group_name", "") or ""),
+                "topic": str(getattr(row, "topic", "") or ""),
+                "text": str(
+                    getattr(row, "scrubbed_text", "") or getattr(row, "raw_text", "") or ""
+                ),
+            }
+            for row in rows
+        ]
+    )
+    for flag in computed:
+        left = by_id.get(str(flag.get("left_id") or ""))
+        right = by_id.get(str(flag.get("right_id") or ""))
+        if left is None or right is None:
+            continue
+        left_label = _group_of(left, labels)
+        right_label = _group_of(right, labels)
+        if not left_label or not right_label or left_label == right_label:
+            continue
+        key = (left_label, right_label) if left_label < right_label else (right_label, left_label)
+        if key in stored:
+            continue
+        percent = _as_percent(flag.get("score"))
+        entry = pairs.setdefault(key, _pair_entry(key[0], key[1]))
+        entry["percent"] = max(int(entry["percent"]), percent)
+        entry["passages"].append(
+            {
+                "id": f"{flag.get('section') or 'body'}-{len(entry['passages']) + 1}",
+                "percent": percent,
+                "common": False,
+                "writing": "Medium" if percent >= 50 else "Low",
+                "left": str(flag.get("passage_a") or ""),
+                "right": str(flag.get("passage_b") or ""),
+            }
+        )
+    return pairs
+
+
+def _db_pair_status(pair: dict[str, Any]) -> str:
+    counted = len([item for item in pair.get("passages") or [] if not item.get("common")])
+    return _status(int(pair.get("percent") or 0), counted)
+
+
+def _overall_status(statuses: list[str]) -> str:
+    if "Concern" in statuses:
+        return "Concern"
+    if any(status != "Clear" for status in statuses):
+        return "Review"
+    return "Clear"
+
+
+def _card_for_ref(ref: dict[str, Any]) -> dict[str, Any]:
+    pairs = list(ref["pairs"].values())
+    statuses = [_db_pair_status(pair) for pair in pairs]
+    flagged = sum(1 for status in statuses if status != "Clear")
+    highest = max((int(pair["percent"]) for pair in pairs), default=0)
+    writing = sum(1 for pair in pairs if _writing_flag(pair.get("passages") or []))
+    groups = len(set(ref["labels"].values()))
+    course = ref["course"]
+    return {
+        "course": str(getattr(course, "code", "") or ""),
+        "slug": ref["slug"],
+        "title": str(getattr(course, "title", "") or ""),
+        "number": str(ref["number"]),
+        "name": str(ref["title"]),
+        "groups": groups,
+        "flagged_pairs": flagged,
+        "highest": highest,
+        "writing_flags": writing,
+        "status": _overall_status(statuses),
+        "line": (
+            f"{_count(groups, 'group', 'groups')} · "
+            f"{_count(flagged, 'pair', 'pairs')} to read · "
+            f"{_count(writing, 'writing flag', 'writing flags')}"
+        ),
+        "course_id": str(getattr(course, "id", "") or ""),
+        "assessment_id": str(getattr(ref["assessment"], "id", "") or ""),
+    }
+
+
+def _prepare_refs(
+    courses: list[Any],
+    assessments: list[Any],
+    group_assignments: list[Any],
+    submissions: list[Any],
+    flags: list[Any],
+    wanted: str | None = None,
+) -> list[dict[str, Any]]:
+    refs = _assessment_refs(courses, assessments, group_assignments)
+    prepared: list[dict[str, Any]] = []
+    for ref in refs:
+        if not _course_matches(ref["course"], wanted):
+            continue
+        rows = _assessment_rows(ref["assessment"], submissions)
+        if not rows:
+            continue
+        labels = _group_labels(rows)
+        ref["rows"] = rows
+        ref["labels"] = labels
+        ref["pairs"] = _pair_map(rows, flags, labels)
+        prepared.append(ref)
+    return prepared
+
+
+def _find_ref(refs: list[dict[str, Any]], number: str) -> dict[str, Any] | None:
+    target = str(number)
+    for ref in refs:
+        assessment = ref["assessment"]
+        values = {
+            str(ref["number"]),
+            str(ref["title"]),
+            str(getattr(assessment, "external_id", "") or ""),
+            str(ref["order"]),
+        }
+        if target in values:
+            return ref
+    return None
+
+
+async def overview_db(db: Any, org_id: Any, user_id: Any, course: str = "all") -> dict[str, Any]:
+    """Courses and assignments with real submissions. Empty until a sync or upload."""
+    wanted = None if not course or course == "all" else _norm(course)
+    courses, assessments, group_assignments, submissions, flags = await _db_catalog(
+        db, org_id, user_id
+    )
+    refs = _prepare_refs(courses, assessments, group_assignments, submissions, flags, wanted)
+    cards = [_card_for_ref(ref) for ref in refs]
+    courses_out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for ref in refs:
+        slug = ref["slug"]
+        if slug in seen:
+            continue
+        seen.add(slug)
+        courses_out.append(
+            {
+                "code": str(getattr(ref["course"], "code", "") or ""),
+                "slug": slug,
+                "title": str(getattr(ref["course"], "title", "") or ""),
+            }
+        )
+    cards.sort(key=lambda card: (card["slug"], str(card["number"])))
+    return {
+        "courses": courses_out,
+        "summary": {
+            "courses": len(courses_out),
+            "assignments": len(cards),
+            "groups": sum(card["groups"] for card in cards),
+            "review": sum(1 for card in cards if card["status"] == "Review"),
+            "concern": sum(1 for card in cards if card["status"] == "Concern"),
+        },
+        "items": cards,
+    }
+
+
+async def assignment_matrix_db(
+    db: Any, org_id: Any, user_id: Any, course: str, number: str
+) -> dict[str, Any]:
+    courses, assessments, group_assignments, submissions, flags = await _db_catalog(
+        db, org_id, user_id
+    )
+    found = _find_course(courses, course)
+    if found is None:
+        return {"error": "That course is not in this workspace."}
+    refs = _prepare_refs([found], assessments, group_assignments, submissions, flags)
+    ref = _find_ref(refs, number)
+    if ref is None:
+        return {"error": "That assignment is not in this course."}
+    groups = sorted(set(ref["labels"].values()))
+    matrix = [
+        [
+            100
+            if left == right
+            else int(
+                ref["pairs"]
+                .get((left, right) if left < right else (right, left), {"percent": 0})
+                .get("percent", 0)
+            )
+            for right in groups
+        ]
+        for left in groups
+    ]
+    pairs: list[dict[str, Any]] = []
+    for index, left in enumerate(groups):
+        for right in groups[index + 1 :]:
+            key = (left, right) if left < right else (right, left)
+            entry = ref["pairs"].get(key)
+            if entry is None:
+                pairs.append(
+                    {
+                        "left": left,
+                        "right": right,
+                        "percent": 0,
+                        "shared": 0,
+                        "writing": False,
+                        "status": "Clear",
+                    }
+                )
+                continue
+            passages = entry.get("passages") or []
+            pairs.append(
+                {
+                    "left": left,
+                    "right": right,
+                    "percent": int(entry["percent"]),
+                    "shared": len([item for item in passages if not item.get("common")]),
+                    "writing": _writing_flag(passages),
+                    "status": _db_pair_status(entry),
+                }
+            )
+    pairs.sort(key=lambda row: row["percent"], reverse=True)
+    course_row = ref["course"]
+    return {
+        "course": str(getattr(course_row, "code", "") or ""),
+        "slug": ref["slug"],
+        "assignment": str(ref["number"]),
+        "name": str(ref["title"]),
+        "groups": groups,
+        "matrix": matrix,
+        "pairs": pairs,
+        "card": _card_for_ref(ref),
+    }
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    body = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not body:
+        return []
+    return [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
+
+
+def _split_runs(paragraph: str, passages: list[dict[str, Any]], side: str) -> list[dict[str, Any]]:
+    for index, passage in enumerate(passages):
+        needle = str(passage.get(side) or "")
+        if not needle:
+            continue
+        at = paragraph.find(needle)
+        if at < 0:
+            continue
+        runs: list[dict[str, Any]] = []
+        if at:
+            runs.append(_run(paragraph[:at]))
+        runs.append(
+            _run(
+                needle,
+                str(passage.get("id") or ""),
+                bool(passage.get("common")),
+            )
+        )
+        tail = paragraph[at + len(needle) :]
+        if tail:
+            runs.extend(
+                _split_runs(
+                    tail,
+                    passages[:index] + passages[index + 1 :],
+                    side,
+                )
+            )
+        return runs
+    return [_run(paragraph)]
+
+
+def _document_paragraphs(
+    text: str, passages: list[dict[str, Any]], side: str
+) -> list[dict[str, Any]]:
+    paragraphs = _split_paragraphs(text)
+    if not paragraphs:
+        return [{"runs": [_run("No text was stored for this submission.")]}]
+    return [{"runs": _split_runs(paragraph, passages, side)} for paragraph in paragraphs]
+
+
+def _submitted_label(submission: Any) -> str:
+    created = getattr(submission, "created_at", None)
+    if created is None:
+        return ""
+    try:
+        return created.strftime("%d %b %Y")
+    except AttributeError:
+        return str(created)[:10]
+
+
+def _matches_from_passages(
+    passages: list[dict[str, Any]], decisions: dict[str, str]
+) -> list[dict[str, Any]]:
+    labels = {
+        "shared": "Shared",
+        "brief": "From the brief - not counted",
+        "readings": "From readings - not counted",
+    }
+    box = {"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}
+    matches: list[dict[str, Any]] = []
+    for index, passage in enumerate(passages):
+        left = str(passage.get("left") or "")
+        common = bool(passage.get("common"))
+        if common and "reading" in left.lower():
+            source = "readings"
+        elif common:
+            source = "brief"
+        else:
+            source = "shared"
+        match_id = str(passage.get("id") or f"m{index + 1}")
+        matches.append(
+            {
+                "id": match_id,
+                "percent": int(passage.get("percent") or 0),
+                "source": source,
+                "tag": labels[source],
+                "quote": left or str(passage.get("right") or ""),
+                "context": "",
+                "page_left": 1,
+                "page_right": 1,
+                "left_box": dict(box),
+                "right_box": dict(box),
+                "decision": decisions.get(match_id, "pending"),
+            }
+        )
+    matches.sort(key=lambda row: row["percent"], reverse=True)
+    return matches
+
+
+def _empty_document(group: str) -> dict[str, Any]:
+    return {
+        "group": group,
+        "origin": "",
+        "converter": "",
+        "pages": 0,
+        "view": "",
+        "original": "",
+        "filename": "",
+    }
+
+
+def _first_for_group(rows: list[Any], labels: dict[str, str], group: str) -> Any | None:
+    matches = [row for row in rows if _group_of(row, labels) == group]
+    if not matches:
+        return None
+    matches.sort(key=lambda row: str(getattr(row, "id", "")))
+    return matches[0]
+
+
+async def pair_detail_db(
+    db: Any, org_id: Any, user_id: Any, course: str, number: str, left: str, right: str
+) -> dict[str, Any]:
+    courses, assessments, group_assignments, submissions, flags = await _db_catalog(
+        db, org_id, user_id
+    )
+    found = _find_course(courses, course)
+    if found is None:
+        return {"error": "That course is not in this workspace."}
+    refs = _prepare_refs([found], assessments, group_assignments, submissions, flags)
+    ref = _find_ref(refs, number)
+    if ref is None:
+        return {"error": "That assignment is not in this course."}
+    labels = ref["labels"]
+    left_label = _group_letter(str(left)) or str(left).upper()[:1]
+    right_label = _group_letter(str(right)) or str(right).upper()[:1]
+    if left_label not in set(labels.values()) or right_label not in set(labels.values()):
+        return {"error": "That pair is not in this workspace."}
+    left_row = _first_for_group(ref["rows"], labels, left_label)
+    right_row = _first_for_group(ref["rows"], labels, right_label)
+    if left_row is None or right_row is None:
+        return {"error": "That pair is not in this workspace."}
+    key = (left_label, right_label) if left_label < right_label else (right_label, left_label)
+    entry = ref["pairs"].get(key) or _pair_entry(key[0], key[1])
+    passages = list(entry.get("passages") or [])
+    percent = int(entry.get("percent") or 0)
+    pair_id = _pair_id(ref["slug"], str(ref["number"]), left_label, right_label)
+    from app.profassist.integrity_docs import load_decisions, summarise
+
+    decisions = load_decisions().get(pair_id, {})
+    matches = _matches_from_passages(passages, decisions)
+    left_text = str(
+        getattr(left_row, "scrubbed_text", "") or getattr(left_row, "raw_text", "") or ""
+    )
+    right_text = str(
+        getattr(right_row, "scrubbed_text", "") or getattr(right_row, "raw_text", "") or ""
+    )
+    course_row = ref["course"]
+    return {
+        "course": str(getattr(course_row, "code", "") or ""),
+        "slug": ref["slug"],
+        "assignment": str(ref["number"]),
+        "name": str(ref["title"]),
+        "left": left_label,
+        "right": right_label,
+        "percent": percent,
+        "status": _db_pair_status(entry),
+        "left_text": _document_paragraphs(left_text, passages, "left"),
+        "right_text": _document_paragraphs(right_text, passages, "right"),
+        "left_meta": {
+            "members": "",
+            "submitted": _submitted_label(left_row),
+        },
+        "right_meta": {
+            "members": "",
+            "submitted": _submitted_label(right_row),
+        },
+        "passages": passages,
+        "matches": matches,
+        "decisions": summarise(matches, decisions),
+        "documents": {
+            "left": _empty_document(left_label),
+            "right": _empty_document(right_label),
+        },
+        "why": (
+            "The highlight is the wording that appears in both submissions. "
+            "A line that also appears in the assignment brief or the readings is marked "
+            "as a common source and is not treated as copying."
+        ),
     }

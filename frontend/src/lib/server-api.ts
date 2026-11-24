@@ -11,6 +11,8 @@ export class BackendApiError extends Error {
     public status: number,
     public statusText: string,
     public data?: unknown,
+    /** Response headers, so callers can forward e.g. `Retry-After`. */
+    public headers?: Headers,
   ) {
     super(`Backend API error: ${status} ${statusText}`);
     this.name = "BackendApiError";
@@ -24,10 +26,13 @@ interface RequestOptions extends RequestInit {
 }
 
 /**
- * Make a request to the FastAPI backend.
- * This should only be called from Next.js API routes or Server Components.
+ * Like {@link backendFetch}, but also returns the backend's HTTP status code so
+ * callers can mirror it instead of hard-coding a response status.
  */
-export async function backendFetch<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+export async function backendFetchWithStatus<T>(
+  endpoint: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; status: number }> {
   const { params, body, raw, ...fetchOptions } = options;
 
   let url = `${BACKEND_URL}${endpoint}`;
@@ -61,20 +66,28 @@ export async function backendFetch<T>(endpoint: string, options: RequestOptions 
     } catch {
       errorData = null;
     }
-    throw new BackendApiError(response.status, response.statusText, errorData);
+    throw new BackendApiError(response.status, response.statusText, errorData, response.headers);
   }
 
   // Handle empty responses
   const text = await response.text();
   if (!text) {
-    return null as T;
+    return { data: null as T, status: response.status };
   }
 
-  if (raw) {
-    return text as T;
-  }
+  return {
+    data: (raw ? text : JSON.parse(text)) as T,
+    status: response.status,
+  };
+}
 
-  return JSON.parse(text);
+/**
+ * Make a request to the FastAPI backend.
+ * This should only be called from Next.js API routes or Server Components.
+ */
+export async function backendFetch<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { data } = await backendFetchWithStatus<T>(endpoint, options);
+  return data;
 }
 
 /**

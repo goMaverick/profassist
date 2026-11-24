@@ -3,16 +3,21 @@
 import asyncio
 import json
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAppAdmin, CurrentUser, DBSession
 from app.integrations.moodle.gateway import launch as moodle_launch
-from app.integrations.moodle.gateway import status_for as moodle_status
-from app.integrations.moodle.gateway import test_connection as moodle_test
+from app.profassist.briefing import build_briefing
 from app.profassist.council_script import script_for
+from app.profassist.course_memory.service import (
+    load_dossier,
+    rebuild_course_memory,
+    rebuild_material,
+)
 from app.profassist.deps import ProfOrg
 from app.profassist.design import approve_design, draft_design, get_design, save_design
 from app.profassist.groupwork import (
@@ -33,6 +38,7 @@ from app.profassist.groupwork import (
 )
 from app.profassist.memory import delete_memory, list_memories
 from app.profassist.outline import (
+    STEPS,
     accept_assessments,
     assist_step,
     attach_file,
@@ -40,7 +46,8 @@ from app.profassist.outline import (
     finish_outline,
     get_outline,
     list_outlines,
-    outline_materials,
+    outline_context,
+    remove_outline_material,
     save_instructions,
     save_step,
     start_outline,
@@ -57,6 +64,7 @@ from app.profassist.service import (
     approve_reflection,
     build_cited_deck,
     calibrator_page,
+    capture_movement,
     check_rubric,
     create_rubric,
     deck_bytes,
@@ -93,11 +101,10 @@ from app.profassist.service import (
     save_template,
     scan_integrity,
     set_flag,
-    sync_moodle,
     upload_submission_zip,
 )
 from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
-from app.profassist.tracking import list_registered_models
+from app.profassist.tracking import list_registered_models_async
 from app.profassist.visuals import page_visuals
 
 router = APIRouter()
@@ -148,9 +155,20 @@ class RubricPasteBody(BaseModel):
     pasted: str = ""
 
 
+class BriefingBody(BaseModel):
+    course_id: uuid.UUID | None = None
+
+
 @router.get("/home")
 async def home_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return await home(db, org.id, user.id)
+
+
+@router.post("/home/briefing")
+async def home_briefing(
+    user: CurrentUser, org: ProfOrg, db: DBSession, body: BriefingBody | None = None
+) -> dict:
+    return await build_briefing(db, org.id, user.id, body.course_id if body else None)
 
 
 @router.get("/visuals")
@@ -162,23 +180,6 @@ async def visuals_view(user: CurrentUser, org: ProfOrg, page: str = "home") -> d
 @router.get("/courses")
 async def courses(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return {"items": await list_courses(db, org.id)}
-
-
-@router.get("/moodle/status")
-async def moodle_status_view(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    del user
-    return await moodle_status(db, org.id)
-
-
-@router.post("/moodle/test")
-async def moodle_test_view(user: CurrentUser, org: ProfOrg) -> dict:
-    del user, org
-    return moodle_test()
-
-
-@router.post("/moodle/sync")
-async def moodle_sync(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
-    return await sync_moodle(db, org.id, user.id)
 
 
 @router.post("/lti/launch")
@@ -197,10 +198,21 @@ async def upload_material(
     user: CurrentUser,
     org: ProfOrg,
     db: DBSession,
+    background: BackgroundTasks,
     file: UploadFile = File(...),
 ) -> dict:
     data = await file.read()
-    return await add_material(db, org.id, course_id, user.id, file.filename or "notes.txt", data)
+    material = await add_material(
+        db, org.id, course_id, user.id, file.filename or "notes.txt", data
+    )
+    if material.get("status") == "ready" and not (material.get("pii_report") or {}).get(
+        "quarantined"
+    ):
+        # Prefect runs after the response; a slow rebuild never blocks the upload.
+        from app.worker.tasks.profassist_tasks import course_memory_flow
+
+        background.add_task(course_memory_flow, str(org.id), str(course_id), str(user.id))
+    return material
 
 
 @router.delete("/courses/{course_id}/materials/{material_id}")
@@ -212,6 +224,53 @@ async def remove_material(
     db: DBSession,
 ) -> dict:
     return await delete_material(db, org.id, course_id, user.id, material_id)
+
+
+@router.get("/courses/{course_id}/memory")
+async def course_memory(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    # A foreign course must 404 before the dossier lookup.
+    materials = await list_materials(db, org.id, course_id, user.id)
+    dossier = await load_dossier(db, org.id, user.id, course_id)
+    from app.profassist.models import Course
+    from app.profassist.slide_memory import artifact_preferences, slide_preferences
+
+    course = await db.get(Course, course_id)
+    code = ""
+    if course is not None and course.organization_id == org.id:
+        code = str(course.code or "").strip()
+    query = f"{code} slides" if code else "slides"
+    preferences = await slide_preferences(db, org.id, user.id, query=query, limit=5)
+    artifact_query = f"{code} outline assignment rubric" if code else "outline assignment rubric"
+    artifacts = await artifact_preferences(db, org.id, user.id, query=artifact_query, limit=6)
+    return {
+        "dossier": dossier,
+        "materials": materials,
+        "slide_preferences": preferences,
+        "artifact_preferences": artifacts,
+    }
+
+
+@router.post("/courses/{course_id}/memory/rebuild")
+async def course_memory_rebuild(
+    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    # Keep the ownership check: a rebuild must never create a foreign dossier.
+    await list_materials(db, org.id, course_id, user.id)
+    result = await rebuild_course_memory(db, org.id, user.id, course_id)
+    return {
+        "status": str((result.get("dossier") or {}).get("status") or ""),
+        "trace_url": str(result.get("trace_url") or ""),
+        "materials": result.get("materials") or [],
+    }
+
+
+@router.post("/materials/{material_id}/extract")
+async def material_extract(
+    material_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    return await rebuild_material(db, org.id, user.id, material_id)
 
 
 @router.post("/courses/{course_id}/objectives/draft")
@@ -256,7 +315,7 @@ async def slides_approve(
 async def slides_pptx(
     deck_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> Response:
-    filename, data = await deck_bytes(db, org.id, deck_id)
+    filename, data = await deck_bytes(db, org.id, user.id, deck_id)
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -266,9 +325,13 @@ async def slides_pptx(
 
 @router.post("/courses/{course_id}/assessment/draft")
 async def assessment_draft(
-    course_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+    course_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    assessment_id: uuid.UUID | None = Query(default=None),
 ) -> dict:
-    return await draft_assessment(db, org.id, course_id, user.id)
+    return await draft_assessment(db, org.id, course_id, user.id, assessment_id)
 
 
 @router.get("/courses/{course_id}/assessment")
@@ -379,6 +442,11 @@ async def assessment_push(
 
     row = await db.get(Assessment, assessment_id)
     if row is None or row.organization_id != org.id:
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(404, "Assessment not found in this workspace")
+    owner = getattr(row, "owner_user_id", None)
+    if owner is not None and owner != user.id:
         from app.profassist.errors import ProfassistError
 
         raise ProfassistError(404, "Assessment not found in this workspace")
@@ -498,25 +566,50 @@ def _grade_place(course: str) -> tuple[str, str]:
     return slug, assignment_number(slug)
 
 
-@router.get("/integrity/overview")
-async def integrity_overview(course: str = "all") -> dict:
-    from app.profassist.integrity_board import overview
+def _feedback_text(notes: dict[str, Any]) -> str:
+    parts = [str(notes.get("overall") or "")]
+    for comment in notes.get("comments") or []:
+        if isinstance(comment, dict):
+            parts.append(" | ".join(str(value) for value in comment.values() if str(value).strip()))
+        else:
+            parts.append(str(comment))
+    for row in notes.get("rubric") or []:
+        if isinstance(row, dict):
+            parts.append(" | ".join(str(value) for value in row.values() if str(value).strip()))
+    return "\n".join(part for part in parts if part.strip())
 
-    return overview(course)
+
+@router.get("/integrity/overview")
+async def integrity_overview(
+    user: CurrentUser, org: ProfOrg, db: DBSession, course: str = "all"
+) -> dict:
+    from app.profassist.integrity_board import overview_db
+
+    return await overview_db(db, org.id, user.id, course)
 
 
 @router.get("/integrity/matrix")
-async def integrity_matrix(course: str, number: str) -> dict:
-    from app.profassist.integrity_board import assignment_matrix
+async def integrity_matrix(
+    user: CurrentUser, org: ProfOrg, db: DBSession, course: str, number: str
+) -> dict:
+    from app.profassist.integrity_board import assignment_matrix_db
 
-    return assignment_matrix(course, number)
+    return await assignment_matrix_db(db, org.id, user.id, course, number)
 
 
 @router.get("/integrity/pair")
-async def integrity_pair(course: str, number: str, left: str, right: str) -> dict:
-    from app.profassist.integrity_board import pair_detail
+async def integrity_pair(
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+    course: str,
+    number: str,
+    left: str,
+    right: str,
+) -> dict:
+    from app.profassist.integrity_board import pair_detail_db
 
-    return pair_detail(course, number, left, right)
+    return await pair_detail_db(db, org.id, user.id, course, number, left, right)
 
 
 @router.post("/integrity/pair")
@@ -550,7 +643,7 @@ async def integrity_pair_action(
 async def integrity_match_action(
     body: IntegrityAction, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    from app.profassist.integrity_board import _pair_id, pair_detail
+    from app.profassist.integrity_board import _pair_id, pair_detail_db
     from app.profassist.integrity_docs import save_decision
     from app.profassist.models import Approval
 
@@ -569,7 +662,9 @@ async def integrity_match_action(
         )
     )
     await db.flush()
-    detail = pair_detail(body.course, body.number, body.left, body.right)
+    detail = await pair_detail_db(
+        db, org.id, user.id, body.course, body.number, body.left, body.right
+    )
     return {
         "saved": True,
         "decisions": detail.get("decisions"),
@@ -579,7 +674,9 @@ async def integrity_match_action(
 
 
 @router.get("/integrity/file")
-async def integrity_file(course: str, number: str, group: str, which: str = "pdf") -> Response:
+async def integrity_file(
+    _: CurrentUser, __: ProfOrg, course: str, number: str, group: str, which: str = "pdf"
+) -> Response:
     from app.profassist.integrity_docs import file_bytes
 
     data, media, filename = file_bytes(course, number, group, which)
@@ -610,11 +707,12 @@ async def grade_feedback(
 async def grade_feedback_save(
     body: FeedbackBody, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    from app.profassist.grade_notes import save_feedback
+    from app.profassist.grade_notes import load_feedback, save_feedback
     from app.profassist.integrity_docs import document_side
     from app.profassist.models import Approval
 
     slug, number = _grade_place(body.course)
+    before = load_feedback(str(user.id), body.group, slug, number)
     notes = save_feedback(
         str(user.id),
         body.group,
@@ -639,6 +737,15 @@ async def grade_feedback_save(
         )
     )
     await db.flush()
+    await capture_movement(
+        db,
+        org.id,
+        user.id,
+        "feedback",
+        _feedback_text(before),
+        _feedback_text(notes),
+        "grade-feedback",
+    )
     letter = body.group.replace("Group ", "").strip() or "A"
     return {
         **notes,
@@ -838,7 +945,7 @@ async def ai_tool_save(body: ToolBody, user: CurrentAppAdmin, org: ProfOrg, db: 
 @router.get("/admin/models")
 async def models_admin(user: CurrentAppAdmin, org: ProfOrg) -> dict:
     del user, org
-    return list_registered_models()
+    return await list_registered_models_async()
 
 
 class StepBody(BaseModel):
@@ -855,6 +962,7 @@ class ChatBody(BaseModel):
     message: str = ""
     confirmed: bool = False
     pending_tool: str = ""
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class AcceptBody(BaseModel):
@@ -869,26 +977,13 @@ class SuggestBody(BaseModel):
 async def outlines(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
     return {
         "items": await list_outlines(db, org.id, user.id),
-        "steps": [
-            "basics",
-            "attachments",
-            "lecture",
-            "description",
-            "outcomes",
-            "schedule",
-            "readings",
-            "assessments",
-            "policies",
-            "review",
-        ],
+        "steps": list(STEPS),
     }
 
 
 @router.post("/outlines")
-async def outlines_start(
-    user: CurrentUser, org: ProfOrg, db: DBSession, demo: bool = False
-) -> dict:
-    return await start_outline(db, org.id, user.id, demo=demo)
+async def outlines_start(user: CurrentUser, org: ProfOrg, db: DBSession) -> dict:
+    return await start_outline(db, org.id, user.id)
 
 
 @router.get("/outlines/{outline_id}")
@@ -926,7 +1021,18 @@ async def outlines_instructions(
 async def outlines_files(
     outline_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    return {"items": await outline_materials(db, org.id, user.id, outline_id)}
+    return await outline_context(db, org.id, user.id, outline_id)
+
+
+@router.delete("/outlines/{outline_id}/materials/{material_id}")
+async def outlines_remove_material(
+    outline_id: uuid.UUID,
+    material_id: uuid.UUID,
+    user: CurrentUser,
+    org: ProfOrg,
+    db: DBSession,
+) -> dict:
+    return await remove_outline_material(db, org.id, user.id, outline_id, material_id)
 
 
 @router.post("/outlines/{outline_id}/materials")
@@ -1182,6 +1288,7 @@ async def professor_chat(body: ChatBody, user: CurrentUser, org: ProfOrg, db: DB
         message=body.message,
         confirmed=body.confirmed,
         pending_tool=body.pending_tool,
+        context=body.context,
     )
 
 
@@ -1197,6 +1304,7 @@ async def professor_chat_stream(
         message=body.message,
         confirmed=body.confirmed,
         pending_tool=body.pending_tool,
+        context=body.context,
     )
 
     async def events():

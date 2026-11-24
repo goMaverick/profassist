@@ -11,7 +11,7 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    ignores: [".next/", "node_modules/", "out/", "next-env.d.ts"],
+    ignores: [".next/", "node_modules/", "out/", "next-env.d.ts", "public/pdf.worker.min.mjs"],
   },
   // Accessibility: enforce the jsx-a11y recommended ruleset explicitly.
   // next/core-web-vitals (loaded via FlatCompat above) already registers the

@@ -41,6 +41,27 @@ group is for and which are required vs optional.
 | `OPENAI_API_KEY` | **required** | — | From platform.openai.com |
 | `AI_MODEL` | optional | `gpt-5.5` | Default model used by agent (provider-specific) |
 
+## Embeddings (local first, optional remote)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| EMBEDDING_PROVIDER | optional | local | local uses fastembed on CPU and needs no key; openai/remote uses a hosted model |
+| EMBEDDING_MODEL | optional | BAAI/bge-small-en-v1.5 | Local: BAAI/bge-small-en-v1.5 = 384 dims. Remote: text-embedding-3-small = 1536, text-embedding-3-large = 3072 |
+| EMBEDDING_API_KEY | required for openai | - | Falls back to OPENAI_API_KEY |
+| EMBEDDING_BASE_URL | optional | - | OpenAI-compatible embeddings endpoint |
+| EMBEDDING_DIM | optional | 0 | 0 derives the size from EMBEDDING_MODEL; set it only for a custom model |
+| MODELS_CACHE_DIR | optional | ./models_cache | Where the local fastembed model is downloaded and cached |
+
+Local mode downloads the model once (about 130 MB for BAAI/bge-small-en-v1.5)
+into MODELS_CACHE_DIR; later starts reuse it. If the download or load fails,
+note indexing fails with an explicit error and the note is not marked ready.
+Switching models changes the vector size, so recreate the Qdrant collection and
+re-index:
+
+    cd backend
+    uv run profassist cmd rag-reset-collection --collection profassist --force
+    uv run profassist cmd rag-reindex --all
+
 ## RAG (qdrant)
 
 | Variable | Required | Default | Description |

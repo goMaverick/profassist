@@ -6,7 +6,7 @@ See: https://anyio.readthedocs.io/en/stable/testing.html
 """
 # ruff: noqa: I001 - Imports structured for Jinja2 template conditionals
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -31,6 +31,23 @@ def anyio_backend() -> str:
 
 
 @pytest.fixture(autouse=True)
+def restore_profassist_runtime() -> Iterator[None]:
+    """Give every test the same AI runtime it started with.
+
+    ``bind_runtime`` writes module-level ContextVars that outlive a test, so one
+    test that sends traffic to Gemini leaks that route into the next test file.
+    Snapshot before the test and restore after, even when the test fails.
+    """
+    from app.profassist import runtime
+
+    variables = (runtime._prompts, runtime._tools, runtime._model)
+    saved = tuple(variable.get() for variable in variables)
+    yield
+    for variable, value in zip(variables, saved):
+        variable.set(value)
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limit_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test its own rate-limit counters.
 
@@ -39,6 +56,41 @@ def reset_rate_limit_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     that posts to an ``/auth/*`` route gets a 429 from the previous five.
     """
     monkeypatch.setattr(rate_limit_service, "_storage", InMemoryStorage())
+
+
+@pytest.fixture
+def fake_langfuse(monkeypatch: pytest.MonkeyPatch) -> str:
+    """A Langfuse client with a stable trace id, so trace URLs can be asserted."""
+    from app.profassist import observe
+
+    class _Span:
+        def __enter__(self) -> "_Span":
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+    class _Client:
+        def start_as_current_generation(self, **kwargs: object) -> _Span:
+            return _Span()
+
+        def start_as_current_span(self, **kwargs: object) -> _Span:
+            return _Span()
+
+        def update_current_trace(self, **kwargs: object) -> None:
+            return None
+
+        def get_current_trace_id(self) -> str:
+            return "trace-123"
+
+        def flush(self) -> None:
+            return None
+
+    monkeypatch.setattr(observe, "_client", lambda: _Client())
+    monkeypatch.setenv("LANGFUSE_PUBLIC_BASE_URL", "http://langfuse.test")
+    monkeypatch.setenv("LANGFUSE_PROJECT_ID", "proj-test")
+    observe.reset_step_trace()
+    return "http://langfuse.test/project/proj-test/traces/trace-123"
 
 
 @pytest.fixture

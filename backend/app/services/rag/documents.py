@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,187 @@ class DocxDocumentParser(BaseDocumentParser):
             return self._parse_docx_file(filepath)
         else:
             raise ValueError(f"Unsupported file extension. Allowed extensions: {self.allowed}")
+
+
+class PptxDocumentParser(BaseDocumentParser):
+    """Parser for PowerPoint decks (.pptx/.potx) using python-pptx.
+
+    Each slide becomes one page so titles, text frames, tables, and speaker
+    notes stay together when the processor chunks the deck.
+    """
+
+    allowed = [".pptx", ".potx"]
+
+    def _slide_text(self, slide: Any) -> str:
+        parts: list[str] = []
+        title = slide.shapes.title
+        title_id = title.shape_id if title is not None else None
+        if title is not None and title.text.strip():
+            parts.append(title.text.strip())
+        for shape in slide.shapes:
+            if title_id is not None and shape.shape_id == title_id:
+                continue
+            if getattr(shape, "has_text_frame", False):
+                text = "\n".join(
+                    paragraph.text.strip()
+                    for paragraph in shape.text_frame.paragraphs
+                    if paragraph.text.strip()
+                )
+                if text:
+                    parts.append(text)
+            if getattr(shape, "has_table", False):
+                rows = []
+                for row in shape.table.rows:
+                    cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                    if any(cells):
+                        rows.append(" | ".join(cells))
+                if rows:
+                    parts.append("\n".join(rows))
+        if getattr(slide, "has_notes_slide", False):
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                parts.append(f"Notes: {notes}")
+        return "\n\n".join(parts)
+
+    def _parse_pptx_file(self, filepath: Path) -> Document:
+        from pptx import Presentation
+
+        presentation = Presentation(str(filepath))
+        pages = [
+            DocumentPage(page_num=index, content=self._slide_text(slide))
+            for index, slide in enumerate(presentation.slides, start=1)
+        ]
+        return Document(pages=pages, metadata=self.get_document_metadata(filepath))
+
+    async def parse(self, filepath: Path) -> Document:
+        if not self.is_extension_allowed(filepath):
+            raise ValueError(f"Extension {filepath.suffix} not supported by PptxDocumentParser")
+        if filepath.suffix.lower() in (".pptx", ".potx"):
+            return self._parse_pptx_file(filepath)
+        raise ValueError(f"Unsupported file extension. Allowed extensions: {self.allowed}")
+
+
+class HtmlTextExtractor(HTMLParser):
+    """Visible text from HTML, keeping headings, paragraphs, and list items.
+
+    Script, style, template, SVG, and title content are dropped. Blocks are
+    separated by blank lines so the splitter sees natural paragraphs.
+    """
+
+    BLOCK_TAGS = frozenset(
+        {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "br",
+            "dd",
+            "div",
+            "dl",
+            "dt",
+            "figcaption",
+            "figure",
+            "footer",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "hr",
+            "li",
+            "main",
+            "nav",
+            "ol",
+            "p",
+            "pre",
+            "section",
+            "table",
+            "td",
+            "th",
+            "tr",
+            "ul",
+        }
+    )
+    SKIP_TAGS = frozenset({"script", "style", "noscript", "template", "svg", "title"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._buffer: list[str] = []
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag in self.BLOCK_TAGS:
+            self._flush()
+        if tag == "li":
+            self._buffer.append("- ")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS or self._skip_depth:
+            return
+        if tag in self.BLOCK_TAGS:
+            self._flush()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if self._skip_depth:
+            return
+        if tag in self.BLOCK_TAGS:
+            self._flush()
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth and data:
+            self._buffer.append(data)
+
+    def _flush(self) -> None:
+        text = " ".join("".join(self._buffer).split())
+        self._buffer.clear()
+        if text:
+            self._parts.append(text)
+
+    def text(self) -> str:
+        self._flush()
+        return "\n\n".join(self._parts)
+
+
+def html_to_text(markup: str) -> str:
+    """Extract visible text from an HTML string."""
+    extractor = HtmlTextExtractor()
+    extractor.feed(markup)
+    extractor.close()
+    return extractor.text()
+
+
+class HtmlDocumentParser(BaseDocumentParser):
+    """Parser for saved web pages and exported HTML notes."""
+
+    allowed = [".html", ".htm"]
+
+    def _parse_html_file(self, filepath: Path) -> Document:
+        page = DocumentPage(
+            page_num=1,
+            content=html_to_text(filepath.read_text(encoding="utf-8", errors="replace")),
+        )
+        return Document(pages=[page], metadata=self.get_document_metadata(filepath))
+
+    async def parse(self, filepath: Path) -> Document:
+        if not self.is_extension_allowed(filepath):
+            raise ValueError(f"Extension {filepath.suffix} not supported by HtmlDocumentParser")
+        if filepath.suffix.lower() in (".html", ".htm"):
+            return self._parse_html_file(filepath)
+        raise ValueError(f"Unsupported file extension. Allowed extensions: {self.allowed}")
 
 
 class PyMuPDFParser(BaseDocumentParser):
@@ -268,6 +450,8 @@ class DocumentProcessor:
     Supported file types:
     - TXT, MD: TextDocumentParser (Python native)
     - DOCX: DocxDocumentParser (Python native)
+    - PPTX, POTX: PptxDocumentParser (one page per slide)
+    - HTML, HTM: HtmlDocumentParser (visible text only)
     - PDF: PyMuPDFParser (local, tables, OCR fallback)
     """
 
@@ -283,6 +467,8 @@ class DocumentProcessor:
         # Always use Python native parser for plain text
         self.text_parser = TextDocumentParser()
         self.docx_parser = DocxDocumentParser()
+        self.pptx_parser = PptxDocumentParser()
+        self.html_parser = HtmlDocumentParser()
         self.pdf_parser = PyMuPDFParser(enable_ocr=False)
 
     @staticmethod
@@ -330,11 +516,16 @@ class DocumentProcessor:
         Raises:
             ValueError: If the file type is not supported.
         """
-        if filepath.suffix in (".txt", ".md"):
+        suffix = filepath.suffix.lower()
+        if suffix in (".txt", ".md"):
             document = await self.text_parser.parse(filepath)
-        elif filepath.suffix == ".docx":
+        elif suffix == ".docx":
             document = await self.docx_parser.parse(filepath)
-        elif filepath.suffix == ".pdf":
+        elif suffix in (".pptx", ".potx"):
+            document = await self.pptx_parser.parse(filepath)
+        elif suffix in (".html", ".htm"):
+            document = await self.html_parser.parse(filepath)
+        elif suffix == ".pdf":
             document = await self.pdf_parser.parse(filepath)
         else:
             raise ValueError(f"Unsupported file type: {filepath.suffix}")

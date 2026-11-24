@@ -116,6 +116,8 @@ Supported file types with the default PyMuPDF parser:
 |-----------|------|-------|
 | `.pdf` | PDF | Text + table extraction via PyMuPDF |
 | `.docx` | Word | Paragraph extraction via python-docx |
+| `.pptx`, `.potx` | PowerPoint | One page per slide; titles, text frames, tables, and notes |
+| `.html`, `.htm` | HTML | Visible headings, paragraphs, and list items; scripts/styles dropped |
 | `.txt` | Plain text | Direct read |
 | `.md` | Markdown | Direct read |
 
@@ -142,8 +144,9 @@ Text is split into chunks before embedding. Configure via environment variables:
 | `fixed` | Uniform chunk sizes; simplest but may split mid-sentence |
 
 ### Embedding Providers
-Embeddings are generated using **OpenAI** (`text-embedding-3-small` by default).
-Set `EMBEDDING_MODEL` to change the model.
+Embeddings run locally by default through fastembed (`BAAI/bge-small-en-v1.5`, 384 dims, CPU); the model downloads once into `MODELS_CACHE_DIR`. Set `EMBEDDING_PROVIDER=openai` plus `EMBEDDING_API_KEY` to use `text-embedding-3-small` or `text-embedding-3-large` instead. Changing models changes the vector
+size: recreate the collection with `rag-reset-collection --force` and rebuild note chunks with
+`rag-reindex --all`.
 
 ### Vector Storage
 Vectors are stored in **Qdrant**. Configure with `QDRANT_HOST`, `QDRANT_PORT`,

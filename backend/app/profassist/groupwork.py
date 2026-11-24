@@ -196,12 +196,27 @@ async def save_groups(
     user_id: uuid.UUID,
     course_id: uuid.UUID,
     groups: list[dict[str, Any]],
+    assignment_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
+    """Replace a course's groups, or only one assignment's groups.
+
+    Course-level groups keep ``assignment_id`` null. Saving an assignment's
+    groups never touches them, and a course-level save leaves assignment groups
+    alone.
+    """
+    if assignment_id is not None:
+        assignment = await _assignment(db, org_id, user_id, assignment_id)
+        if assignment.course_id != course_id:
+            raise ProfassistError(400, "That assignment belongs to another course.")
+        scope = StudentGroup.assignment_id == assignment_id
+    else:
+        scope = StudentGroup.assignment_id.is_(None)
     await db.execute(
         StudentGroup.__table__.delete().where(
             StudentGroup.organization_id == org_id,
             StudentGroup.owner_user_id == user_id,
             StudentGroup.course_id == course_id,
+            scope,
         )
     )
     created = []
@@ -210,6 +225,7 @@ async def save_groups(
             organization_id=org_id,
             owner_user_id=user_id,
             course_id=course_id,
+            assignment_id=assignment_id,
             name=item.get("name") or "Group",
             member_ids=item.get("member_ids") or [],
         )
@@ -239,6 +255,7 @@ async def allocate(
                     StudentGroup.organization_id == org_id,
                     StudentGroup.course_id == row.course_id,
                     StudentGroup.owner_user_id == user_id,
+                    StudentGroup.assignment_id == row.id,
                 )
             )
         )
@@ -330,7 +347,9 @@ async def publish_assignment(
             "id": str(row.id),
             "title": row.title,
             "body": row.body,
-        }
+        },
+        db,
+        org_id,
     )
     row.status = "published"
     await db.flush()
@@ -425,8 +444,11 @@ def merge_catalog(
                 "weight": (existing or {}).get("weight", task.get("weight") or 0),
                 "status": (existing or {}).get("status") or "in outline",
                 "lo_codes": task.get("lo_codes") or (existing or {}).get("lo_codes") or [],
-                "brief": task.get("brief") or (existing or {}).get("body") or "",
-                "criteria": task.get("criteria") or [],
+                "brief": task.get("brief")
+                or "\n\n".join(str(item) for item in task.get("overview") or [] if str(item))
+                or (existing or {}).get("body")
+                or "",
+                "criteria": task.get("rubric") or task.get("criteria") or [],
             }
         )
         seen.add(number)
@@ -635,7 +657,9 @@ async def assignment_view(
         (
             await db.execute(
                 select(StudentGroup).where(
-                    StudentGroup.course_id == row.course_id, StudentGroup.owner_user_id == user_id
+                    StudentGroup.organization_id == org_id,
+                    StudentGroup.assignment_id == row.id,
+                    StudentGroup.owner_user_id == user_id,
                 )
             )
         )
@@ -679,6 +703,27 @@ async def assignment_view(
     )
 
 
+async def assignment_groups(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assignment_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """Return only the groups that belong to one assignment."""
+    row = await _assignment(db, org_id, user_id, assignment_id)
+    rows = (
+        (
+            await db.execute(
+                select(StudentGroup).where(
+                    StudentGroup.organization_id == org_id,
+                    StudentGroup.owner_user_id == user_id,
+                    StudentGroup.assignment_id == row.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [{"id": str(item.id), "name": item.name, "member_ids": item.member_ids} for item in rows]
+
+
 def _exemplar_public(row: Exemplar | None) -> dict[str, str] | None:
     if row is None:
         return None
@@ -701,6 +746,10 @@ def _assignment_public(row, ideas, allocations, groups=None) -> dict[str, Any]:
         "due": row.due,
         "lo_codes": row.lo_codes,
         "status": row.status,
+        "document": dict(getattr(row, "document", None) or {}),
+        "assessment_id": str(row.assessment_id) if row.assessment_id else "",
+        "blind": bool(getattr(row, "blind", False)),
+        "group_mode": getattr(row, "group_mode", None) or "individual",
         "ideas": ideas,
         "groups": groups or [],
         "allocations": allocations,

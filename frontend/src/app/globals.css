@@ -1,4 +1,5 @@
-/* Utilities only. Preflight is left out so it does not reset Carbon buttons, type, or lists. */
+/* Tailwind v4 layers. Preflight is restored now that Carbon is gone. */
+@import "tailwindcss/preflight";
 @import "tailwindcss/theme";
 @import "tailwindcss/utilities";
 

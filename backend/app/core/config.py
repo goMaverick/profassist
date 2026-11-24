@@ -166,7 +166,13 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_API_KEY: str = ""
-    EMBEDDING_MODEL: str = "text-embedding-3-large"
+    # local (fastembed, CPU, downloads the model on first use) or openai/remote
+    EMBEDDING_PROVIDER: str = "local"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str | None = None
+    # 0 = derive the vector size from EMBEDDING_MODEL
+    EMBEDDING_DIM: int = 0
 
     RAG_CHUNK_SIZE: int = 512
     RAG_CHUNK_OVERLAP: int = 50
@@ -214,7 +220,13 @@ class Settings(BaseSettings):
             chunking_strategy=self.RAG_CHUNKING_STRATEGY,
             enable_hybrid_search=self.RAG_HYBRID_SEARCH,
             enable_ocr=self.RAG_ENABLE_OCR,
-            embeddings_config=EmbeddingsConfig(model=self.EMBEDDING_MODEL),
+            embeddings_config=EmbeddingsConfig(
+                provider=self.EMBEDDING_PROVIDER,
+                model=self.EMBEDDING_MODEL,
+                dim=self.EMBEDDING_DIM,
+                api_key=self.EMBEDDING_API_KEY,
+                base_url=self.EMBEDDING_BASE_URL,
+            ),
             document_parser=DocumentParser(),
             pdf_parser=pdf_parser,
         )
@@ -227,3 +239,8 @@ Settings.model_rebuild()
 
 
 settings = Settings()
+
+
+def get_rag_settings() -> RAGSettings:
+    """Current RAG settings, including the selected embedding provider."""
+    return settings.rag

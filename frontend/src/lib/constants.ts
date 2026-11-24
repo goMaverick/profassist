@@ -46,7 +46,6 @@ export const ROUTES = {
   BILLING_INVOICES: "/billing/invoices",
   BILLING_PAYMENT_METHODS: "/billing/payment-methods",
   BILLING_SUBSCRIPTION: "/billing/subscription",
-  PRICING: "/pricing",
   ABOUT: "/about",
   CONTACT: "/contact",
   HELP: "/help",

@@ -1,5 +1,7 @@
 """Unit tests for the professor workflows. No database and no model key."""
 
+from collections.abc import Iterator
+
 import pytest
 
 from app.profassist.errors import ProfassistError, require_same_tenant
@@ -9,7 +11,7 @@ from app.profassist.grading import (
     quotes_in_text,
     reconcile,
 )
-from app.profassist.llm import complete, demo_complete
+from app.profassist.llm import complete
 from app.profassist.moodle import (
     SUBMISSIONS,
     FakeMoodleConnector,
@@ -21,6 +23,16 @@ from app.profassist.pii import assert_prompt_is_clean, scrub
 from app.profassist.similarity import compare_submissions, hash_embed
 from app.profassist.slides import build_pptx
 from app.profassist.stubs import at_risk_snapshot, grade_calibrator
+from tests.integrity_fixture import DEMO_COURSES, install, remove
+
+
+@pytest.fixture
+def demo_board() -> Iterator[None]:
+    install()
+    try:
+        yield
+    finally:
+        remove()
 
 
 def test_scrub_removes_roster_email_and_id() -> None:
@@ -43,6 +55,22 @@ def test_scrub_quarantines_an_unknown_name() -> None:
     result = scrub("Please ask Jordan Hale about the lab report.", [])
     assert result.quarantined is True
     assert any("Jordan Hale" in item for item in result.uncertain)
+
+
+def test_presidio_leaves_a_url_and_filename_unchanged() -> None:
+    from app.profassist.pii import _presidio_extra
+
+    assert _presidio_extra("See https://example.com/PIPE903-notes for details.") == []
+    assert _presidio_extra("PIPE903-notes-v2.txt") == []
+
+
+def test_heading_pairs_do_not_quarantine_but_a_body_name_does() -> None:
+    for heading in ("Practice Term", "Policies Late", "Course Schedule: Teaching Week"):
+        assert scrub(heading).quarantined is False
+
+    body = scrub("This report was written by Ahmed Al Mansoori for the final assessment.")
+    assert body.quarantined is True
+    assert any("Ahmed Al Mansoori" in item for item in body.uncertain)
 
 
 def test_model_gate_refuses_an_email() -> None:
@@ -72,15 +100,26 @@ def test_missing_course_pdf_still_opens() -> None:
     assert name.endswith(".pdf")
 
 
-def test_demo_quotes_are_in_the_submission() -> None:
+def test_grade_reply_quotes_are_in_the_submission() -> None:
+    import json
+
+    from app.profassist.llm import parse_grade_content
+
     submission = (
         "We chose this use case because the brief asks for a measurable operational problem. "
         "A limitation is that weekend readings were missing, therefore the trend is only reliable on weekdays."
     )
-    vote = demo_complete(
-        "grade_persona",
-        {"persona": "strict", "submission": submission, "criterion": {"name": "CLO 1"}},
+    vote = parse_grade_content(
+        json.dumps(
+            {
+                "level": "proficient",
+                "quotes": ["A limitation is that weekend readings were missing"],
+                "why": "The limitation is explicit.",
+            }
+        ),
+        "strict",
     )
+    assert vote is not None
     kept, rejected = quotes_in_text(vote["quotes"], submission)
     assert kept
     assert rejected == []
@@ -183,9 +222,15 @@ def test_similarity_flags_the_copied_method_only() -> None:
     assert "sustanability" in copied["rare_details"] or copied["kind"] == "fingerprint"
 
 
-def test_outline_assist_scrubs_a_contact_email_before_the_model() -> None:
+def test_outline_assist_scrubs_a_contact_email_before_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
     from app.profassist.llm import complete
 
+    calls: list[object] = []
+    _fake_model(monkeypatch, json.dumps({"reply": "ok", "suggestion": {}}), calls=calls)
     drafted = complete(
         "outline_assist",
         {
@@ -195,6 +240,7 @@ def test_outline_assist_scrubs_a_contact_email_before_the_model() -> None:
         },
     )
     assert isinstance(drafted, dict)
+    assert "ada@university.edu" not in json.dumps(calls)
 
 
 def test_assignment_catalog_keeps_the_outline_number_and_due_date() -> None:
@@ -219,7 +265,34 @@ def test_assignment_catalog_keeps_the_outline_number_and_due_date() -> None:
     assert rows[0]["status"] == "draft"
 
 
-def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
+def test_integrity_board_is_empty_until_submissions_are_registered() -> None:
+    from app.profassist.integrity_board import (
+        assignment_matrix,
+        concerns,
+        overview,
+        pair_detail,
+    )
+
+    board = overview("all")
+    assert board["courses"] == []
+    assert board["items"] == []
+    assert board["summary"] == {
+        "courses": 0,
+        "assignments": 0,
+        "groups": 0,
+        "review": 0,
+        "concern": 0,
+    }
+    assert assignment_matrix("MAAI903", "1") == {"error": "That course is not in this workspace."}
+    assert pair_detail("MAAI903", "1", "A", "B") == {"error": "That pair is not in this workspace."}
+    empty = concerns("AAS910")
+    assert empty["items"] == []
+    assert empty["cases"] == []
+    assert empty["matches"] == []
+    assert empty["message"] == "AAS 910 has no copying cases yet."
+
+
+def test_integrity_board_has_a_concern_and_a_clear_assignment(demo_board) -> None:
     from app.profassist.integrity_board import overview
     from app.profassist.platform_tools import choose_tool
 
@@ -231,11 +304,9 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     assert name == "integrity_concerns"
     assert args["code"] == "MAAI903"
     assert args["assignment"] == "1"
-    from app.profassist.mcp_server import answer_tool
+    from app.profassist.integrity_board import concerns as board_concerns
 
-    answered = answer_tool(
-        name, "Look up shared work", "show integrity concerns for MAAI 903 assignment 1"
-    )
+    answered = board_concerns("MAAI903", "1")
     assert "Concern" in answered["message"]
     assert "86" in answered["message"]
     assert "page" in answered["message"]
@@ -291,9 +362,11 @@ def test_integrity_board_has_a_concern_and_a_clear_assignment() -> None:
     )
 
 
-def test_integrity_gate_and_match_decisions(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_integrity_gate_and_match_decisions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, demo_board
+) -> None:
     from app.core.config import settings
-    from app.profassist.integrity_board import COURSES, _pair_id, assignment_card
+    from app.profassist.integrity_board import _pair_id, assignment_card
     from app.profassist.integrity_docs import gate_for_model, pair_matches, save_decision
 
     cleaned = gate_for_model("Write to ada@university.edu about the typo sustanability.")
@@ -305,7 +378,7 @@ def test_integrity_gate_and_match_decisions(monkeypatch: pytest.MonkeyPatch, tmp
         assert_prompt_is_clean("ada@university.edu")
 
     monkeypatch.setattr(settings, "MEDIA_DIR", tmp_path)
-    course = COURSES[0]
+    course = DEMO_COURSES[0]
     item = course["assignments"][0]
     before = assignment_card(course, item)["flagged_pairs"]
     shared = [row for row in pair_matches("MAAI903", "1", "A", "B") if row["source"] == "shared"]
@@ -336,13 +409,12 @@ def test_grading_council_drafts_from_the_rubric() -> None:
     assert len(mark["council"]) == 4
 
 
-def test_grade_feedback_stays_private_until_push_is_enabled(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_grade_feedback_approval_never_pushes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from app.core.config import settings
     from app.profassist.grade_notes import load_feedback, release_feedback, save_feedback
 
     monkeypatch.setattr(settings, "MEDIA_DIR", tmp_path)
+    monkeypatch.setenv("MOODLE_MODE", "fake")
     monkeypatch.delenv("MOODLE_PUSH_ENABLED", raising=False)
     saved = save_feedback(
         "professor",
@@ -359,13 +431,12 @@ def test_grade_feedback_stays_private_until_push_is_enabled(
     assert saved["release"] == "draft"
     held = release_feedback("professor", "Group A")
     assert held["pushed"] is False
-    assert "not contacted" in held["message"]
+    assert "Nothing sent until push" in held["message"]
     monkeypatch.setenv("MOODLE_PUSH_ENABLED", "true")
-    pushed = release_feedback("professor", "Group A")
-    assert pushed["pushed"] is True
-    assert "not contacted" in pushed["receipt"]["moodle_response"]
-    assert pushed["receipt"]["item"]["comments"][0]["text"] == "Fix the spelling."
-    assert load_feedback("professor", "Group A")["release"] == "pushed"
+    still_held = release_feedback("professor", "Group A")
+    assert still_held["pushed"] is False
+    assert "Nothing sent until push" in still_held["message"]
+    assert load_feedback("professor", "Group A")["release"] == "held"
 
 
 def test_create_assignment_phrase_picks_the_course_tool() -> None:
@@ -398,10 +469,23 @@ def test_chat_stream_asks_before_a_moodle_push() -> None:
     )
 
 
-def test_shared_idea_brief_is_not_treated_as_copying() -> None:
+def test_shared_idea_brief_is_not_treated_as_copying(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
     from app.profassist.groupwork import pairwise_similarity
     from app.profassist.llm import complete
 
+    _fake_model(
+        monkeypatch,
+        json.dumps(
+            {
+                "ideas": [
+                    {"title": f"Idea {index}", "brief": "b", "deliverables": "", "evidence": ""}
+                    for index in range(1, 6)
+                ]
+            }
+        ),
+    )
     ideas = complete("ideas", {"title": "Report", "lo_codes": ["LO1"]})["ideas"]
     assert len(ideas) == 5
     brief = "Shared clinic triage use case."
@@ -448,35 +532,121 @@ def test_moodle_schedule_respects_pause_interval_and_nightly_hour() -> None:
     assert nightly_due(now, 10, True, now) is False
 
 
-def test_dropout_adapter_scores_synthetic_rows_and_takes_no_action() -> None:
+def test_dropout_adapter_does_not_invent_scores() -> None:
     from app.profassist.ml.dropout import FEATURE_COLUMNS, predict
 
     payload = predict(
         [{"display_name": "Sara Al Maktoum", "external_id": "stu-1"}],
         course_code="MAAI903",
     )
-    assert payload["trained"] is True
+    assert payload["trained"] is False
     assert payload["automatic_actions"] is False
-    assert payload["status"] == "trained_on_synthetic_data"
+    assert payload["status"] == "not_trained"
     assert payload["synthetic"] is True
     assert "active_days_14d" in FEATURE_COLUMNS
     assert "mean_score_pct_to_date" in FEATURE_COLUMNS
     assert len(FEATURE_COLUMNS) == 14
-    assert isinstance(payload["students"][0]["score"], float)
-    assert payload["students"][0]["band"] in {"low", "medium", "high"}
+    assert payload["students"][0]["score"] is None
+    assert payload["students"][0]["band"] is None
+    assert payload["students"][0]["factors"] == []
+    assert payload["students"][0]["note"].startswith("Not enough data")
     assert payload["course_code"] == "MAAI903"
-    assert "synthetic" in payload["message"].lower()
+    assert payload["message"] in {
+        "The course-withdrawal model is not trained. Connect Moodle activity data to enable it.",
+        "A model is present but there is not enough activity data to score.",
+    }
 
 
-def test_calibrator_stays_untrained_while_dropout_can_score() -> None:
+def test_calibrator_and_dropout_stay_untrained() -> None:
     calibrator = grade_calibrator({"judge_level": "proficient"})
     assert calibrator["trained"] is False
     assert calibrator["level"] is None
     risk = at_risk_snapshot([{"display_name": "Sara Al Maktoum", "external_id": "stu-1"}])
-    assert risk["trained"] is True
+    assert risk["trained"] is False
+    assert risk["status"] == "not_trained"
+    assert risk["synthetic"] is True
     assert risk["automatic_actions"] is False
-    assert isinstance(risk["students"][0]["score"], float)
+    assert risk["students"][0]["score"] is None
     assert risk["students"][0]["display_name"] == "Sara Al Maktoum"
+
+
+@pytest.mark.anyio
+async def test_fake_grade_send_does_not_complete_assignments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid
+    from types import SimpleNamespace
+
+    from app.profassist.journey import send_grade
+    from app.profassist.models import Course, GradeDraft, GroupAssignment, Submission
+
+    monkeypatch.setenv("MOODLE_MODE", "fake")
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    course = SimpleNamespace(id=uuid.uuid4(), organization_id=org_id, code="AAS 910", term="2026")
+    submission = SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        course_id=course.id,
+        group_name="Group A",
+    )
+    draft = SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        owner_user_id=user_id,
+        submission_id=submission.id,
+        status="pushed",
+    )
+    assignments = [
+        SimpleNamespace(
+            organization_id=org_id,
+            owner_user_id=user_id,
+            course_id=course.id,
+            status="open",
+        )
+    ]
+
+    class _Result:
+        def __init__(self, rows: list[object]) -> None:
+            self._rows = rows
+
+        def scalars(self) -> "_Result":
+            return self
+
+        def all(self) -> list[object]:
+            return self._rows
+
+        def first(self) -> object | None:
+            return self._rows[0] if self._rows else None
+
+        def scalar_one_or_none(self) -> object | None:
+            return self.first()
+
+    class _FakeDb:
+        async def execute(self, statement):
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is Course:
+                return _Result([course])
+            if entity is Submission:
+                return _Result([submission])
+            if entity is GradeDraft:
+                return _Result([draft])
+            if entity is GroupAssignment:
+                return _Result(assignments)
+            return _Result([])
+
+        async def flush(self) -> None:
+            return None
+
+        def add(self, row: object) -> None:
+            return None
+
+    result = await send_grade(_FakeDb(), org_id, user_id, "AAS 910", "Group A")
+    assert result["message"] == "Recorded in ProfAssist"
+    assert "Sent to Moodle" not in result["message"]
+    assert result["note"] == "Recorded in ProfAssist. Moodle was not contacted."
+    assert result["assignment_status"] == "unchanged"
+    assert [item.status for item in assignments] == ["open"]
 
 
 def test_fake_moodle_push_does_not_claim_a_live_write() -> None:
@@ -497,15 +667,19 @@ def test_fake_moodle_push_does_not_claim_a_live_write() -> None:
     assert parsed["course_external_id"] == "mdl-maai903"
 
 
-def test_connector_factory_defaults_to_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_connector_factory_uses_real_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MOODLE_MODE", raising=False)
+    monkeypatch.delenv("MOODLE_BASE_URL", raising=False)
+    monkeypatch.delenv("MOODLE_WS_TOKEN", raising=False)
+    assert isinstance(get_connector(), RealMoodleConnector)
+    with pytest.raises(ProfassistError) as caught:
+        get_connector().list_courses()
+    assert caught.value.status == 503
+    assert "Moodle is not configured" in caught.value.detail
+    monkeypatch.setenv("MOODLE_MODE", "fake")
     assert isinstance(get_connector(), FakeMoodleConnector)
     monkeypatch.setenv("MOODLE_MODE", "real")
-    real = get_connector()
-    assert isinstance(real, RealMoodleConnector)
-    with pytest.raises(ProfassistError) as caught:
-        real.list_courses()
-    assert caught.value.status == 503
+    assert isinstance(get_connector(), RealMoodleConnector)
 
 
 def test_tenant_guard() -> None:
@@ -564,6 +738,63 @@ def test_mlflow_empty_state_when_server_is_down(monkeypatch: pytest.MonkeyPatch)
     assert payload["models"][0]["status"] == "not_trained"
 
 
+def test_objectives_accept_a_bare_string_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model that answers ["..."] instead of [{"text": ...}] must not 500."""
+    from app.profassist import agents
+
+    note = "Explain how an LLM agent differs from a trained machine learning model."
+    chunks = [{"id": "c1", "text": note}]
+    monkeypatch.setattr(
+        agents.llm,
+        "complete",
+        lambda task, payload: {"objectives": [note, "  ", {"text": note}]},
+    )
+
+    drafted = agents.run_course(
+        "objectives", title="Agents", query="course learning outcome", chunks=chunks
+    )
+
+    assert drafted["objectives"] == [{"text": note}, {"text": note}]
+
+    monkeypatch.setattr(agents.llm, "complete", lambda task, payload: {"objectives": note})
+    single = agents.run_course(
+        "objectives", title="Agents", query="course learning outcome", chunks=chunks
+    )
+
+    assert single["objectives"] == [{"text": note}]
+
+
+def test_objectives_accept_a_bare_list_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist import agents
+
+    note = "Explain how an LLM agent differs from a trained machine learning model."
+    monkeypatch.setattr(agents.llm, "complete", lambda task, payload: [note])
+
+    drafted = agents.run_course(
+        "objectives", title="Agents", query="course learning outcome", chunks=[{"text": note}]
+    )
+
+    assert drafted["objectives"] == [{"text": note}]
+
+
+@pytest.mark.anyio
+async def test_legacy_admin_models_awaits_the_async_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old route called the sync wrapper and always reported unreachable."""
+    from app.api.routes.v1 import profassist as routes
+
+    async def fake_registry() -> dict:
+        return {"tracking_uri": "http://mlflow:5000", "reachable": True, "models": []}
+
+    monkeypatch.setattr(routes, "list_registered_models_async", fake_registry)
+
+    payload = await routes.models_admin(user=None, org=None)
+
+    assert payload["reachable"] is True
+    assert payload["tracking_uri"] == "http://mlflow:5000"
+
+
 def test_debate_starts_only_past_the_threshold() -> None:
     from app.profassist.grading import level_spread, needs_debate
 
@@ -583,6 +814,45 @@ def test_a_short_rate_limit_is_retried_and_a_daily_cap_is_not() -> None:
     assert retry_wait("retry in 400s. Quota exceeded per day") is None
     assert retry_wait("RESOURCE_EXHAUSTED limit: 0") is None
     assert retry_wait("429 rate limit") == 5.0
+
+
+def test_a_busy_model_becomes_a_clean_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    from unittest.mock import patch
+
+    import app.profassist.providers as providers
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-secret-do-not-leak")
+    monkeypatch.setattr(providers.time, "sleep", lambda _seconds: None)
+    calls: list[int] = []
+
+    # litellm loads backend/.env on import; keep those keys out of the rest of the suite.
+    with patch.dict(os.environ):
+        import litellm
+        from litellm import ServiceUnavailableError
+
+        def busy(*_args: object, **_kwargs: object) -> object:
+            calls.append(1)
+            raise ServiceUnavailableError(
+                message="The provider is at high demand. raw payload super-secret",
+                llm_provider="anthropic",
+                model="claude-3-5-haiku-latest",
+            )
+
+        monkeypatch.setattr(litellm, "completion", busy)
+
+        with pytest.raises(ProfassistError) as caught:
+            providers.generate(
+                "anthropic",
+                "claude-3-5-haiku-latest",
+                [{"role": "user", "content": "hello"}],
+            )
+
+    assert caught.value.status == 503
+    assert caught.value.detail
+    assert "sk-test-secret-do-not-leak" not in caught.value.detail
+    assert "raw payload" not in caught.value.detail
+    assert len(calls) == 4
 
 
 def test_a_busy_debate_keeps_the_votes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -668,7 +938,34 @@ def test_lessons_rewrite_the_portrait_instead_of_stacking() -> None:
     assert same_lesson(portrait, portrait)
 
 
-def test_about_section_is_labelled_and_scrubbed() -> None:
+def test_lessons_note_concise_and_fuller_outline_and_assignment() -> None:
+    from app.profassist.lessons import extract_lessons
+
+    long_text = "word " * 100
+    short_text = "word " * 40
+
+    concise = extract_lessons("outline", long_text, short_text)
+    assert {"kind": "objective", "text": "Prefers a more concise outline."} in concise
+
+    fuller = extract_lessons("outline", short_text, long_text)
+    assert {"kind": "objective", "text": "Prefers fuller detail in outlines."} in fuller
+
+    concise_brief = extract_lessons("assignment", long_text, short_text)
+    assert {
+        "kind": "objective",
+        "text": "Prefers a more concise assignment brief.",
+    } in concise_brief
+
+    fuller_brief = extract_lessons("assignment", short_text, long_text)
+    assert {
+        "kind": "objective",
+        "text": "Prefers fuller detail in assignment briefs.",
+    } in fuller_brief
+
+
+def test_about_section_is_labelled_and_scrubbed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
     from app.profassist.llm import complete
     from app.profassist.runtime import labelled_about, set_about
 
@@ -677,6 +974,12 @@ def test_about_section_is_labelled_and_scrubbed() -> None:
     assert block.startswith("\n\n## About this professor\n")
     assert "@" not in block
     assert "sara" not in block.lower()
+    _fake_model(
+        monkeypatch,
+        json.dumps(
+            {"feedback": "You showed 42.7 in your own words. One improvement: name the limit."}
+        ),
+    )
     drafted = complete(
         "feedback",
         {
@@ -688,6 +991,28 @@ def test_about_section_is_labelled_and_scrubbed() -> None:
     assert "42.7" in drafted["feedback"]
     set_about("Please ask Jordan Hale about the lab.")
     assert labelled_about() == ""
+    set_about("")
+
+
+def test_trace_about_drops_identity_and_still_scrubs() -> None:
+    from app.profassist.observe import trace_about
+    from app.profassist.runtime import set_about
+
+    set_about(
+        "About this professor:\nProfessor: Jane Doe \u2014 owner\nTeaches: AAS910\n"
+        "She prefers short feedback.\nEmail sara@student.uowd.ac.ae"
+    )
+
+    text = trace_about()
+
+    assert "Jane Doe" not in text
+    assert "Professor:" not in text
+    assert "Teaches:" not in text
+    assert "AAS910" not in text
+    assert "@" not in text
+    assert "sara" not in text.lower()
+    assert "She prefers short feedback." in text
+    assert len(text) <= 900
     set_about("")
 
 
@@ -736,9 +1061,35 @@ def test_deck_fits_and_cites_every_slide() -> None:
     assert saw_image
 
 
-def test_course_design_uses_notes_and_a_shorter_reply() -> None:
+def test_course_design_parses_a_model_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
     from app.profassist.llm import complete
 
+    _fake_model(
+        monkeypatch,
+        json.dumps(
+            {
+                "reply": "Drafted from your notes and the About this professor section.",
+                "clos": [
+                    {
+                        "code": "CLO1",
+                        "text": "Explain how an LLM agent differs from a trained machine learning model.",
+                    }
+                ],
+                "weeks": [{"week": 1, "topic": "Agents", "clos": ["CLO1"], "notes": "Draft."}],
+                "plan": [
+                    {
+                        "title": "Group report 1",
+                        "weight": 40,
+                        "clos": ["CLO1"],
+                        "brief": "A short report that quotes the evidence.",
+                        "kind": "assignment",
+                    }
+                ],
+            }
+        ),
+    )
     drafted = complete(
         "course_design",
         {
@@ -755,8 +1106,6 @@ def test_course_design_uses_notes_and_a_shorter_reply() -> None:
     assert drafted["weeks"]
     assert drafted["clos"][0]["code"] == "CLO1"
     assert drafted["plan"][0]["weight"] == 40
-    shorter = complete("course_design", {"message": "Make the weeks shorter", "chunks": []})
-    assert "shortened" in shorter["reply"].lower()
 
 
 def test_rubric_import_flags_vague_wording() -> None:
@@ -822,8 +1171,15 @@ def test_subject_outline_document_and_catalogue() -> None:
     body = demo_outline()
     assert len(body["clos"]) == 6
     assert len(body["plos"]) == 6
-    assert [item["number"] for item in body["tasks"]] == ["A1", "A2", "A3", "A4"]
-    assert sum(item["weight"] for item in body["tasks"]) == 100
+    assert len(body["weeks"]) == 11
+    assert len(body["readings"]) == 5
+    assert len(body["outcome_measures"]) == 6
+    assert len(body["assessment_tasks"]) == 4
+    assert len(body["genai"]) == 6
+    assert len(body["grades"]) == 7
+    assert len(body["policy_documents"]) == 18
+    assert "tasks" not in body
+    assert "criteria" not in body
     assert body["clos"][0]["plos"]
     assert render_pdf(body)[:4] == b"%PDF"
     assert render_docx(body)[:2] == b"PK"
@@ -848,6 +1204,236 @@ def test_chat_tools_require_a_professor_and_a_confirm() -> None:
     asyncio.run(run())
 
 
+def test_choose_tool_routes_outline_review_and_opinion_by_context() -> None:
+    from app.profassist.platform_tools import choose_tool
+
+    oid = "11111111-1111-1111-1111-111111111111"
+    name, args = choose_tool("review this outline", {"outline_id": oid})
+    assert name == "review_outline"
+    assert args["outline_id"] == oid
+    assert args["mode"] == "council"
+    assert args["reviewer"] == "curriculum"
+
+    name, args = choose_tool("what do you think?", {"outline_id": oid})
+    assert name == "review_outline"
+    assert args["outline_id"] == oid
+    assert args["mode"] == "single"
+    assert args["reviewer"] == "curriculum"
+
+
+def test_choose_tool_falls_back_to_assistant_chat_not_list_courses() -> None:
+    from app.profassist.platform_tools import choose_tool
+
+    name, args = choose_tool("hello", {})
+    assert name == "assistant_chat"
+    assert args["message"] == "hello"
+    assert args["context"] == {}
+
+
+def test_assistant_chat_is_honest_without_a_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import app.profassist.providers as providers
+    from app.profassist.platform_tools import _assistant_chat
+
+    monkeypatch.setattr(providers, "key_configured", lambda _provider: False)
+
+    current = {"org_id": "org", "user_id": "user", "is_admin": False}
+    answer = asyncio.run(
+        _assistant_chat(
+            None,
+            current,
+            {"message": "what is on this page?", "context": {"page": "dashboard"}},
+        )
+    )
+    assert "No AI model is configured" in answer["answer"]
+    assert "LLM_API_KEY" in answer["answer"]
+
+
+def test_review_outline_handler_returns_findings_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import uuid
+
+    import app.profassist.outline_review as outline_review
+    from app.profassist.platform_tools import _reply, _review_outline
+
+    outline_id = uuid.uuid4()
+    seen: dict = {}
+
+    async def fake_run_review(db, org_id, user_id, oid, *, mode, reviewer):
+        seen.update(
+            {
+                "db": db,
+                "org_id": org_id,
+                "user_id": user_id,
+                "oid": oid,
+                "mode": mode,
+                "reviewer": reviewer,
+            }
+        )
+        return {
+            "score": 82,
+            "summary": "Two outcomes need a clearer program link.",
+            "findings": [
+                {"section": "outcomes", "message": "CLO1 does not map to a program outcome."},
+                {"section": "assessments", "message": "CLO1 is not assessed by any task."},
+            ],
+        }
+
+    monkeypatch.setattr(outline_review, "run_review", fake_run_review)
+
+    current = {"org_id": "org", "user_id": "user", "is_admin": False}
+    args = {"outline_id": str(outline_id), "mode": "council", "reviewer": "curriculum"}
+    snapshot = dict(args)
+    result = asyncio.run(_review_outline(None, current, args))
+
+    assert result["score"] == 82
+    assert len(result["findings"]) == 2
+    assert seen["oid"] == outline_id
+    assert seen["mode"] == "council"
+    assert seen["reviewer"] == "curriculum"
+    # The handler only reads its arguments; the outline snapshot is untouched.
+    assert args == snapshot
+
+    reply = _reply("review_outline", result)
+    assert "This is a review, not a verdict. Nothing was changed." in reply
+    assert "CLO1 does not map" in reply
+
+
+def test_choose_tool_routes_rubric_review_by_context() -> None:
+    from app.profassist.platform_tools import choose_tool
+
+    rid = "22222222-2222-2222-2222-222222222222"
+    oid = "11111111-1111-1111-1111-111111111111"
+    name, args = choose_tool("Review this rubric", {"rubric_id": rid, "page": "/rubric"})
+    assert name == "review_rubric"
+    assert args["rubric_id"] == rid
+
+    # Both ids are set: the page decides which review tool wins.
+    name, _ = choose_tool(
+        "Review this rubric", {"rubric_id": rid, "outline_id": oid, "page": "/rubric"}
+    )
+    assert name == "review_rubric"
+    name, _ = choose_tool(
+        "Review this outline", {"rubric_id": rid, "outline_id": oid, "page": "/outline"}
+    )
+    assert name == "review_outline"
+
+
+def _fake_rubric_loader(monkeypatch: pytest.MonkeyPatch, data: dict) -> None:
+    import app.profassist.service as service
+
+    async def fake_owned(db, model, org_id, row_id, user_id=None):
+        return object()
+
+    async def fake_dict(db, row):
+        return data
+
+    monkeypatch.setattr(service, "_owned", fake_owned)
+    monkeypatch.setattr(service, "_assessment_dict", fake_dict)
+
+
+def test_review_rubric_reports_findings_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import copy
+    import uuid
+
+    from app.profassist.platform_tools import _reply, _review_rubric
+
+    fake = {
+        "title": "Workshops rubric",
+        "status": "draft",
+        "criteria": [
+            {
+                "name": "Evidence",
+                "weight": 60,
+                "levels": {
+                    "beginning": "Little evidence",
+                    "developing": "",
+                    "proficient": "Clear evidence",
+                    "advanced": "Strong evidence",
+                },
+            },
+            {
+                "name": "Reflection",
+                "weight": 30,
+                "levels": {
+                    "beginning": "Describes",
+                    "developing": "Explains",
+                    "proficient": "Analyses",
+                    "advanced": "Evaluates",
+                },
+            },
+        ],
+        "alignment": {"flags": ["No criterion mentions this outcome: Design a study."]},
+    }
+    snapshot = copy.deepcopy(fake)
+    _fake_rubric_loader(monkeypatch, fake)
+
+    current = {"org_id": "org", "user_id": "user", "is_admin": False}
+    result = asyncio.run(_review_rubric(None, current, {"rubric_id": str(uuid.uuid4())}))
+
+    assert result["title"] == "Workshops rubric"
+    assert result["status"] == "draft"
+    assert result["criteria_count"] == 2
+    assert result["weight_total"] == 90
+    assert result["changed"] is False
+    messages = [item["message"] for item in result["findings"]]
+    assert any("90%" in message for message in messages)
+    assert any("blank developing" in message for message in messages)
+    assert any("No criterion mentions this outcome" in message for message in messages)
+    # The handler reads the rubric; the fake payload is untouched.
+    assert fake == snapshot
+
+    reply = _reply("review_rubric", result)
+    assert "Workshops rubric" in reply
+    assert "weighting 90%" in reply
+    assert "This is a review, not a verdict. Nothing was changed." in reply
+
+
+def test_review_rubric_with_no_criteria_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import uuid
+
+    from app.profassist.platform_tools import _review_rubric
+
+    _fake_rubric_loader(
+        monkeypatch,
+        {"title": "Empty rubric", "status": "draft", "criteria": [], "alignment": {}},
+    )
+    current = {"org_id": "org", "user_id": "user", "is_admin": False}
+    result = asyncio.run(_review_rubric(None, current, {"rubric_id": str(uuid.uuid4())}))
+
+    assert result["criteria_count"] == 0
+    assert result["weight_total"] == 0
+    assert result["findings"] == [{"severity": "high", "message": "No criteria yet."}]
+
+
+def test_review_rubric_returns_404_for_a_foreign_rubric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import uuid
+
+    import app.profassist.service as service
+    from app.profassist.errors import ProfassistError
+    from app.profassist.platform_tools import _review_rubric
+
+    async def foreign(db, model, org_id, row_id, user_id=None):
+        raise ProfassistError(404, "Not found in this workspace")
+
+    monkeypatch.setattr(service, "_owned", foreign)
+
+    current = {"org_id": "org", "user_id": "user", "is_admin": False}
+    with pytest.raises(ProfassistError) as caught:
+        asyncio.run(_review_rubric(None, current, {"rubric_id": str(uuid.uuid4())}))
+    assert caught.value.status == 404
+
+
 def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "GEMINI_API_KEY",
@@ -855,27 +1441,109 @@ def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
         "OPENAI_API_KEY",
         "LLM_API_KEY",
         "OLLAMA_API_BASE",
+        "ANTHROPIC_API_KEY",
+        "XAI_API_KEY",
+        "MISTRAL_API_KEY",
+        "AZURE_API_KEY",
+        "AZURE_API_BASE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 
 
+def _fake_model(
+    monkeypatch: pytest.MonkeyPatch, content: str, calls: list[object] | None = None
+) -> None:
+    from types import SimpleNamespace
+
+    from app.profassist.runtime import bind_runtime
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class Response:
+        choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
+
+    def fake_generate(provider_id: str, model: str, messages: object, **kwargs: object) -> Response:
+        if calls is not None:
+            calls.append(messages)
+        return Response()
+
+    monkeypatch.setattr("app.profassist.providers.generate", fake_generate)
+
+
 def test_outline_assist_suggests_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
     from app.profassist.llm import complete
 
-    _offline(monkeypatch)
+    _fake_model(
+        monkeypatch,
+        json.dumps(
+            {
+                "reply": "Suggested outcomes.",
+                "suggestion": {
+                    "clos": [{"code": "CLO1", "text": "Explain the idea."}],
+                    "plos": [{"code": "PLO1", "text": "Apply the idea."}],
+                },
+            }
+        ),
+    )
     drafted = complete("outline_assist", {"step": "outcomes", "message": "Suggest outcomes"})
     assert drafted["suggestion"]["clos"]
     assert drafted["suggestion"]["plos"]
 
 
+def test_outline_assist_prompt_interviews_for_the_next_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from app.profassist.llm import complete
+
+    calls: list[object] = []
+    _fake_model(monkeypatch, json.dumps({"reply": "ok", "suggestion": {}}), calls=calls)
+
+    complete("outline_assist", {"step": "outcomes", "message": "Explain the idea."})
+    complete("outline_assist", {"step": "policies", "message": "Late work loses marks."})
+
+    def system_of(messages: object) -> str:
+        assert isinstance(messages, list)
+        return next(message["content"] for message in messages if message["role"] == "system")
+
+    first = system_of(calls[0])
+    assert "current section is outcomes" in first
+    assert "next section: schedule" in first
+    assert "exactly ONE natural question" in first
+
+    last = system_of(calls[1])
+    assert "current section is policies" in last
+    assert "ready to review" in last
+    assert "ONE natural question" not in last
+
+
 def test_outcome_answer_follows_the_requested_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
     from app.profassist.llm import complete
     from app.profassist.outline import asked_count, shape_outcomes
 
-    _offline(monkeypatch)
     message = "Draft 3 learning outcomes for AAS 910"
     assert asked_count(message) == 3
     assert asked_count("Suggest outcomes") is None
+    _fake_model(
+        monkeypatch,
+        json.dumps(
+            {
+                "suggestion": {
+                    "clos": [
+                        {"code": f"CLO{index}", "text": f"Outcome {index}"} for index in range(1, 5)
+                    ]
+                }
+            }
+        ),
+    )
     drafted = complete("outline_assist", {"step": "outcomes", "message": message})
     shaped, reply = shape_outcomes(drafted["suggestion"], message)
     assert len(shaped["clos"]) == 3
@@ -891,15 +1559,24 @@ def test_outline_review_names_a_missing_policy_and_a_weight_gap() -> None:
     from app.profassist.outline_review import apply_fix, review_outline, score_of
 
     body = demo_outline()
-    body["policies"] = [item for item in body["policies"] if item["key"] != "attendance"]
-    body["tasks"][0]["weight"] = 10
+    body["attendance"] = ""
+    # Legacy review input: outlines no longer own tasks, but the reviewer still
+    # weighs any that are present so old drafts keep the same checks.
+    body["tasks"] = [
+        {
+            "number": "A1",
+            "name": "Workshops",
+            "weight": 10,
+            "lo_codes": ["LO1", "LO2", "LO3", "LO4", "LO5", "LO6"],
+        }
+    ]
     findings = review_outline(body, "focus on healthcare cases")
     assert any(
         item["object_id"] == "attendance" and item["severity"] == "high" for item in findings
     )
     assert any(item["object_id"] == "weights" for item in findings)
     fixed = apply_fix(body, next(item for item in findings if item["object_id"] == "attendance"))
-    assert any(item["key"] == "attendance" for item in fixed["policies"])
+    assert fixed["attendance"]
     assert score_of(findings) < 100
 
 
@@ -914,19 +1591,19 @@ def test_council_script_walks_marking_debate_judge_and_verdict() -> None:
     assert any(event["type"] == "arrow" for event in events)
 
 
-def test_demo_completion_does_not_call_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    result = complete(
-        "feedback",
-        {
-            "quote": "The baseline load is 42.7 kWh during the teaching day.",
-            "level": "proficient",
-            "soul": "",
-        },
-    )
-    assert "42.7" in result["feedback"]
-    assert "!" not in result["feedback"]
+def test_a_missing_model_raises_an_explicit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _offline(monkeypatch)
+    with pytest.raises(ProfassistError) as caught:
+        complete(
+            "feedback",
+            {
+                "quote": "The baseline load is 42.7 kWh during the teaching day.",
+                "level": "proficient",
+                "soul": "",
+            },
+        )
+    assert caught.value.status == 503
+    assert "No AI model is configured" in caught.value.detail
 
 
 def test_local_ollama_is_used_only_when_the_chosen_provider_has_no_key(
@@ -957,6 +1634,65 @@ def test_local_ollama_is_used_only_when_the_chosen_provider_has_no_key(
     assert "test-gemini-key" not in str(routed)
     monkeypatch.setenv("LLM_MODEL", "llama3.2:1b")
     assert agent_route("chat")["model"] == "gemini-3.5-flash-lite"
+
+
+def test_an_explicit_provider_prefix_in_llm_model_selects_that_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Gemini base URL must not be spent on the OpenAI key just because both are set."""
+    from app.profassist.runtime import agent_route, bind_runtime
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("LLM_MODEL", "gemini/gemini-3.1-flash-lite")
+
+    routed = agent_route("course_designer")
+    assert routed == {"provider": "gemini", "model": "gemini-3.1-flash-lite"}
+    assert "test-gemini-key" not in str(routed)
+
+    monkeypatch.setenv("LLM_MODEL", "openai/gpt-4o-mini")
+    assert agent_route("course_designer") == {"provider": "openai", "model": "gpt-4o-mini"}
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
+
+
+def test_the_database_model_choice_still_wins_without_a_provider_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.profassist.runtime import agent_route, bind_runtime
+
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    bind_runtime(
+        {}, {}, {"provider": "anthropic", "model": "claude-3-5-haiku-latest", "agents": {}}
+    )
+
+    assert agent_route("chat") == {"provider": "anthropic", "model": "claude-3-5-haiku-latest"}
+
+    # A bare model name does not say which key it belongs to, so it changes nothing.
+    monkeypatch.setenv("LLM_MODEL", "gpt-4o-mini")
+    assert agent_route("chat") == {"provider": "anthropic", "model": "claude-3-5-haiku-latest"}
+
+    # An admin route for one agent still wins over the app-wide choice.
+    bind_runtime(
+        {},
+        {},
+        {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "agents": {"chat": {"provider": "anthropic", "model": "claude-3-5-haiku-latest"}},
+        },
+    )
+    assert agent_route("chat") == {"provider": "anthropic", "model": "claude-3-5-haiku-latest"}
+    assert agent_route("feedback_writer") == {"provider": "openai", "model": "gpt-4o-mini"}
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
 
 
 def test_connection_errors_hide_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -997,6 +1733,8 @@ def test_fresh_course_appears_on_the_integrity_board() -> None:
     try:
         board = overview(course["slug"])
         assert board["summary"]["courses"] == 1
+        every_course = overview("all")
+        assert [row["slug"] for row in every_course["courses"]] == [course["slug"]]
         card = board["items"][0]
         assert card["number"] == "A3"
         assert card["groups"] == 4
@@ -1106,3 +1844,131 @@ def test_fake_moodle_stages_pdf_and_docx_without_a_network_call() -> None:
         SUBMISSIONS[:] = [
             row for row in SUBMISSIONS if not str(row.get("id", "")).startswith("sub-journey-test")
         ]
+
+
+def test_dossier_model_payload_keeps_filenames_and_codes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from app.profassist.llm import complete
+
+    calls: list[object] = []
+    _fake_model(monkeypatch, json.dumps({"summary": "ok"}), calls=calls)
+
+    complete(
+        "dossier_extract",
+        {
+            "material_id": "m1",
+            "filename": "PIPE903-notes-v2.txt",
+            "chunks": [{"ordinal": 0, "text": "CLO1 maps to the report."}],
+        },
+    )
+
+    messages = calls[0]
+    assert isinstance(messages, list)
+    user = next(message["content"] for message in messages if message["role"] == "user")
+    assert "PIPE903-notes-v2.txt" in user
+    assert "CLO1" in user
+
+
+def test_dossier_calls_ask_gemini_for_the_json_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    from app.profassist import runtime
+    from app.profassist.llm import complete
+    from app.profassist.runtime import bind_runtime
+
+    previous = (runtime._prompts.get(), runtime._tools.get(), runtime._model.get())
+    try:
+        bind_runtime({}, {}, {"provider": "gemini", "model": "gemini-3.5-flash-lite", "agents": {}})
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        calls: list[dict[str, object]] = []
+
+        class Response:
+            choices = [
+                SimpleNamespace(message=SimpleNamespace(content=json.dumps({"summary": "ok"})))
+            ]
+
+        def fake_generate(
+            provider_id: str, model: str, messages: object, **kwargs: object
+        ) -> Response:
+            calls.append({"provider": provider_id, "messages": messages, "kwargs": kwargs})
+            return Response()
+
+        monkeypatch.setattr("app.profassist.providers.generate", fake_generate)
+
+        complete("dossier_extract", {"filename": "notes.txt", "chunks": []})
+    finally:
+        runtime._prompts.set(previous[0])
+        runtime._tools.set(previous[1])
+        runtime._model.set(previous[2])
+
+    assert calls[0]["provider"] == "gemini"
+    response_format = calls[0]["kwargs"]["response_format"]
+    assert isinstance(response_format, dict)
+    assert response_format["type"] == "json_object"
+    assert response_format["response_schema"]["title"] == "FileDossier"
+
+
+def test_dossier_schemas_require_the_content_fields() -> None:
+    """The schema sent to Gemini demands what a partial reply used to skip."""
+    from app.profassist.course_memory.schemas import FileDossier
+    from app.profassist.llm import DOSSIER_SCHEMAS
+
+    extract = DOSSIER_SCHEMAS["dossier_extract"]
+    assert {"document_kind", "summary", "topics", "outcomes", "assessments"} <= set(
+        extract["required"]
+    )
+    merge = DOSSIER_SCHEMAS["dossier_merge"]
+    assert {"summary", "topics", "outcomes", "assessments"} <= set(merge["required"])
+
+    # The Pydantic model itself stays tolerant, so a partial reply still validates.
+    assert FileDossier.model_validate({"summary": "ok"}).summary == "ok"
+
+
+def test_complete_parses_json_with_trailing_prose(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.profassist.llm import complete
+
+    _fake_model(monkeypatch, '{"reply": "ok"} then some trailing prose')
+    drafted = complete("ideas", {"title": "Report"})
+
+    assert drafted == {"reply": "ok"}
+
+
+def test_complete_retries_once_when_the_reply_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    from app.profassist.llm import complete
+    from app.profassist.runtime import bind_runtime
+
+    bind_runtime({}, {}, {"provider": "openai", "model": "gpt-4o-mini", "agents": {}})
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    replies = ["not json at all", json.dumps({"reply": "ok"})]
+    calls: list[object] = []
+
+    class Response:
+        def __init__(self, content: str) -> None:
+            self.choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
+
+    def fake_generate(provider_id: str, model: str, messages: object, **kwargs: object) -> Response:
+        calls.append(messages)
+        return Response(replies[len(calls) - 1])
+
+    monkeypatch.setattr("app.profassist.providers.generate", fake_generate)
+
+    drafted = complete("ideas", {"title": "Report"})
+
+    assert drafted == {"reply": "ok"}
+    assert len(calls) == 2
+    second = calls[1]
+    assert isinstance(second, list)
+    user = next(message["content"] for message in second if message["role"] == "user")
+    assert "Return valid JSON only, no prose" in user

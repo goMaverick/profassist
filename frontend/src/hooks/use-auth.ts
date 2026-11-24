@@ -16,6 +16,12 @@ import { isAppAdmin } from "@/lib/utils";
 let authCheckPromise: Promise<void> | null = null;
 let authChecked = false;
 
+// Monotonic session generation. A /auth/me or /auth/refresh started before a
+// login/logout belongs to an older session; when it settles it must not clobber
+// the newer auth state. Without this, a stale /auth/me 401 landing right after
+// login cleared the fresh user and the AuthGuard bounced back to /login.
+let authEpoch = 0;
+
 // Access tokens expire after 15 min. The in-memory token (used by the chat
 // WebSocket and proxied API calls) is set once on load and would otherwise go
 // stale while the tab stays open — causing WS auth failures / "Offline" chat.
@@ -49,18 +55,23 @@ function stopTokenRefresh(): void {
 function runAuthCheck(setUser: (u: User | null) => void): Promise<void> {
   if (authChecked) return Promise.resolve();
   if (authCheckPromise) return authCheckPromise;
+  const epoch = authEpoch;
   authCheckPromise = (async () => {
     try {
       const data = await apiClient.get<User & { access_token?: string }>("/auth/me");
+      if (epoch !== authEpoch) return; // superseded by login/logout - keep newer state
       const { access_token, ...userData } = data;
       setUser(userData as User);
       useAuthStore.getState().setAccessToken(access_token ?? null);
     } catch {
+      if (epoch !== authEpoch) return; // stale 401 must not clear a newer session
       setUser(null);
       useAuthStore.getState().setAccessToken(null);
     } finally {
-      authChecked = true;
-      authCheckPromise = null;
+      if (epoch === authEpoch) {
+        authChecked = true;
+        authCheckPromise = null;
+      }
     }
   })();
   return authCheckPromise;
@@ -86,6 +97,10 @@ export function useAuth() {
           access_token: string;
           message: string;
         }>("/auth/login", credentials);
+        // Invalidate any /auth/me that started before this login so its stale
+        // 401 (or user payload) can't overwrite this fresh session.
+        authEpoch += 1;
+        authCheckPromise = null;
         setUser(response.user);
         useAuthStore.getState().setAccessToken(response.access_token);
         authChecked = true; // login already populated user + token; skip /auth/me
@@ -109,6 +124,7 @@ export function useAuth() {
     } catch {
       // Ignore logout errors
     } finally {
+      authEpoch += 1; // invalidate in-flight checks/refreshes from the old session
       authChecked = false; // re-check on next login
       authCheckPromise = null;
       stopTokenRefresh();
@@ -119,15 +135,19 @@ export function useAuth() {
   }, [logout, router]);
 
   const refreshToken = useCallback(async () => {
+    const epoch = authEpoch;
     try {
       const refreshResponse = await apiClient.post<{ access_token: string; message: string }>(
         "/auth/refresh",
       );
+      if (epoch !== authEpoch) return false;
       useAuthStore.getState().setAccessToken(refreshResponse.access_token);
       const userData = await apiClient.get<User>("/auth/me");
+      if (epoch !== authEpoch) return false;
       setUser(userData);
       return true;
     } catch (error) {
+      if (epoch !== authEpoch) return false; // a newer login owns auth state now
       if (error instanceof ApiError && error.status === 401) {
         logout();
         router.push(ROUTES.LOGIN);

@@ -96,7 +96,7 @@ def extract_text(filename: str, data: bytes) -> str:
         return "\n".join(pieces)
     if lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
         return f"[image {filename}]"
-    if lower.endswith(".pptx"):
+    if lower.endswith((".pptx", ".potx")):
         import io
 
         from pptx import Presentation
@@ -107,5 +107,16 @@ def extract_text(filename: str, data: bytes) -> str:
             for shape in slide.shapes:
                 if hasattr(shape, "text") and shape.text:
                     bits.append(shape.text)
+                if getattr(shape, "has_table", False):
+                    for row in shape.table.rows:
+                        bits.append(" | ".join(cell.text for cell in row.cells))
+            if getattr(slide, "has_notes_slide", False):
+                notes = slide.notes_slide.notes_text_frame.text
+                if notes.strip():
+                    bits.append(notes)
         return "\n".join(bits)
+    if lower.endswith((".html", ".htm")):
+        from app.services.rag.documents import html_to_text
+
+        return html_to_text(data.decode("utf-8", errors="replace"))
     return data.decode("utf-8", errors="replace")

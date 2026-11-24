@@ -21,6 +21,8 @@ interface StylePayload {
   about_md: string;
   about_history: Array<{ version: number; text: string; source: string }>;
   owner_name: string;
+  owner_role?: string;
+  courses?: string[];
 }
 
 export default function StylePage() {
@@ -28,6 +30,8 @@ export default function StylePage() {
   const [about, setAbout] = useState("");
   const [history, setHistory] = useState<StylePayload["about_history"]>([]);
   const [owner, setOwner] = useState("");
+  const [role, setRole] = useState("");
+  const [courses, setCourses] = useState<string[]>([]);
   const [items, setItems] = useState<Reflection[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [error, setError] = useState("");
@@ -43,6 +47,8 @@ export default function StylePage() {
     setAbout(style.about_md || "");
     setHistory(style.about_history || []);
     setOwner(style.owner_name || "");
+    setRole(style.owner_role || "");
+    setCourses(style.courses || []);
     setItems(reflections.items);
     setMemories(memory.items);
   }
@@ -59,8 +65,8 @@ export default function StylePage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">About me</h2>
         <p className="text-foreground/60 text-sm">
-          {owner ? `${owner}. ` : ""}
-          Every agent reads this portrait for you, in this university only. It is rewritten from your memories after you approve or edit. It does not change the shared prompts.
+          {owner ? `${owner}${role ? ` · ${role}` : ""}${courses.length ? ` · ${courses.join(", ")}` : ""}. ` : ""}
+          Every agent reads this portrait for you, in this university only. It is built from your signed-in profile and the edits you make, then rewritten from your memories. It does not change the shared prompts.
         </p>
         <textarea
           className="border-foreground/15 min-h-40 w-full rounded-xl border bg-transparent p-4 text-sm"
@@ -124,7 +130,7 @@ export default function StylePage() {
           onClick={async () => {
             const created = await run(() => pa<Reflection>("/reflections/run", { method: "POST" }), setError);
             if (created) {
-              setSaved("A reflection is waiting. It does not change your style until you approve it.");
+              setSaved("A reflection was added to About me. Edit the portrait above to change it.");
               await load();
             }
           }}
@@ -162,21 +168,11 @@ export default function StylePage() {
       </section>
       {items.map((item) => (
         <article key={item.id} className="border-foreground/10 rounded-lg border p-3 text-sm">
-          <p className="text-foreground/50 text-xs uppercase">{item.status}</p>
+          <p className="text-foreground/50 text-xs uppercase">In your portrait</p>
           <p className="mt-2">{item.proposal}</p>
-          {item.status !== "approved" && (
-            <button
-              className="mt-2 underline"
-              onClick={async () => {
-                await run(async () => {
-                  await pa(`/reflections/${item.id}/approve`, { method: "POST" });
-                  await load();
-                }, setError);
-              }}
-            >
-              Add this to my style
-            </button>
-          )}
+          <p className="text-foreground/60 mt-2 text-xs">
+            This is already in About me. Edit the portrait above to change it.
+          </p>
         </article>
       ))}
     </div>

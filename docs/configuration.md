@@ -121,9 +121,16 @@ AI_AVAILABLE_MODELS=["gpt-5.5","gpt-5.4","claude-opus-4-7"]
 
 ### Embeddings
 
+Local embeddings are the default: fastembed runs on CPU and needs no API key.
+The model downloads once into MODELS_CACHE_DIR.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
+| `EMBEDDING_PROVIDER` | `local` | `local` (fastembed) or `openai`/`remote` |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local model (384 dims) or remote model (`text-embedding-3-small` = 1536, `text-embedding-3-large` = 3072) |
+| `EMBEDDING_API_KEY` | (empty) | Remote key; falls back to `OPENAI_API_KEY` |
+| `EMBEDDING_BASE_URL` | (empty) | OpenAI-compatible embeddings endpoint |
+| `EMBEDDING_DIM` | `0` | 0 = derive from the model; set only for a custom model |
 
 ### Chunking & Retrieval
 

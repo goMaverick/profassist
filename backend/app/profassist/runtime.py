@@ -3,6 +3,8 @@
 from contextvars import ContextVar
 from typing import Any
 
+from app.profassist.course_memory.prompts import COURSE_MEMORY_MERGE, DOCUMENT_ANALYST
+
 DEFAULT_PROMPTS: dict[str, str] = {
     "course_designer": (
         "Draft course objectives and slides only from the professor's uploaded notes. "
@@ -24,11 +26,44 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "No exclamation marks."
     ),
     "integrity": "Flags are evidence for a viva, never a verdict. Do not accuse the student.",
-    "reflection": "Propose a small change to the professor's style. Do not apply it yourself.",
+    "reflection": (
+        "Rewrite this professor's portrait for them, using only the facts supplied. "
+        "Never invent students, credentials, or titles. Keep it under 120 words. "
+        'Return JSON as {"proposal": string}. Do not apply it; the professor approves it.'
+    ),
+    "briefing": (
+        "You are the professor's chief of staff. Write the morning briefing from the supplied "
+        "facts only. Be direct and calm. Never invent a number, course, deadline, student, or "
+        "grade, and never name a student. The headline is at most 90 characters. Exactly 3 "
+        "short bullets, each a single sentence with no filler. Name the one next action in "
+        "`focus`. Return JSON only as "
+        '{"headline": string, "bullets": [string, string, string], "focus": string}.'
+    ),
     "slide_studio": (
         "Plan a deck from the objectives. Every bullet must cite a source passage. "
         "Say when the notes do not cover an objective."
     ),
+    "slide_review": (
+        "You are an independent reviewer. Judge the deck against the official "
+        "outline/dossier and the professor's stated preferences. Do not rewrite the deck. "
+        "Return JSON only: verdict pass|revise, issues "
+        "[{slide,severity high|medium|low,issue,fix}], strengths [..]. "
+        "Never invent a source or a student name."
+    ),
+    "assignment_reviewer": (
+        "You are the chair of the assignment council. The deterministic checks are the only "
+        "findings. Summarise them, keep the strictest reading, and never invent an issue, "
+        "section, criterion, CLO, weight, or due date. Return JSON only as "
+        '{"verdict": "pass"|"revise", "summary": string, "strengths": [string]}.'
+    ),
+    "assignment_review": (
+        "You are the chair of the assignment council. The deterministic checks are the only "
+        "findings. Summarise them, keep the strictest reading, and never invent an issue, "
+        "section, criterion, CLO, weight, or due date. Return JSON only as "
+        '{"verdict": "pass"|"revise", "summary": string, "strengths": [string]}.'
+    ),
+    "document_analyst": DOCUMENT_ANALYST,
+    "course_memory_merge": COURSE_MEMORY_MERGE,
     "chat": "Help the professor. Do not publish anything to Moodle.",
     "idea_generator": "Propose four or five distinct use cases. Several groups may share one idea.",
     "exemplar": (
@@ -105,24 +140,30 @@ def set_about(text: str) -> None:
     _about.set(text or "")
 
 
-def about_section() -> str:
-    text = (_about.get() or "").strip()
-    if not text:
-        return ""
-    return "\n\n## About this professor\n" + text
-
-
 def labelled_about() -> str:
-    """The portrait, after the privacy gate. Empty when a name is still uncertain."""
+    """The portrait, after the privacy gate. Empty when a name is still uncertain.
+
+    The professor's own name and title come from the signed-in profile, not from
+    student text, so they are kept out of the PII pass. Everything else is still
+    scrubbed and quarantined when a name cannot be removed confidently.
+    """
+    from app.profassist.lessons import split_identity
     from app.profassist.pii import scrub
 
     raw = (_about.get() or "").strip()
     if not raw:
         return ""
-    cleaned = scrub(raw)
-    if cleaned.quarantined or not cleaned.text.strip():
+    identity, body = split_identity(raw)
+    cleaned = scrub(body)
+    if cleaned.quarantined:
         return ""
-    return "\n\n## About this professor\n" + cleaned.text.strip()
+    body_text = cleaned.text.strip()
+    parts = [*identity]
+    if body_text:
+        parts.append(body_text)
+    if not parts:
+        return ""
+    return "\n\n## About this professor\n" + "\n".join(parts)
 
 
 def prompt_for(agent: str) -> str:
@@ -159,30 +200,64 @@ def debate_settings() -> dict[str, Any]:
     }
 
 
+def _env_route() -> dict[str, str] | None:
+    """The provider that ``LLM_MODEL`` names explicitly, or None.
+
+    ``LLM_MODEL=gemini/gemini-3.1-flash-lite`` says which key to spend;
+    ``LLM_MODEL=gemini-3.1-flash-lite`` does not. Only the prefixed form is
+    honoured here, and only when that provider has its key configured.
+    """
+    import os
+
+    from app.profassist.providers import PROVIDERS, key_configured
+
+    raw = (os.getenv("LLM_MODEL") or "").strip()
+    prefix, _, name = raw.partition("/")
+    provider = prefix.strip().lower()
+    model = name.strip()
+    if provider not in {row["id"] for row in PROVIDERS} or not model:
+        return None
+    if not key_configured(provider):
+        return None
+    return {"provider": provider, "model": model}
+
+
 def agent_route(agent: str) -> dict[str, str]:
     """Which model serves this agent.
 
-    A configured local Ollama server is used only when the chosen provider has
-    no key. With no local server, the offline drafter remains the fallback.
+    Precedence: ``LLM_MODEL`` with an explicit provider prefix (a deployment
+    wide choice, and the only way a bare model name can say which key it
+    belongs to), then the database choice (this agent, then the whole app),
+    then ``openai``. A bare ``LLM_MODEL`` value never overrides the database.
+    A configured local Ollama server, or Gemini, is used only when the chosen
+    provider has no key. With no model configured, drafting raises an explicit
+    error.
     """
     import os
 
     from app.profassist.providers import key_configured
 
+    override = _env_route()
+    if override:
+        return override
+
     routes = model_settings().get("agents") or {}
     chosen = routes.get(agent) or {}
     provider = chosen.get("provider") or model_settings().get("provider") or "openai"
     model = chosen.get("model") or model_settings().get("model") or "gpt-4o-mini"
+    raw = (os.getenv("LLM_MODEL") or "").strip()
+    bare = raw if raw and "/" not in raw else ""
     if not key_configured(provider) and key_configured("gemini"):
         provider = "gemini"
-        override = os.getenv("LLM_MODEL") or ""
-        if override.startswith("gemini/") or override.startswith("gemini-"):
-            model = override.split("/", 1)[-1]
+        if raw.startswith("gemini/"):
+            model = raw.split("/", 1)[1]
+        elif raw.startswith("gemini-"):
+            model = raw
         else:
             model = "gemini-3.5-flash-lite"
     elif not key_configured(provider) and key_configured("ollama"):
         provider = "ollama"
-        model = os.getenv("LLM_MODEL") or model
+        model = bare or model
     return {"provider": provider, "model": model}
 
 

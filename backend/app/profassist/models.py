@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,6 +57,9 @@ class Material(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")
     pii_report: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    insight: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    insight_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    trace_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
 
 class Chunk(Base, TimestampMixin):
@@ -105,6 +108,8 @@ class SlideDeck(Base, TimestampMixin):
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     week: Mapped[int] = mapped_column(nullable=False, default=0)
     instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    review: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    review_trace_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
 
 class Assessment(Base, TimestampMixin):
@@ -227,6 +232,34 @@ class CourseDesign(Base, TimestampMixin):
     body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
+    history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class CourseDossier(Base, TimestampMixin):
+    """One merged dossier per professor and course. Never shared across professors."""
+
+    __tablename__ = "pa_course_dossiers"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "course_id", "owner_user_id", name="uq_pa_dossier_owner"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid()
+    organization_id: Mapped[uuid.UUID] = _org()
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
+    body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    trace_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
 
@@ -397,6 +430,9 @@ class GroupAssignment(Base, TimestampMixin):
     due: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     lo_codes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    document: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    blind: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="individual")
 
 
 class AssignmentIdea(Base, TimestampMixin):
@@ -423,6 +459,9 @@ class StudentGroup(Base, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = _org()
     owner_user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    assignment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     member_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
@@ -580,6 +619,9 @@ class MoodleActivity(Base, TimestampMixin):
     last_access: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     logins_14d: Mapped[int] = mapped_column(nullable=False, default=0)
     completion: Mapped[float] = mapped_column(nullable=False, default=0)
+    # The 14 dropout feature columns as pulled from the LMS. An empty object is
+    # a data gap, not a student with zero activity.
+    features: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="fake")
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -593,6 +635,35 @@ class MoodlePush(Base, TimestampMixin):
     target_type: Mapped[str] = mapped_column(String(64), nullable=False)
     target_id: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class MoodleConnection(Base, TimestampMixin):
+    """One Moodle site per university. The token is never stored in clear."""
+
+    __tablename__ = "pa_moodle_connections"
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_pa_moodle_connections_org"),)
+
+    id: Mapped[uuid.UUID] = _uuid()
+    organization_id: Mapped[uuid.UUID] = _org()
+    label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    base_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    ws_token_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ws_token_hint: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unverified")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_check_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    site_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    site_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    release: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    siteid: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    capabilities: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    course_scope: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    push_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    token_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Reflection(Base, TimestampMixin):
@@ -691,3 +762,26 @@ class ProfessorMemory(Base, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(64), nullable=False, default="preference")
     text: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+
+class CouncilRole(Base, TimestampMixin):
+    """One reviewer in a council, in the order the council speaks."""
+
+    __tablename__ = "pa_council_roles"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "council_key", "role_key", name="uq_pa_council_role"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid()
+    organization_id: Mapped[uuid.UUID] = _org()
+    council_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    role_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="llm")
+    persona_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    agent_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    position: Mapped[int] = mapped_column(nullable=False, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

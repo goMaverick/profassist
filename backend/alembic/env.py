@@ -1,6 +1,7 @@
 """Alembic migration environment."""
 # ruff: noqa: I001 - Imports structured for Jinja2 template conditionals
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -36,8 +37,13 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    """Get database URL from settings."""
-    return settings.DATABASE_URL_SYNC
+    """Get the database URL.
+
+    An explicit ``DATABASE_URL_SYNC`` environment variable wins so tooling (for
+    example the migration tests) can target a throwaway database without
+    mutating the developer's ``settings``.
+    """
+    return os.environ.get("DATABASE_URL_SYNC") or settings.DATABASE_URL_SYNC
 
 
 def run_migrations_offline() -> None:

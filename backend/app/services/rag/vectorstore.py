@@ -146,30 +146,82 @@ from app.services.rag.config import RAGSettings
 from app.services.rag.embeddings import EmbeddingService
 
 
+class CollectionDimensionMismatch(ValueError):
+    """The collection already stores vectors that a different model produced."""
+
+
+def _build_client() -> AsyncQdrantClient:
+    return AsyncQdrantClient(
+        host=app_settings.QDRANT_HOST,
+        port=app_settings.QDRANT_PORT,
+        # An empty key must stay None: qdrant-client sets https=True for any
+        # non-None api_key, which breaks plain-HTTP local Qdrant with
+        # ``[SSL: WRONG_VERSION_NUMBER]``. Cloud keys still force TLS.
+        api_key=app_settings.QDRANT_API_KEY or None,
+    )
+
+
+def _collection_vector_size(info: Any) -> int | None:
+    """Vector size held by a collection, or None when it cannot be read."""
+    vectors = getattr(getattr(getattr(info, "config", None), "params", None), "vectors", None)
+    size = getattr(vectors, "size", None)
+    if size is not None:
+        return int(size)
+    if isinstance(vectors, dict):
+        sizes = {item.size for item in vectors.values() if getattr(item, "size", None) is not None}
+        if len(sizes) == 1:
+            return int(sizes.pop())
+    return None
+
+
 class QdrantVectorStore(BaseVectorStore):
     """Qdrant vector store implementation."""
 
     def __init__(self, settings: RAGSettings, embedding_service: EmbeddingService):
         self.settings = settings
         self.embedder = embedding_service
-        self.client = AsyncQdrantClient(
-            host=app_settings.QDRANT_HOST,
-            port=app_settings.QDRANT_PORT,
-            # QDRANT_API_KEY is str | None; pass directly without `or None`
-            # to avoid silently coercing empty strings to None.
-            api_key=app_settings.QDRANT_API_KEY,
-        )
+        self.client = _build_client()
 
     async def _ensure_collection(self, name: str) -> None:
+        expected = self.settings.embeddings_config.dim
         collections = await self.client.get_collections()
         if name not in [c.name for c in collections.collections]:
             await self.client.create_collection(
                 collection_name=name,
-                vectors_config=VectorParams(
-                    size=self.settings.embeddings_config.dim,
-                    distance=Distance.COSINE,
-                ),
+                vectors_config=VectorParams(size=expected, distance=Distance.COSINE),
             )
+            return
+
+        info = await self.client.get_collection(name)
+        actual = _collection_vector_size(info)
+        if actual is None or actual == expected:
+            return
+
+        points = info.points_count or 0
+        if points == 0:
+            # Nothing is lost: replace the empty shell with the right size.
+            logger.warning(
+                "Collection '%s' was created for %d-dim vectors but the configured model "
+                "needs %d. It is empty, so it will be recreated.",
+                name,
+                actual,
+                expected,
+            )
+            await self.client.delete_collection(name)
+            await self.client.create_collection(
+                collection_name=name,
+                vectors_config=VectorParams(size=expected, distance=Distance.COSINE),
+            )
+            return
+
+        model = self.settings.embeddings_config.model
+        raise CollectionDimensionMismatch(
+            f"Collection '{name}' stores {actual}-dim vectors, but embedding model "
+            f"'{model}' produces {expected}-dim vectors. Writing now would make every "
+            f"existing point unreadable. Rebuild the collection with: "
+            f"`uv run profassist cmd rag-reset-collection --collection {name} --force`, "
+            "then re-index the documents (`rag-ingest` or `rag-reindex`)."
+        )
 
     async def insert_document(self, collection_name: str, document: Document) -> None:
         await self._ensure_collection(collection_name)
@@ -222,7 +274,7 @@ class QdrantVectorStore(BaseVectorStore):
         return CollectionInfo(
             name=collection_name,
             total_vectors=info.points_count or 0,
-            dim=self.settings.embeddings_config.dim,
+            dim=_collection_vector_size(info) or self.settings.embeddings_config.dim,
         )
 
     async def delete_collection(self, collection_name: str) -> None:
@@ -246,8 +298,8 @@ class QdrantVectorStore(BaseVectorStore):
         )
         results = [
             {
-                "parent_doc_id": r.payload.get("parent_doc_id"),
-                "metadata": r.payload.get("metadata", {}),
+                "parent_doc_id": (r.payload or {}).get("parent_doc_id"),
+                "metadata": (r.payload or {}).get("metadata", {}),
             }
             for r in records
         ]
@@ -256,3 +308,57 @@ class QdrantVectorStore(BaseVectorStore):
     async def list_collections(self) -> list[str]:
         collections = await self.client.get_collections()
         return [c.name for c in collections.collections]
+
+
+async def reset_collection(
+    collection_name: str,
+    *,
+    force: bool = False,
+    settings: RAGSettings | None = None,
+) -> dict[str, Any]:
+    """Delete and recreate one Qdrant collection with the configured vector size.
+
+    Existing data is protected: a non-empty collection is only dropped when
+    ``force`` is True. The caller is responsible for re-indexing afterwards.
+    """
+    rag_settings = settings or app_settings.rag
+    expected = rag_settings.embeddings_config.dim
+    client = _build_client()
+    try:
+        existing = [c.name for c in (await client.get_collections()).collections]
+        if collection_name not in existing:
+            return {
+                "collection": collection_name,
+                "action": "missing",
+                "vectors": 0,
+                "dim": expected,
+            }
+        info = await client.get_collection(collection_name)
+        points = info.points_count or 0
+        actual = _collection_vector_size(info)
+        if points and not force:
+            raise RuntimeError(
+                f"Collection '{collection_name}' still holds {points} vector(s) "
+                f"({actual or 'unknown'}-dim). Re-run with --force to drop and rebuild it."
+            )
+        await client.delete_collection(collection_name)
+        await client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=expected, distance=Distance.COSINE),
+        )
+        return {
+            "collection": collection_name,
+            "action": "recreated",
+            "vectors": points,
+            "dim": expected,
+        }
+    finally:
+        await client.close()
+
+
+async def reset_default_collection(
+    *, force: bool = False, settings: RAGSettings | None = None
+) -> dict[str, Any]:
+    """Recreate the default RAG collection with the configured vector size."""
+    rag_settings = settings or app_settings.rag
+    return await reset_collection(rag_settings.collection_name, force=force, settings=rag_settings)

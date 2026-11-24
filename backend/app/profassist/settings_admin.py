@@ -8,15 +8,20 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.organization import OrganizationMember
+from app.db.models.user import User
 from app.profassist.lessons import condense_about
 from app.profassist.memory import list_memories
 from app.profassist.models import (
     AgentToolSetting,
     AiSettings,
     Course,
+    CourseDesign,
+    Material,
     PromptAudit,
     PromptVersion,
     StyleProfile,
+    SubjectOutline,
 )
 from app.profassist.providers import AGENTS
 from app.profassist.providers import catalog as provider_catalog
@@ -68,6 +73,60 @@ async def load_runtime(
     await _prime_about(db, org_id, user_id)
 
 
+async def _course_codes(
+    db: AsyncSession, org_id: uuid.UUID, ids: set[uuid.UUID] | None = None
+) -> list[str]:
+    """Course codes in this workspace, optionally limited to a set of ids."""
+    rows = (
+        (await db.execute(select(Course).where(Course.organization_id == org_id))).scalars().all()
+    )
+    return sorted({row.code for row in rows if row.code and (ids is None or row.id in ids)})
+
+
+async def professor_identity(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None
+) -> dict[str, Any]:
+    """Name, org role, and the courses this professor owns evidence for."""
+    empty: dict[str, Any] = {"name": "", "role": "", "courses": []}
+    if user_id is None:
+        return empty
+    user = await db.get(User, user_id)
+    name = (user.full_name or "").strip() if user and user.full_name else ""
+    membership = (
+        (
+            await db.execute(
+                select(OrganizationMember).where(
+                    OrganizationMember.organization_id == org_id,
+                    OrganizationMember.user_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    role = (membership.role or "").strip() if membership is not None else ""
+    owned_ids: set[uuid.UUID] = set()
+    for model in (CourseDesign, SubjectOutline, Material):
+        rows = (
+            (
+                await db.execute(
+                    select(model).where(
+                        model.organization_id == org_id,
+                        model.owner_user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            course_id = getattr(row, "course_id", None)
+            if course_id:
+                owned_ids.add(course_id)
+    courses = await _course_codes(db, org_id, owned_ids)
+    return {"name": name, "role": role, "courses": courses}
+
+
 async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
     """Per professor, per university. Never the global prompt."""
     if user_id is None:
@@ -80,16 +139,17 @@ async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID |
             )
         )
     ).scalar_one_or_none()
-    courses = [
-        row.code
-        for row in (
-            await db.execute(select(Course).where(Course.organization_id == org_id))
-        ).scalars()
-    ]
+    identity = await professor_identity(db, org_id, user_id)
     memories = await list_memories(db, org_id, user_id)
     saved = profile.about_md if profile else ""
     set_about(
-        saved.strip() or condense_about(profile.soul_md if profile else "", memories, courses)
+        saved.strip()
+        or condense_about(
+            profile.soul_md if profile else "",
+            memories,
+            identity["courses"],
+            identity,
+        )
     )
 
 

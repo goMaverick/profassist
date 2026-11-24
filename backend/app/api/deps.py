@@ -103,9 +103,13 @@ SyncSourceSvc = Annotated[SyncSourceService, Depends(get_sync_source_service)]
 from app.services.rag_status import RAGStatusService
 
 
-def get_rag_status_service() -> RAGStatusService:
-    """Create RAGStatusService instance (no DB)."""
-    return RAGStatusService()
+def get_rag_status_service(redis: Redis) -> RAGStatusService:
+    """Create RAGStatusService on the shared Redis connection (no DB).
+
+    ``RedisClient.raw`` is the single long-lived ``aioredis`` client created
+    during application lifespan, so SSE subscribers do not each open a socket.
+    """
+    return RAGStatusService(redis.raw)
 
 
 RAGStatusSvc = Annotated[RAGStatusService, Depends(get_rag_status_service)]
