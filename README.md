@@ -1,6 +1,8 @@
 # ProfAssist
 
-**AI workspace for Dr Patrick Mukala, University of Wollongong in Dubai (UOWD) - course MAAI904.**
+**AI workspace for Dr Patrick Mukala, University of Wollongong in Dubai (UOWD) - course MAAI903.**
+
+POC team: Osama Abbas (8884304), Maxsim, Reece.
 
 Proof of concept (POC), built on the [Vstorm full-stack AI agent template](https://github.com/vstorm-co/full-stack-ai-agent-template) (FastAPI + Next.js + LangGraph). One professor drafts course material with a council of LLM reviewers and a human approval gate; every artifact stays a draft.
 

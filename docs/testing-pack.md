@@ -196,7 +196,7 @@ The four README GIFs are captured from the same local Docker run against the dem
 | [slide-studio-create.gif](gifs/slide-studio-create.gif) | 501,766 | Cited slide deck built in the studio |
 | [assignment-create.gif](gifs/assignment-create.gif) | 620,732 | Assignment brief and rubric drafted with the council |
 
-The material and assignment captures show advisory council verdicts, including drafts that land as **Needs revision**; the council never blocks saving, and the professor decides. Captions in the README say "demo course" because the captures are the local seeded demo, not real UOWD/MAAI904 data.
+The material and assignment captures show advisory council verdicts, including drafts that land as **Needs revision**; the council never blocks saving, and the professor decides. Captions in the README say "demo course" because the captures are the local seeded demo, not real UOWD/MAAI903 data.
 
 ## 7. E2E failures: root cause and status
 
