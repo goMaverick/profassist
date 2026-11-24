@@ -26,6 +26,7 @@ from app.profassist.course_memory.graph import (
 from app.profassist.course_memory.merge import PRUNE_ORDER, merge_dossiers, shrink_dossier
 from app.profassist.errors import ProfassistError
 from app.profassist.models import Chunk, CourseDossier, Material
+from app.profassist.settings_admin import load_runtime
 
 MATERIAL_CHUNK_LIMIT = 40
 CHUNK_TEXT_LIMIT = 4000
@@ -332,6 +333,7 @@ async def rebuild_course_memory(
             "trace_url": str(existing.trace_url or ""),
         }
 
+    await load_runtime(db, org_id, user_id)
     result, trace_url = run_memory_state(specs, official, course_code=course_code)
     dossiers = {
         str(item.get("material_id") or ""): item
@@ -397,6 +399,7 @@ async def rebuild_material(
     row = await db.get(Material, material_id)
     if row is None or row.organization_id != org_id or row.owner_user_id != user_id:
         raise ProfassistError(404, "That file is not in this course.")
+    await load_runtime(db, org_id, user_id)
 
     result = await db.execute(
         select(Chunk)

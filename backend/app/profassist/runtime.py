@@ -130,6 +130,7 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
 }
 
 _about: ContextVar[str | None] = ContextVar("pa_about", default=None)
+_professor: ContextVar[dict[str, Any] | None] = ContextVar("pa_professor", default=None)
 _prompts: ContextVar[dict[str, str] | None] = ContextVar("pa_prompts", default=None)
 _tools: ContextVar[dict[str, bool] | None] = ContextVar("pa_tools", default=None)
 _model: ContextVar[dict[str, Any] | None] = ContextVar("pa_model", default=None)
@@ -143,6 +144,32 @@ def bind_runtime(prompts: dict[str, str], tools: dict[str, bool], model: dict[st
 
 def set_about(text: str) -> None:
     _about.set(text or "")
+
+
+def set_professor(identity: dict[str, Any] | None) -> None:
+    """The signed-in professor's name, title, university, and courses."""
+    _professor.set(dict(identity or {}))
+
+
+def professor_name() -> str:
+    return str((_professor.get() or {}).get("name") or "").strip()
+
+
+def professor_block() -> str:
+    """Who the model is working for. Empty when no professor is signed in."""
+    identity = _professor.get() or {}
+    name = str(identity.get("name") or "").strip()
+    if not name:
+        return ""
+    role = str(identity.get("role") or "").strip()
+    organization = str(identity.get("organization") or "").strip()
+    courses = [str(item).strip() for item in (identity.get("courses") or []) if str(item).strip()]
+    lines = ["## Working for", f"Professor: {name} ({role})" if role else f"Professor: {name}"]
+    if organization:
+        lines.append(f"University: {organization}")
+    if courses:
+        lines.append("Courses: " + ", ".join(courses))
+    return "\n".join(lines)
 
 
 def labelled_about() -> str:

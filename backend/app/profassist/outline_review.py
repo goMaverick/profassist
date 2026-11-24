@@ -16,6 +16,7 @@ from app.profassist.outline import get_outline
 from app.profassist.outline_data import POLICIES
 from app.profassist.runtime import tool_enabled
 from app.profassist.service import capture_movement
+from app.profassist.settings_admin import load_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,7 @@ async def run_review(
     from app.profassist.observe import step_trace_url
 
     row = await get_outline(db, org_id, user_id, outline_id)
+    await load_runtime(db, org_id, user_id)
     roles = await load_council_roles(db, org_id, "outline")
     enabled = [name for name in enabled_keys(roles, "deterministic") if name in REVIEWERS]
     chosen = [reviewer] if mode == "single" else list(enabled)

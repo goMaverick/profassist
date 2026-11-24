@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import Delete
@@ -1039,6 +1040,7 @@ def _wire_outline(
 
     monkeypatch.setattr(outline_review, "get_outline", fake_get_outline)
     monkeypatch.setattr(outline_review, "load_council_roles", fake_load_roles)
+    monkeypatch.setattr(outline_review, "load_runtime", AsyncMock())
     monkeypatch.setattr(llm, "complete", fake_complete)
     if tool is not None:
         monkeypatch.setattr(outline_review, "tool_enabled", tool)
@@ -1074,6 +1076,25 @@ async def test_outline_reviewers_are_enabled_roles_in_order(
     assert "balance" not in reviewers
     assert reviewers <= {"curriculum", "alignment", "student"}
     assert [task for task, _payload in calls] == ["outline_review"]
+
+
+@pytest.mark.anyio
+async def test_outline_review_loads_the_signed_in_professor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = _roles("outline")
+    _wire_outline(monkeypatch, roles)
+    load = outline_review.load_runtime
+    org_id, user_id = uuid.uuid4(), uuid.uuid4()
+    db = _ReviewSession()
+
+    await outline_review.run_review(
+        db, org_id, user_id, uuid.uuid4(), mode="single", reviewer="curriculum"
+    )
+
+    load.assert_awaited_once()
+    args = load.await_args.args
+    assert args == (db, org_id, user_id)
 
 
 @pytest.mark.anyio

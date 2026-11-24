@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.db.models.organization import OrganizationMember
+from app.db.models.organization import Organization, OrganizationMember
 from app.db.models.user import User
-from app.profassist import agents, service, settings_admin
+from app.profassist import agents, llm, runtime, service, settings_admin
 from app.profassist.lessons import condense_about, split_identity
 from app.profassist.models import Course, CourseDesign, Reflection, StyleProfile
 from tests.test_profassist_rubric import FakeSession
@@ -15,6 +15,14 @@ from tests.test_profassist_rubric import FakeSession
 
 def _person(db: FakeSession, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
     db.add(User(id=user_id, email="jane@university.edu", full_name="Jane Doe", role="user"))
+    db.add(
+        Organization(
+            id=org_id,
+            name="Northgate University",
+            slug=f"org-{org_id.hex[:12]}",
+            created_by_user_id=user_id,
+        )
+    )
     db.add(OrganizationMember(organization_id=org_id, user_id=user_id, role="owner"))
 
 
@@ -87,6 +95,7 @@ async def test_identity_does_not_fall_back_to_every_course(
 
     assert identity["name"] == "Jane Doe"
     assert identity["role"] == "owner"
+    assert identity["organization"] == "Northgate University"
     assert identity["courses"] == []
 
 
@@ -191,3 +200,87 @@ async def test_saving_the_portrait_keeps_identity_and_scrubs_the_body(
     assert "Jane Doe" in saved["about_md"]
     assert "AAS910" in saved["about_md"]
     assert "Lead with evidence." in saved["about_md"]
+
+
+@pytest.mark.anyio
+async def test_load_runtime_sets_the_professor_block() -> None:
+    db = FakeSession()
+    org_id, user_id = uuid.uuid4(), uuid.uuid4()
+    _person(db, org_id, user_id)
+    course = Course(id=uuid.uuid4(), organization_id=org_id, code="AAS910", title="Assurance")
+    db.add(course)
+    db.add(CourseDesign(organization_id=org_id, course_id=course.id, owner_user_id=user_id))
+    await db.flush()
+
+    await settings_admin.load_runtime(db, org_id, user_id)
+
+    assert runtime.professor_name() == "Jane Doe"
+    block = runtime.professor_block()
+    assert block.startswith("## Working for\n")
+    assert "Professor: Jane Doe (owner)" in block
+    assert "University: Northgate University" in block
+    assert "Courses: AAS910" in block
+
+
+def test_a_saved_portrait_without_identity_still_gets_the_block() -> None:
+    runtime.set_professor(
+        {
+            "name": "Jane Doe",
+            "role": "owner",
+            "organization": "Northgate University",
+            "courses": ["AAS910"],
+        }
+    )
+
+    text = llm._professor_context("\n\n## About this professor\nShe prefers short feedback.")
+
+    assert "She prefers short feedback." in text
+    assert "Professor: Jane Doe (owner)" in text
+    assert "University: Northgate University" in text
+    assert "Courses: AAS910" in text
+
+
+def test_no_signed_in_professor_gets_no_block() -> None:
+    runtime.set_professor({})
+    about = "\n\n## About this professor\nShe prefers short feedback."
+
+    assert runtime.professor_block() == ""
+    assert llm._professor_context(about) == about
+
+
+def test_the_block_never_repeats_the_name_already_in_the_portrait() -> None:
+    runtime.set_professor(
+        {
+            "name": "Jane Doe",
+            "role": "owner",
+            "organization": "Northgate University",
+            "courses": ["AAS910"],
+        }
+    )
+    about = "\n\n## About this professor\nProfessor: Jane Doe \u2014 owner\nTeaches: AAS910"
+
+    text = llm._professor_context(about)
+
+    assert text.count("Professor: Jane Doe") == 1
+    assert "University: Northgate University" in text
+    assert "Courses: AAS910" in text
+
+
+@pytest.mark.anyio
+async def test_identity_uses_the_university_of_this_workspace_only() -> None:
+    db = FakeSession()
+    org_id, other_org, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    _person(db, org_id, user_id)
+    db.add(
+        Organization(
+            id=other_org,
+            name="Elsewhere University",
+            slug=f"org-{other_org.hex[:12]}",
+            created_by_user_id=user_id,
+        )
+    )
+    await db.flush()
+
+    identity = await settings_admin.professor_identity(db, org_id, user_id)
+
+    assert identity["organization"] == "Northgate University"

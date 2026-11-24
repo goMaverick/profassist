@@ -103,7 +103,13 @@ from app.profassist.service import (
     set_flag,
     upload_submission_zip,
 )
-from app.profassist.settings_admin import admin_view, save_model_settings, save_prompt, set_tool
+from app.profassist.settings_admin import (
+    admin_view,
+    load_runtime,
+    save_model_settings,
+    save_prompt,
+    set_tool,
+)
 from app.profassist.tracking import list_registered_models_async
 from app.profassist.visuals import page_visuals
 
@@ -1155,7 +1161,10 @@ async def assignments_list(
 async def assignments_create(
     body: AssignmentBody, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
-    text = body.body or await draft_text(body.title, body.lo_codes, body.instructions)
+    text = body.body
+    if not text:
+        await load_runtime(db, org.id, user.id)
+        text = await draft_text(body.title, body.lo_codes, body.instructions)
     return await create_from_task(
         db,
         org.id,
@@ -1183,6 +1192,7 @@ async def assignments_get(
 async def assignments_ideas(
     assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
+    await load_runtime(db, org.id, user.id)
     current = await assignment_view(db, org.id, user.id, assignment_id)
     ideas = await propose_ideas(current["title"], current["body"], current["lo_codes"])
     return await save_ideas(db, org.id, user.id, assignment_id, ideas)
@@ -1221,6 +1231,7 @@ async def assignments_allocate(
 async def assignments_exemplars(
     assignment_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
 ) -> dict:
+    await load_runtime(db, org.id, user.id)
     return await write_exemplars(db, org.id, user.id, assignment_id)
 
 

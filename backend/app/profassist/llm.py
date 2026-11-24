@@ -15,7 +15,13 @@ from app.profassist.errors import ProfassistError
 from app.profassist.observe import record_step, reset_step_trace
 from app.profassist.pii import assert_prompt_is_clean, scrub, strip_contacts
 from app.profassist.providers import any_key_configured, key_configured, litellm_model
-from app.profassist.runtime import agent_route, labelled_about, prompt_for
+from app.profassist.runtime import (
+    agent_route,
+    labelled_about,
+    professor_block,
+    professor_name,
+    prompt_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +154,22 @@ def _trace_about() -> Any:
     """
     resolve = getattr(observe, "trace_about", None)
     return resolve() if callable(resolve) else labelled_about()
+
+
+def _professor_context(about: str) -> str:
+    """The portrait plus who the model is working for.
+
+    The portrait already names the professor when one was saved from the profile,
+    so only the duplicate ``Professor:`` line is dropped from the block. The
+    university and courses are always kept.
+    """
+    block = professor_block()
+    if not block:
+        return about
+    name = professor_name()
+    if name and f"Professor: {name}" in about:
+        block = "\n".join(line for line in block.splitlines() if not line.startswith("Professor:"))
+    return f"{about}\n\n{block}" if about else f"\n\n{block}"
 
 
 def _outline_payload_note(payload: dict[str, Any]) -> str:
@@ -368,7 +390,7 @@ def complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         "For a grade, level is exactly beginning, developing, proficient, or advanced, "
         "and each quote is copied from the submission with the same words. "
         f"Task: {task}. {prompt_override or prompt_for(prompt_key)} {persona}"
-        f"{labelled_about()}"
+        f"{_professor_context(labelled_about())}"
         + (
             f"\n\n## Professor instructions\n{payload.get('instructions')}"
             if (payload.get("instructions") or "").strip()
