@@ -323,8 +323,9 @@ def _assignment_review_note(payload: dict[str, Any]) -> str:
         "\n\n## Assignment council\n"
         f"The built-in `checks` list has {count} finding(s); reviewer issues are merged "
         "beside it. Do not invent an issue, section, criterion, CLO, weight, due date, "
-        "source, or student name. A clean assignment has no findings; return verdict pass "
-        "and do not manufacture one. "
+        "source, or student name. The summary must match the verdict and the findings: if "
+        "any finding exists, never say the work meets all requirements. A clean assignment "
+        "has no findings; return verdict pass and do not manufacture one. "
         'Return JSON only as {"verdict": "pass"|"revise", "summary": string, '
         '"strengths": [string]}.'
     )

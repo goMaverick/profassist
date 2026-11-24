@@ -266,3 +266,89 @@ def test_a_failed_chair_degrades_to_the_deterministic_checks(
         "chair",
     ]
     assert review["messages"][-1]["text"].startswith("The council verdict is pass")
+
+
+def test_a_positive_model_summary_is_replaced_when_issues_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reply(task: str, _payload: dict[str, Any]) -> Any:
+        if task == "council_review":
+            return {
+                "issues": [
+                    {
+                        "severity": "high",
+                        "issue": "The rubric omits the ethics criterion.",
+                        "fix": "Add it.",
+                    }
+                ]
+            }
+        return {
+            "verdict": "revise",
+            "summary": "Your submission meets all requirements cleanly.",
+            "strengths": [],
+        }
+
+    _wire(monkeypatch, reply)
+
+    review = assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+    )
+
+    assert review["verdict"] == "revise"
+    assert review["summary"].startswith("The council found ")
+    assert "meets all requirements" not in review["summary"].lower()
+    assert "The rubric omits the ethics criterion." in review["summary"]
+    assert "meets all requirements" not in review["messages"][-1]["text"].lower()
+
+
+def test_a_clean_assignment_keeps_the_model_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _wire(
+        monkeypatch,
+        {"verdict": "pass", "summary": "Everything is in place.", "strengths": []},
+    )
+
+    review = assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+    )
+
+    assert review["issues"] == []
+    assert review["summary"] == "Everything is in place."
+
+
+def test_a_summary_that_acknowledges_revision_is_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary = "The brief needs the missing due date before it is ready."
+
+    def reply(task: str, _payload: dict[str, Any]) -> Any:
+        if task == "council_review":
+            return {
+                "issues": [
+                    {
+                        "severity": "medium",
+                        "issue": "The brief omits the due date.",
+                        "fix": "Add the due date.",
+                    }
+                ]
+            }
+        return {"verdict": "revise", "summary": summary, "strengths": []}
+
+    _wire(monkeypatch, reply)
+
+    review = assignment_council.run_assignment_council(
+        _document(),
+        _rubric(),
+        ["Design an end-to-end AI solution."],
+        _outline(),
+    )
+
+    assert review["verdict"] == "revise"
+    assert review["summary"] == summary

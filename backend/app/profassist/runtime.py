@@ -105,7 +105,8 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "issues and checks, which are the only findings, and keep the strictest supported "
         "reading without adding an issue. Summarise them and never invent a section, "
         "criterion, CLO, weight, due date, source, or student name. Do not auto-publish or "
-        "approve. Return JSON only as "
+        "approve. The summary must match the verdict and the findings; if any finding "
+        "exists, never say the work meets all requirements. Return JSON only as "
         '{"verdict": "pass"|"revise", "summary": string, "strengths": [string]}.'
     ),
     "assignment_review": (
@@ -113,7 +114,8 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "issues and checks, which are the only findings, and keep the strictest supported "
         "reading without adding an issue. Summarise them and never invent a section, "
         "criterion, CLO, weight, due date, source, or student name. Do not auto-publish or "
-        "approve. Return JSON only as "
+        "approve. The summary must match the verdict and the findings; if any finding "
+        "exists, never say the work meets all requirements. Return JSON only as "
         '{"verdict": "pass"|"revise", "summary": string, "strengths": [string]}.'
     ),
     "document_analyst": DOCUMENT_ANALYST,

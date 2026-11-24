@@ -31,6 +31,28 @@ def _sentences(text: str) -> list[str]:
     return [part.strip() for part in parts if len(part.strip()) > 40]
 
 
+def _cite_fragment(text: str) -> tuple[str, str]:
+    """Return (bullet, quote) from a chunk without opening on a partial word.
+
+    The bullet prefers a fragment that starts with a capital letter or digit.
+    When every fragment is a continuation, it trims the leading partial word and
+    prefixes an ellipsis. The quote stays verbatim so the citation is unchanged.
+    """
+    fragments = _sentences(text)
+    if not fragments:
+        whole = " ".join((text or "").split())
+        return whole, whole
+    for fragment in fragments:
+        first = fragment[:1]
+        if first.isupper() or first.isdigit():
+            return fragment, fragment
+    first = fragments[0]
+    _head, separator, tail = first.partition(" ")
+    if separator and tail.strip():
+        return "…" + tail.strip(), first
+    return "…" + first, first
+
+
 def plan_queries(objectives: list[str]) -> list[dict[str, str]]:
     queries = []
     for objective in objectives:
@@ -90,16 +112,16 @@ def retrieve_hops(
 def cite_slide(objective: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
     bullets = []
     for hit in hits:
-        sentence = (_sentences(hit.get("text") or "") or [hit.get("text") or ""])[0]
-        if not sentence:
+        bullet, quote = _cite_fragment(hit.get("text") or "")
+        if not bullet:
             continue
         bullets.append(
             {
-                "text": sentence,
+                "text": bullet,
                 "citation": {
                     "filename": hit.get("filename") or "note",
                     "section": hit.get("section") or "note",
-                    "quote": sentence,
+                    "quote": quote,
                     "chunk_id": hit.get("id"),
                 },
             }
@@ -120,7 +142,10 @@ def critique(slides: list[dict[str, Any]], chunks: list[dict[str, Any]]) -> list
         bullets = []
         for bullet in slide.get("bullets") or []:
             text = bullet["text"] if isinstance(bullet, dict) else str(bullet)
-            if text and text in source:
+            grounded = text in source or (
+                len(text) > 1 and text.startswith("…") and text[1:] in source
+            )
+            if text and grounded:
                 bullets.append(
                     bullet if isinstance(bullet, dict) else {"text": text, "citation": {}}
                 )
