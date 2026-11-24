@@ -24,9 +24,6 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "@carbon/icons-react": "^11.92.0",
-    "@carbon/react": "^1.121.0",
-    "@carbon/styles": "^1.120.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.0",
     "@radix-ui/react-avatar": "^1.1.0",

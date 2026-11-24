@@ -1,6 +1,7 @@
 # ruff: noqa: I001
 """Sync source service — org-scoped integration management."""
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from uuid import UUID
@@ -25,6 +26,8 @@ from app.schemas.sync_source import (
     SyncSourceRead,
     SyncSourceUpdate,
 )
+
+_BACKGROUND_TASKS: set[asyncio.Task[object]] = set()
 
 _SECRET_MASK = "••••••"
 
@@ -266,10 +269,11 @@ class SyncSourceService:
             mode=source.sync_mode,
             sync_source_id=source.id,
         )
-        import asyncio
         from app.worker.tasks.rag_tasks import sync_single_source_flow
 
-        asyncio.create_task(sync_single_source_flow(source_id, str(sync_log.id)))
+        task = asyncio.create_task(sync_single_source_flow(source_id, str(sync_log.id)))
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
         return sync_log
 
     async def update_after_sync(

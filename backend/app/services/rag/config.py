@@ -1,8 +1,11 @@
 """RAG configuration."""
 
+import logging
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentExtensions(StrEnum):
@@ -10,11 +13,26 @@ class DocumentExtensions(StrEnum):
 
     PDF = ".pdf"
     DOCX = ".docx"
+    PPTX = ".pptx"
+    POTX = ".potx"
     MD = ".md"
     TXT = ".txt"
+    HTML = ".html"
+    HTM = ".htm"
 
 
-PYMUPDF_FORMATS: set[str] = {".pdf", ".docx", ".txt", ".md"}
+# The built-in processor (not PyMuPDF) parses PPTX and HTML; the name is kept
+# for compatibility with the existing parser registry.
+PYMUPDF_FORMATS: set[str] = {
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".potx",
+    ".txt",
+    ".md",
+    ".html",
+    ".htm",
+}
 
 LITEPARSE_FORMATS: set[str] = {
     ".pdf",
@@ -74,34 +92,111 @@ def get_supported_formats(parser_name: str = "pymupdf") -> set[str]:
 
 
 # Known embedding models and their output dimensions.
-# Used to auto-set vector store dimension from model name.
-EMBEDDING_DIMENSIONS: dict[str, int] = {
+# Local models are the ones fastembed can actually load and run on CPU; remote
+# models need a hosted endpoint (OpenAI and compatible services).
+DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_LOCAL_EMBEDDING_DIM = 384
+
+LOCAL_EMBEDDING_MODELS: dict[str, int] = {
+    DEFAULT_LOCAL_EMBEDDING_MODEL: DEFAULT_LOCAL_EMBEDDING_DIM,
+    "BAAI/bge-base-en-v1.5": 768,
+    "BAAI/bge-large-en-v1.5": 1024,
+    "sentence-transformers/all-MiniLM-L6-v2": 384,
+    "sentence-transformers/all-mpnet-base-v2": 768,
+    # Fastembed short names (same weights as the BAAI/* ids)
+    "bge-small-en-v1.5": 384,
+    "bge-base-en-v1.5": 768,
+    "bge-large-en-v1.5": 1024,
+    "all-MiniLM-L6-v2": 384,
+    "all-mpnet-base-v2": 768,
+}
+
+REMOTE_EMBEDDING_MODELS: dict[str, int] = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,
     "voyage-3": 1024,
     "voyage-3-lite": 512,
     "voyage-code-3": 1024,
+    "gemini-embedding-001": 3072,
     "gemini-embedding-exp-03-07": 3072,
-    "all-MiniLM-L6-v2": 384,
-    "all-mpnet-base-v2": 768,
-    "bge-small-en-v1.5": 384,
-    "bge-base-en-v1.5": 768,
-    "bge-large-en-v1.5": 1024,
 }
+
+# Full catalogue, for callers that only need "is this model a known one".
+EMBEDDING_DIMENSIONS: dict[str, int] = {**LOCAL_EMBEDDING_MODELS, **REMOTE_EMBEDDING_MODELS}
+
+LOCAL_EMBEDDING_PROVIDERS = frozenset({"local", "fastembed"})
+REMOTE_EMBEDDING_PROVIDERS = frozenset({"openai", "remote"})
 
 
 class EmbeddingsConfig(BaseModel):
-    """Embeddings configuration. Dimension is auto-derived from model name."""
+    """Embeddings configuration.
 
-    model: str = "text-embedding-3-large"
-    dim: int = 3072
+    ``dim`` is auto-derived from the model name when it is 0 (the default).
+
+    - ``local``: the model must be one fastembed can run (see
+      ``LOCAL_EMBEDDING_MODELS``). A remote-only model is replaced by
+      ``DEFAULT_LOCAL_EMBEDDING_MODEL`` with a warning, so one stale
+      ``EMBEDDING_MODEL`` cannot take the RAG pipeline down at startup.
+    - ``openai``/``remote``: the configured model is kept and a positive
+      dimension is required (a known model name or an explicit ``EMBEDDING_DIM``).
+    """
+
+    provider: str = "local"
+    model: str = DEFAULT_LOCAL_EMBEDDING_MODEL
+    dim: int = 0
+    api_key: str = ""
+    base_url: str | None = None
 
     @model_validator(mode="after")
     def set_dim_from_model(self) -> "EmbeddingsConfig":
-        if self.model in EMBEDDING_DIMENSIONS:
-            self.dim = EMBEDDING_DIMENSIONS[self.model]
+        provider = self.provider.strip().lower()
+        if provider not in LOCAL_EMBEDDING_PROVIDERS | REMOTE_EMBEDDING_PROVIDERS:
+            raise ValueError(
+                f"Unknown embedding provider '{self.provider}'. "
+                "Use 'local' (fastembed) or 'openai'/'remote'."
+            )
+        self.provider = "local" if provider in LOCAL_EMBEDDING_PROVIDERS else "openai"
+        if self.provider == "local":
+            self._use_local_model()
+            return self
+        if self.dim <= 0:
+            known = REMOTE_EMBEDDING_MODELS.get(self.model)
+            if known is None:
+                raise ValueError(
+                    f"Unknown remote embedding model '{self.model}'. Add it to "
+                    "REMOTE_EMBEDDING_MODELS or set EMBEDDING_DIM explicitly."
+                )
+            self.dim = known
         return self
+
+    def _use_local_model(self) -> None:
+        """Keep a model fastembed can load, falling back to bge-small."""
+        local_dim = LOCAL_EMBEDDING_MODELS.get(self.model)
+        if local_dim is None:
+            fallback = DEFAULT_LOCAL_EMBEDDING_MODEL
+            if self.dim > 0 and self.dim != DEFAULT_LOCAL_EMBEDDING_DIM:
+                logger.warning(
+                    "Ignoring EMBEDDING_DIM=%s: the local fallback model '%s' outputs %s dims.",
+                    self.dim,
+                    fallback,
+                    DEFAULT_LOCAL_EMBEDDING_DIM,
+                )
+            logger.warning(
+                "EMBEDDING_PROVIDER=local cannot run the configured model '%s' "
+                "(local models: %s). Falling back to '%s' (%s dims). "
+                "Set EMBEDDING_PROVIDER=openai with an API key to use '%s' remotely.",
+                self.model,
+                ", ".join(sorted(LOCAL_EMBEDDING_MODELS)),
+                fallback,
+                DEFAULT_LOCAL_EMBEDDING_DIM,
+                self.model,
+            )
+            self.model = fallback
+            self.dim = DEFAULT_LOCAL_EMBEDDING_DIM
+            return
+        if self.dim <= 0:
+            self.dim = local_dim
 
 
 class DocumentParser(BaseModel):

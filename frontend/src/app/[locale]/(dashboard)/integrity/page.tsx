@@ -3,10 +3,32 @@
 import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Dropdown, StructuredListBody, StructuredListCell, StructuredListHead, StructuredListRow, StructuredListWrapper, Tag, TextArea, Tile } from "@carbon/react";
-import { ChevronLeft, ChevronRight } from "@carbon/icons-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
 import { pa, run } from "@/components/profassist/bits";
 import type { Hit } from "@/components/profassist/document-viewer";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
+  Button,
+  Card,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 function fileUrl(path: string) {
   return `/api/profassist${path}`;
@@ -22,7 +44,7 @@ interface CourseOption {
   slug: string;
   title: string;
 }
-interface Card {
+interface AssignmentCard {
   course: string;
   slug: string;
   title: string;
@@ -37,8 +59,14 @@ interface Card {
 }
 interface Overview {
   courses: CourseOption[];
-  summary: { courses: number; assignments: number; groups: number; review: number; concern: number };
-  items: Card[];
+  summary: {
+    courses: number;
+    assignments: number;
+    groups: number;
+    review: number;
+    concern: number;
+  };
+  items: AssignmentCard[];
 }
 interface PairRow {
   left: string;
@@ -127,11 +155,28 @@ export default function IntegrityPage() {
   );
 }
 
-function statusType(status: string): "green" | "blue" | "red" | "gray" {
-  if (status === "Clear") return "green";
-  if (status === "Review") return "blue";
-  if (status === "Concern") return "red";
-  return "gray";
+function statusClass(status: string) {
+  if (status === "Clear") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700";
+  if (status === "Review") return "border-blue-500/40 bg-blue-500/10 text-blue-700";
+  if (status === "Concern") return "border-red-500/40 bg-red-500/10 text-red-700";
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function sourceClass(source: string) {
+  if (source === "shared") return "border-purple-500/40 bg-purple-500/10 text-purple-700";
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function decisionClass(decision: string) {
+  if (decision === "flag") return "border-red-500/40 bg-red-500/10 text-red-700";
+  if (decision === "ok") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700";
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function decisionLabel(decision: string) {
+  if (decision === "ok") return "OK";
+  if (decision === "flag") return "Flagged";
+  return "Pending";
 }
 
 function heat(percent: number) {
@@ -141,7 +186,11 @@ function heat(percent: number) {
   return "#defbe6";
 }
 
-function hitsFor(rows: Match[], visible: Array<Match & { n: number }>, side: "left" | "right"): Hit[] {
+function hitsFor(
+  rows: Match[],
+  visible: Array<Match & { n: number }>,
+  side: "left" | "right",
+): Hit[] {
   const numbers = new Map(visible.map((row) => [row.id, row.n]));
   return rows
     .filter((row) => numbers.has(row.id) || row.source !== "shared")
@@ -191,7 +240,11 @@ function SubmissionCard({
                 <span id={`${side}-${run.id}`} className={run.common ? "pa-from-brief" : undefined}>
                   {run.common ? run.text : <mark>{run.text}</mark>}
                 </span>
-                {run.common ? <Tag type="gray" size="sm">From the brief - not counted</Tag> : null}
+                {run.common ? (
+                  <Badge variant="outline" className={sourceClass("brief")}>
+                    From the brief - not counted
+                  </Badge>
+                ) : null}
               </Fragment>
             ) : (
               <span key={`${side}-plain-${runIndex}`}>{run.text}</span>
@@ -225,7 +278,9 @@ function IntegrityDrill() {
   useEffect(() => {
     pa<Overview>(`/integrity/overview?course=${encodeURIComponent(course)}`)
       .then(setOverview)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open integrity"));
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not open integrity"),
+      );
   }, [course]);
 
   useEffect(() => {
@@ -235,7 +290,9 @@ function IntegrityDrill() {
     }
     pa<Matrix>(`/integrity/matrix?course=${encodeURIComponent(course)}&number=${assignment}`)
       .then(setMatrix)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that assignment"));
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not open that assignment"),
+      );
   }, [course, assignment]);
 
   useEffect(() => {
@@ -244,9 +301,13 @@ function IntegrityDrill() {
       return;
     }
     const [left, right] = pair.split("-");
-    pa<PairDetail>(`/integrity/pair?course=${encodeURIComponent(course)}&number=${assignment}&left=${left}&right=${right}`)
+    pa<PairDetail>(
+      `/integrity/pair?course=${encodeURIComponent(course)}&number=${assignment}&left=${left}&right=${right}`,
+    )
       .then(setDetail)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open that pair"));
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not open that pair"),
+      );
   }, [course, assignment, pair]);
 
   const visible = useMemo(() => {
@@ -257,7 +318,6 @@ function IntegrityDrill() {
     });
     return rows.map((item, index) => ({ ...item, n: index + 1 }));
   }, [detail, strongOnly, hideCommon]);
-
   useEffect(() => {
     setCursor(0);
   }, [pair, strongOnly, hideCommon]);
@@ -281,21 +341,26 @@ function IntegrityDrill() {
     if (!detail) return;
     const result = await run(
       () =>
-        pa<{ matches: Match[]; decisions: PairDetail["decisions"]; message: string }>("/integrity/match", {
-          method: "POST",
-          body: JSON.stringify({
-            course: detail.slug,
-            number: detail.assignment,
-            left: detail.left,
-            right: detail.right,
-            match_id: matchId,
-            action,
-          }),
-        }),
+        pa<{ matches: Match[]; decisions: PairDetail["decisions"]; message: string }>(
+          "/integrity/match",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              course: detail.slug,
+              number: detail.assignment,
+              left: detail.left,
+              right: detail.right,
+              match_id: matchId,
+              action,
+            }),
+          },
+        ),
       setError,
     );
     if (!result) return;
-    setDetail((current) => (current ? { ...current, matches: result.matches, decisions: result.decisions } : current));
+    setDetail((current) =>
+      current ? { ...current, matches: result.matches, decisions: result.decisions } : current,
+    );
     setSaved(result.message);
   }
 
@@ -319,46 +384,90 @@ function IntegrityDrill() {
     if (result) setSaved(result.message);
   }
 
-  const courseItems = [{ code: "All courses", slug: "all", title: "" }, ...(overview?.courses || [])];
+  const courseItems = [
+    { code: "All courses", slug: "all", title: "" },
+    ...(overview?.courses || []),
+  ];
 
   return (
     <div className="pa-dash">
       <nav className="pa-crumb" aria-label="Integrity">
-        <button type="button" className="pa-why" onClick={() => go({ course, assignment: "", pair: "" })}>Course</button>
+        <button
+          type="button"
+          className="pa-why"
+          onClick={() => go({ course, assignment: "", pair: "" })}
+        >
+          Course
+        </button>
         {assignment && (
           <>
             {" / "}
-            <button type="button" className="pa-why" onClick={() => go({ course, assignment, pair: "" })}>
+            <button
+              type="button"
+              className="pa-why"
+              onClick={() => go({ course, assignment, pair: "" })}
+            >
               Assignment {assignment}
             </button>
           </>
         )}
-        {detail && <> / Group {detail.left} and Group {detail.right}</>}
+        {detail && (
+          <>
+            {" "}
+            / Group {detail.left} and Group {detail.right}
+          </>
+        )}
       </nav>
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTitle>Integrity</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {!assignment && (
         <>
-          <div style={{ maxWidth: 320 }}>
-            <Dropdown
-              id="integrity-course"
-              titleText="Course"
-              label="All courses"
-              items={courseItems}
-              itemToString={(item) => (item ? (item.slug === "all" ? "All courses" : `${item.code} · ${item.title}`) : "")}
-              selectedItem={courseItems.find((item) => item.slug === course) || courseItems[0]}
-              onChange={({ selectedItem }) => go({ course: selectedItem?.slug || "all" })}
-            />
+          <div className="max-w-xs space-y-1.5">
+            <Label htmlFor="integrity-course">Course</Label>
+            <Select
+              value={courseItems.some((item) => item.slug === course) ? course : "all"}
+              onValueChange={(value) => go({ course: value })}
+            >
+              <SelectTrigger id="integrity-course">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {courseItems.map((item) => (
+                  <SelectItem key={item.slug} value={item.slug}>
+                    {item.slug === "all" ? "All courses" : `${item.code} · ${item.title}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           {overview && (
             <div className="pa-kpi-row">
-              <Tile><p className="pa-step-kicker">Assignments</p><strong style={{ fontSize: "2rem" }}>{overview.summary.assignments}</strong></Tile>
-              <Tile><p className="pa-step-kicker">Groups</p><strong style={{ fontSize: "2rem" }}>{overview.summary.groups}</strong></Tile>
-              <Tile><p className="pa-step-kicker">Needs a look</p><strong style={{ fontSize: "2rem" }}>{overview.summary.review}</strong></Tile>
-              <Tile><p className="pa-step-kicker">Concern</p><strong style={{ fontSize: "2rem" }}>{overview.summary.concern}</strong></Tile>
+              <Card className="p-4">
+                <p className="pa-step-kicker">Assignments</p>
+                <strong className="text-[2rem]">{overview.summary.assignments}</strong>
+              </Card>
+              <Card className="p-4">
+                <p className="pa-step-kicker">Groups</p>
+                <strong className="text-[2rem]">{overview.summary.groups}</strong>
+              </Card>
+              <Card className="p-4">
+                <p className="pa-step-kicker">Needs a look</p>
+                <strong className="text-[2rem]">{overview.summary.review}</strong>
+              </Card>
+              <Card className="p-4">
+                <p className="pa-step-kicker">Concern</p>
+                <strong className="text-[2rem]">{overview.summary.concern}</strong>
+              </Card>
             </div>
           )}
-          {overview && overview.items.length === 0 && <p>No assignments in this course yet.</p>}
-          <div style={{ display: "grid", gap: 12 }}>
+          {overview && overview.items.length === 0 && (
+            <p>No submissions yet. Sync Moodle or upload a submission.</p>
+          )}
+          <div className="grid gap-3">
             {(overview?.items || []).map((item) => (
               <button
                 key={`${item.slug}-${item.number}`}
@@ -367,17 +476,23 @@ function IntegrityDrill() {
                 onClick={() => go({ course: item.slug, assignment: item.number })}
               >
                 <span className="pa-integrity-main">
-                  <strong>{item.course} · Assignment {item.number}</strong>
+                  <strong>
+                    {item.course} · Assignment {item.number}
+                  </strong>
                   <span> {item.name}</span>
                   <span className="pa-integrity-meta">{item.line}</span>
                   <span className="pa-integrity-bar">
-                    <span className="pa-mini-meter" aria-hidden="true"><span style={{ width: `${item.highest}%`, background: heat(item.highest) }} /></span>
+                    <span className="pa-mini-meter" aria-hidden="true">
+                      <span style={{ width: `${item.highest}%`, background: heat(item.highest) }} />
+                    </span>
                     Highest {item.highest}%
                   </span>
                 </span>
                 <span className="pa-integrity-side">
-                  <Tag type={statusType(item.status)} size="sm">{item.status}</Tag>
-                  <ChevronRight size={20} aria-hidden="true" />
+                  <Badge variant="outline" className={statusClass(item.status)}>
+                    {item.status}
+                  </Badge>
+                  <ChevronRight className="h-5 w-5" aria-hidden="true" />
                 </span>
               </button>
             ))}
@@ -386,32 +501,56 @@ function IntegrityDrill() {
       )}
       {assignment && !pair && matrix && (
         <>
-          <h2 style={{ margin: 0, fontWeight: 400 }}>{matrix.course} · Assignment {matrix.assignment} {matrix.name}</h2>
+          <h2 className="m-0 font-normal">
+            {matrix.course} · Assignment {matrix.assignment} {matrix.name}
+          </h2>
           <div className="pa-legend" aria-label="Colour key">
-            <span><i style={{ background: "#defbe6" }} /> Under 40%, clear</span>
-            <span><i style={{ background: "#d0e2ff" }} /> 40% to 74%, review</span>
-            <span><i style={{ background: "#ffd7d9" }} /> 75% or more, concern</span>
+            <span>
+              <i style={{ background: "#defbe6" }} /> Under 40%, clear
+            </span>
+            <span>
+              <i style={{ background: "#d0e2ff" }} /> 40% to 74%, review
+            </span>
+            <span>
+              <i style={{ background: "#ffd7d9" }} /> 75% or more, concern
+            </span>
           </div>
           <table className="pa-matrix" aria-label="Similarity between groups">
             <thead>
               <tr>
                 <th />
-                {matrix.groups.map((group) => <th key={group}>Group {group}</th>)}
+                {matrix.groups.map((group) => (
+                  <th key={group}>Group {group}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {matrix.groups.map((left, row) => (
                 <tr key={left}>
                   <th>Group {left}</th>
-                  {matrix.groups.map((right, column) => (
-                    <td key={right} style={{ background: left === right ? "#e0e0e0" : heat(matrix.matrix[row][column]) }}>
-                      {left === right ? "—" : (
-                        <button type="button" className="pa-why" onClick={() => go({ course: matrix.slug, assignment, pair: `${left}-${right}` })}>
-                          {matrix.matrix[row][column]}%
-                        </button>
-                      )}
-                    </td>
-                  ))}
+                  {matrix.groups.map((right, column) => {
+                    const percent = matrix.matrix[row]?.[column] ?? 0;
+                    return (
+                      <td
+                        key={right}
+                        style={{ background: left === right ? "#e0e0e0" : heat(percent) }}
+                      >
+                        {left === right ? (
+                          "—"
+                        ) : (
+                          <button
+                            type="button"
+                            className="pa-why"
+                            onClick={() =>
+                              go({ course: matrix.slug, assignment, pair: `${left}-${right}` })
+                            }
+                          >
+                            {percent}%
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -420,20 +559,40 @@ function IntegrityDrill() {
             <thead>
               <tr>
                 <th>Pair</th>
-                <th><button type="button" className="pa-why" onClick={() => setSort("percent")}>Similar</button></th>
-                <th><button type="button" className="pa-why" onClick={() => setSort("shared")}>Shared passages</button></th>
+                <th>
+                  <button type="button" className="pa-why" onClick={() => setSort("percent")}>
+                    Similar
+                  </button>
+                </th>
+                <th>
+                  <button type="button" className="pa-why" onClick={() => setSort("shared")}>
+                    Shared passages
+                  </button>
+                </th>
                 <th>AI flag</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {pairs.map((item) => (
-                <tr key={`${item.left}-${item.right}`} onClick={() => go({ course: matrix.slug, assignment, pair: `${item.left}-${item.right}` })} style={{ cursor: "pointer" }}>
-                  <td>Group {item.left} vs Group {item.right}</td>
+                <tr
+                  key={`${item.left}-${item.right}`}
+                  onClick={() =>
+                    go({ course: matrix.slug, assignment, pair: `${item.left}-${item.right}` })
+                  }
+                  style={{ cursor: "pointer" }}
+                >
+                  <td>
+                    Group {item.left} vs Group {item.right}
+                  </td>
                   <td>{item.percent}%</td>
                   <td>{item.shared}</td>
                   <td>{item.writing ? "Yes" : "No"}</td>
-                  <td><Tag type={statusType(item.status)} size="sm">{item.status}</Tag></td>
+                  <td>
+                    <Badge variant="outline" className={statusClass(item.status)}>
+                      {item.status}
+                    </Badge>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -442,56 +601,138 @@ function IntegrityDrill() {
       )}
       {detail && (
         <>
-          <h2 style={{ margin: 0, fontWeight: 400 }}>Group {detail.left} and Group {detail.right}</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h2 className="m-0 font-normal">
+            Group {detail.left} and Group {detail.right}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
             <span>{detail.percent}% similar</span>
-            <Tag type={statusType(detail.status)} size="sm">{detail.status}</Tag>
-            <span>{detail.decisions.flagged} flagged, {detail.decisions.ok} OK, {detail.decisions.pending} pending</span>
+            <Badge variant="outline" className={statusClass(detail.status)}>
+              {detail.status}
+            </Badge>
+            <span>
+              {detail.decisions.flagged} flagged, {detail.decisions.ok} OK,{" "}
+              {detail.decisions.pending} pending
+            </span>
           </div>
-          <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
-            <Button kind={strongOnly ? "primary" : "tertiary"} size="sm" onClick={() => setStrongOnly((on) => !on)}>Strong only</Button>
-            <Button kind={hideCommon ? "primary" : "tertiary"} size="sm" onClick={() => setHideCommon((on) => !on)}>Hide brief and readings</Button>
-            <Button kind="secondary" size="sm" onClick={() => setViewer(true)}>See in document</Button>
+          <div className="my-3 flex flex-wrap gap-2">
+            <Button
+              variant={strongOnly ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStrongOnly((on) => !on)}
+            >
+              Strong only
+            </Button>
+            <Button
+              variant={hideCommon ? "default" : "outline"}
+              size="sm"
+              onClick={() => setHideCommon((on) => !on)}
+            >
+              Hide brief and readings
+            </Button>
+            {detail.documents.left.view && detail.documents.right.view && (
+              <Button variant="secondary" size="sm" onClick={() => setViewer(true)}>
+                See in document
+              </Button>
+            )}
           </div>
           {visible.length === 0 && <p>No shared sentences in this view.</p>}
           {visible.length > 0 && (
-            <StructuredListWrapper aria-label="Matches">
-              <StructuredListHead>
-                <StructuredListRow head>
-                  <StructuredListCell head>#</StructuredListCell>
-                  <StructuredListCell head>%</StructuredListCell>
-                  <StructuredListCell head>Page</StructuredListCell>
-                  <StructuredListCell head>Quote</StructuredListCell>
-                  <StructuredListCell head>Source</StructuredListCell>
-                  <StructuredListCell head>Status</StructuredListCell>
-                  <StructuredListCell head> </StructuredListCell>
-                </StructuredListRow>
-              </StructuredListHead>
-              <StructuredListBody>
+            <Table aria-label="Matches">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>#</TableHead>
+                  <TableHead>%</TableHead>
+                  <TableHead>Page</TableHead>
+                  <TableHead>Quote</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead aria-label="Actions" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {visible.map((item) => (
-                  <StructuredListRow key={item.id} className={item.n === cursor + 1 ? "is-current" : ""} onClick={() => { setCursor(item.n - 1); setViewer(true); }}>
-                    <StructuredListCell>{item.n}</StructuredListCell>
-                    <StructuredListCell>{item.percent}%</StructuredListCell>
-                    <StructuredListCell>{item.page_left}</StructuredListCell>
-                    <StructuredListCell><span className="pa-quote">{item.quote}</span></StructuredListCell>
-                    <StructuredListCell><Tag type={item.source === "shared" ? "purple" : "gray"} size="sm">{item.tag}</Tag></StructuredListCell>
-                    <StructuredListCell><Tag type={item.decision === "flag" ? "red" : item.decision === "ok" ? "green" : "gray"} size="sm">{item.decision === "ok" ? "OK" : item.decision === "flag" ? "Flagged" : "Pending"}</Tag></StructuredListCell>
-                    <StructuredListCell>
+                  <TableRow
+                    key={item.id}
+                    onClick={() => {
+                      setCursor(item.n - 1);
+                      setViewer(true);
+                    }}
+                    className={cn("cursor-pointer", item.n === cursor + 1 && "bg-primary/5")}
+                  >
+                    <TableCell>{item.n}</TableCell>
+                    <TableCell>{item.percent}%</TableCell>
+                    <TableCell>{item.page_left}</TableCell>
+                    <TableCell>
+                      <span className="pa-quote">{item.quote}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={sourceClass(item.source)}>
+                        {item.tag}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={decisionClass(item.decision)}>
+                        {decisionLabel(item.decision)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <span className="pa-row-actions">
-                        <Button kind="ghost" size="sm" onClick={(event) => { event.stopPropagation(); void decide(item.id, "ok"); }}>Mark OK</Button>
-                        <Button kind="ghost" size="sm" onClick={(event) => { event.stopPropagation(); void decide(item.id, "flag"); }}>Flag</Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void decide(item.id, "ok");
+                          }}
+                        >
+                          Mark OK
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void decide(item.id, "flag");
+                          }}
+                        >
+                          Flag
+                        </Button>
                       </span>
-                    </StructuredListCell>
-                  </StructuredListRow>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </StructuredListBody>
-            </StructuredListWrapper>
+              </TableBody>
+            </Table>
           )}
           {visible.length > 0 && (
             <div className="pa-stepper">
-              <span>Match {cursor + 1} of {visible.length}</span>
-              <Button kind="ghost" size="sm" renderIcon={ChevronLeft} disabled={cursor === 0} onClick={() => { setCursor((value) => Math.max(0, value - 1)); setViewer(true); }}>Prev</Button>
-              <Button kind="ghost" size="sm" renderIcon={ChevronRight} disabled={cursor >= visible.length - 1} onClick={() => { setCursor((value) => Math.min(visible.length - 1, value + 1)); setViewer(true); }}>Next</Button>
+              <span>
+                Match {cursor + 1} of {visible.length}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={cursor === 0}
+                onClick={() => {
+                  setCursor((value) => Math.max(0, value - 1));
+                  setViewer(true);
+                }}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={cursor >= visible.length - 1}
+                onClick={() => {
+                  setCursor((value) => Math.min(visible.length - 1, value + 1));
+                  setViewer(true);
+                }}
+              >
+                <ChevronRight className="h-4 w-4" />
+                Next
+              </Button>
             </div>
           )}
           {viewer && visible[cursor] && (
@@ -514,14 +755,39 @@ function IntegrityDrill() {
               />
             </div>
           )}
-          <button type="button" className="pa-why" style={{ display: "block", margin: "12px 0", textAlign: "left" }} onClick={() => setWhy((open) => !open)}>{why ? "Hide why" : "Why?"}</button>
-          {why && <p id="integrity-why" className="pa-why-body">{detail.why}</p>}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
-            <Button kind="primary" onClick={() => act("ok")}>Mark as OK</Button>
-            <Button kind="danger--tertiary" onClick={() => act("flag")}>Flag for follow-up</Button>
+          <button
+            type="button"
+            className="pa-why"
+            style={{ display: "block", margin: "12px 0", textAlign: "left" }}
+            onClick={() => setWhy((open) => !open)}
+          >
+            {why ? "Hide why" : "Why?"}
+          </button>
+          {why && (
+            <p id="integrity-why" className="pa-why-body">
+              {detail.why}
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => act("ok")}>Mark as OK</Button>
+            <Button variant="destructive" onClick={() => act("flag")}>
+              Flag for follow-up
+            </Button>
           </div>
-          <TextArea id="integrity-note" labelText="Add a note" rows={3} value={note} onChange={(event) => setNote(event.target.value)} />
-          <Button kind="tertiary" onClick={() => act("note")}>Save note</Button>
+          <div className="mt-4 space-y-1.5">
+            <Label htmlFor="integrity-note">Add a note</Label>
+            <Textarea
+              id="integrity-note"
+              rows={3}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </div>
+          <div className="mt-2">
+            <Button variant="outline" onClick={() => act("note")}>
+              Save note
+            </Button>
+          </div>
           {saved && <p>{saved}</p>}
         </>
       )}

@@ -1,25 +1,12 @@
 "use client";
 
-import { Checkmark, Renew } from "@carbon/icons-react";
+import { Check, RotateCw } from "lucide-react";
 import { CodeBlock } from "@/components/ai-elements/code-block";
-import {
-  InlineCitation,
-  InlineCitationCard,
-  InlineCitationCardBody,
-  InlineCitationCardTrigger,
-  InlineCitationCarousel,
-  InlineCitationCarouselContent,
-  InlineCitationCarouselItem,
-  InlineCitationQuote,
-  InlineCitationSource,
-  InlineCitationText,
-} from "@/components/ai-elements/inline-citation";
+import { InlineCitation, InlineCitationText } from "@/components/ai-elements/inline-citation";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Plan, PlanContent, PlanDescription, PlanHeader, PlanTitle } from "@/components/ai-elements/plan";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task";
-import { WebPreview, WebPreviewBody, WebPreviewNavigation, WebPreviewUrl } from "@/components/ai-elements/web-preview";
 import { Artifact, ArtifactAction, ArtifactActions, ArtifactContent, ArtifactDescription, ArtifactHeader, ArtifactTitle } from "@/components/ai-elements/artifact";
 
 export function AiSuggestion({
@@ -39,7 +26,6 @@ export function AiSuggestion({
   onAccept?: () => void;
   onRegenerate?: () => void;
 }) {
-  const source = "https://demo.uowd.ac.ae/materials/lecture-note";
   return (
     <div className="pa-ai" style={{ marginTop: "1rem" }}>
       {busy ? (
@@ -54,12 +40,12 @@ export function AiSuggestion({
             <ArtifactActions>
               {onAccept && (
                 <ArtifactAction tooltip="Accept" label="Accept" onClick={onAccept}>
-                  <Checkmark />
+                  <Check />
                 </ArtifactAction>
               )}
               {onRegenerate && (
                 <ArtifactAction tooltip="Regenerate" label="Regenerate" onClick={onRegenerate}>
-                  <Renew />
+                  <RotateCw />
                 </ArtifactAction>
               )}
             </ArtifactActions>
@@ -78,41 +64,16 @@ export function AiSuggestion({
               <TaskTrigger title="Steps the drafter took" />
               <TaskContent>
                 <TaskItem>Match the step to the subject outline.</TaskItem>
-                <TaskItem>Prefer the professor's instructions when they disagree with the default.</TaskItem>
+                <TaskItem>Prefer the professor&apos;s instructions when they disagree with the default.</TaskItem>
               </TaskContent>
             </Task>
             <MessageResponse>{body}</MessageResponse>
-            <InlineCitation>
-              <InlineCitationText>{citation || "Lecture note"}</InlineCitationText>
-              <InlineCitationCard>
-                <InlineCitationCardTrigger sources={[source]} />
-                <InlineCitationCardBody>
-                  <InlineCitationCarousel>
-                    <InlineCitationCarouselContent>
-                      <InlineCitationCarouselItem>
-                        <InlineCitationSource title="Uploaded note" description="Indexed for this professor and course." />
-                        <InlineCitationQuote>{citation || body.slice(0, 180)}</InlineCitationQuote>
-                      </InlineCitationCarouselItem>
-                    </InlineCitationCarouselContent>
-                  </InlineCitationCarousel>
-                </InlineCitationCardBody>
-              </InlineCitationCard>
-            </InlineCitation>
-            <Sources>
-              <SourcesTrigger count={1} />
-              <SourcesContent>
-                <Source href={source} title="Lecture note" />
-              </SourcesContent>
-            </Sources>
+            {citation && (
+              <InlineCitation>
+                <InlineCitationText>{citation}</InlineCitationText>
+              </InlineCitation>
+            )}
             <CodeBlock code={body.slice(0, 400)} language="markdown" />
-            <WebPreview defaultUrl={source} className="h-40">
-              <WebPreviewNavigation>
-                <WebPreviewUrl readOnly />
-              </WebPreviewNavigation>
-              <WebPreviewBody
-                srcDoc={`<p style="font-family:IBM Plex Sans,sans-serif;padding:1rem">${body.slice(0, 280)}</p>`}
-              />
-            </WebPreview>
           </ArtifactContent>
         </Artifact>
       )}

@@ -57,7 +57,7 @@ export function OnboardingShell({
       <header className="border-border bg-background sticky top-0 z-10 border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
           <Link
-            href={ROUTES.HOME}
+            href={ROUTES.DASHBOARD}
             className="text-foreground inline-flex items-center gap-2 text-base font-semibold tracking-tight"
           >
             <span aria-hidden className="bg-brand inline-block h-2.5 w-2.5 rounded-full" />

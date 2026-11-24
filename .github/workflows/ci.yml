@@ -23,113 +23,39 @@ jobs:
         run: uv sync --directory backend --dev
 
       - name: Lint
-        run: uv run --directory backend ruff check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py
+        run: uv run --directory backend ruff check .
 
-      - name: Format
-        run: uv run --directory backend ruff format --check app/profassist app/api/routes/v1/profassist.py app/worker/tasks/profassist_tasks.py tests/test_profassist.py alembic/versions/0028_profassist.py alembic/versions/0032_professor_about.py alembic/versions/0033_course_flow.py alembic/versions/0034_subject_outline.py alembic/versions/0035_group_assignments.py alembic/versions/0036_moodle_schedule.py
+      - name: Format check
+        run: uv run --directory backend ruff format --check .
+
+      - name: Type check
+        run: uv run --directory backend ty check
 
       - name: Unit tests
-        run: uv run --directory backend pytest tests/test_profassist.py -q
+        run: uv run --directory backend pytest tests -q
 
-  e2e-journey:
+  frontend:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: profassist
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: profassist
-      REDIS_HOST: localhost
-      ENVIRONMENT: local
-      PROFASSIST_AUTO_SEED: "1"
-      MOODLE_MODE: fake
-      BACKEND_URL: http://127.0.0.1:8000
-      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
-      CI: "true"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install backend dependencies
-        run: uv sync --directory backend --dev
-
-      - name: Migrate
-        working-directory: backend
-        run: uv run alembic upgrade head
-
-      - name: Start the API
-        working-directory: backend
-        run: |
-          uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
-          for i in $(seq 1 60); do
-            curl -sf http://127.0.0.1:8000/api/v1/health && exit 0
-            sleep 2
-          done
-          echo "API did not start"
-          cat /tmp/api.log
-          exit 1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         working-directory: frontend
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright
+      - name: Type check
         working-directory: frontend
-        run: bunx playwright install --with-deps chromium
+        run: bun run type-check
 
-      - name: Start the app
+      - name: Lint
         working-directory: frontend
-        run: |
-          bun run dev > /tmp/web.log 2>&1 &
-          for i in $(seq 1 90); do
-            curl -sf http://127.0.0.1:3000/login && exit 0
-            sleep 2
-          done
-          echo "App did not start"
-          tail -n 80 /tmp/web.log
-          exit 1
+        run: bun run lint
 
-      - name: Journey
+      - name: Build
         working-directory: frontend
-        run: bunx playwright test --project=journey
+        run: bun run build
 
-      - name: Upload journey screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-journey
-          path: frontend/test-results/journey/
-          if-no-files-found: ignore
+  # E2E journey removed with demo mode; rebuild it against a real fixture.

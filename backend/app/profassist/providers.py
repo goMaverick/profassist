@@ -79,6 +79,7 @@ PROVIDERS: list[dict[str, Any]] = [
 
 AGENTS = [
     "course_designer",
+    "document_analyst",
     "rubric_designer",
     "persona_evidence",
     "persona_strict",
@@ -87,7 +88,10 @@ AGENTS = [
     "integrity",
     "reflection",
     "slide_studio",
+    "slide_reviewer",
+    "assignment_reviewer",
     "chat",
+    "chief_of_staff",
 ]
 
 
@@ -115,6 +119,11 @@ def key_configured(provider_id: str) -> bool:
     return any(_present(name) for name in provider["env"])
 
 
+def any_key_configured() -> bool:
+    """True when at least one provider has the credentials it needs."""
+    return any(key_configured(provider["id"]) for provider in PROVIDERS)
+
+
 def catalog() -> list[dict[str, Any]]:
     rows = []
     for provider in PROVIDERS:
@@ -133,7 +142,7 @@ def catalog() -> list[dict[str, Any]]:
 def model_label(provider_id: str, model: str) -> str:
     """A name a professor can read. No key is included."""
     if not key_configured(provider_id):
-        return "Offline drafter"
+        return "No model configured"
     name = (model or "").strip()
     if provider_id == "gemini":
         words = name.removeprefix("gemini/").removeprefix("gemini-").replace("-", " ")
@@ -227,7 +236,39 @@ def _pace_gemini() -> None:
         _last_gemini_call = time.monotonic()
 
 
-def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwargs: Any):
+_BUSY_MESSAGE = "The model is busy right now. Try again in a minute."
+_QUOTA_MESSAGE = (
+    "The model provider is out of quota for this model. Check the provider's usage limit, "
+    "then try again later or choose another model in Settings."
+)
+
+
+def _status_code(exc: Exception) -> int | None:
+    code = getattr(exc, "status_code", None)
+    return code if isinstance(code, int) else None
+
+
+def _is_quota(exc: Exception) -> bool:
+    """A per-minute or daily allowance has run out."""
+    text = str(exc).lower()
+    return _status_code(exc) == 429 or "quota" in text or "resource_exhausted" in text
+
+
+def _is_busy(exc: Exception) -> bool:
+    """The provider is up but temporarily refusing work, usually with HTTP 503."""
+    if _status_code(exc) == 429:
+        return False
+    from litellm.exceptions import ServiceUnavailableError
+
+    if isinstance(exc, ServiceUnavailableError):
+        return True
+    text = str(exc).lower()
+    return (
+        _status_code(exc) == 503 or "high demand" in text or "unavailable" in text or "503" in text
+    )
+
+
+def generate(provider_id: str, model: str, messages: list[dict[str, Any]], **kwargs: Any):
     """One LiteLLM call. A quota failure becomes a plain error, with no secret in it."""
     import litellm
 
@@ -257,11 +298,10 @@ def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwa
             ):
                 call.pop("reasoning_effort", None)
                 continue
-            if "high demand" in text.lower() or "unavailable" in text.lower() or "503" in text:
+            if _is_busy(exc):
                 time.sleep(2 * (attempt + 1))
                 continue
-            refused = getattr(exc, "status_code", None) == 429 or "quota" in text.lower()
-            if refused or "resource_exhausted" in text.lower():
+            if _is_quota(exc):
                 wait = retry_wait(text)
                 logger.warning(
                     "Model call refused (wait=%s): %s",
@@ -271,12 +311,16 @@ def generate(provider_id: str, model: str, messages: list[dict[str, str]], **kwa
                 if wait is not None and attempt < 3:
                     time.sleep(wait)
                     continue
-                raise ProfassistError(
-                    429,
-                    "The model provider is out of free quota for this model. Try again later or choose another model.",
-                ) from None
+                raise ProfassistError(429, _QUOTA_MESSAGE) from None
             raise
-    raise last if last else RuntimeError("The model did not answer.")
+    if last is None:
+        raise RuntimeError("The model did not answer.")
+    if _is_busy(last):
+        logger.warning("Model stayed busy after retries: %s", _safe_detail(str(last)))
+        raise ProfassistError(503, _BUSY_MESSAGE) from None
+    if _is_quota(last):
+        raise ProfassistError(429, _QUOTA_MESSAGE) from None
+    raise last
 
 
 def test_connection(provider_id: str, model: str) -> dict[str, Any]:

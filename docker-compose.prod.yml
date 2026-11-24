@@ -33,6 +33,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     networks:
       - backend-internal
+      - egress
     ports:
       - "8000:8000"
     depends_on:
@@ -110,7 +111,7 @@ services:
     networks:
       - backend-internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -156,6 +157,19 @@ services:
     depends_on:
       - app
     restart: unless-stopped
+    healthcheck:
+      # The oven/bun image has no curl/wget, so probe with bun's built-in fetch.
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -166,6 +180,11 @@ networks:
   backend-internal:
     driver: bridge
     internal: true
+
+  # Non-internal bridge used by app only, so outbound LLM/S3 traffic has a
+  # default gateway. db/redis/qdrant/frontend stay on backend-internal.
+  egress:
+    driver: bridge
 
 volumes:
   media_data:

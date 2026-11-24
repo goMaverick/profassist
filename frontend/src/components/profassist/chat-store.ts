@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { getPageContext } from "@/components/profassist/page-context";
 
 export interface ToolCard {
   name: string;
@@ -60,7 +61,7 @@ export async function sendChat(message: string) {
     const response = await fetch("/api/profassist/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: trimmed }),
+      body: JSON.stringify({ message: trimmed, context: getPageContext() }),
     });
     if (!response.ok || !response.body) throw new Error("The assistant could not start.");
     const reader = response.body.getReader();

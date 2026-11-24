@@ -9,9 +9,12 @@ from langgraph.graph import END, StateGraph
 class SlideState(TypedDict, total=False):
     objectives: list[str]
     chunks: list[dict[str, Any]]
+    outline: dict[str, Any]
+    dossier: dict[str, Any]
     queries: list[dict[str, str]]
     hits: list[dict[str, Any]]
     slides: list[dict[str, Any]]
+    preferences: list[str]
     skill: str
 
 
@@ -132,12 +135,108 @@ def critique(slides: list[dict[str, Any]], chunks: list[dict[str, Any]]) -> list
     return kept
 
 
+def _wants(preferences: list[str], *phrases: str) -> bool:
+    blob = " ".join(str(item).lower() for item in preferences)
+    return any(phrase in blob for phrase in phrases)
+
+
+_LENGTH_HINT = re.compile(r"about\s+(\d+)\s+characters", re.IGNORECASE)
+_SHORTER_DEFAULT = 100
+_SHORTER_MAX = 220
+# Do not touch a bullet that is already short; 40 is the practical floor.
+_SHORTER_FLOOR = 40
+
+
+def _shorter_limit(preferences: list[str]) -> int:
+    """The professor's stated bullet length, clamped to a readable range."""
+    match = _LENGTH_HINT.search(" ".join(preferences))
+    if not match:
+        return _SHORTER_DEFAULT
+    return max(_SHORTER_FLOOR, min(_SHORTER_MAX, int(match.group(1))))
+
+
+def _shorten(text: str, limit: int) -> str:
+    """Trim an over-long bullet at the last word boundary before the limit."""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    boundary = head.rfind(" ")
+    if boundary > 0:
+        return head[:boundary].rstrip()
+    return head
+
+
+def _sentence_case(title: str) -> str:
+    words = title.split()
+    if len(words) < 2:
+        return title
+    converted = [words[0]]
+    converted.extend(word if word.isupper() else word.lower() for word in words[1:])
+    return " ".join(converted)
+
+
+def _citation_filename(slide: dict[str, Any]) -> str:
+    for bullet in slide.get("bullets") or []:
+        if isinstance(bullet, dict):
+            filename = (bullet.get("citation") or {}).get("filename")
+            if filename:
+                return str(filename)
+    return ""
+
+
+def apply_style_preferences(
+    slides: list[dict[str, Any]], preferences: list[str] | None
+) -> list[dict[str, Any]]:
+    """Deterministic style rules. The citation quote stays verbatim."""
+    prefs = [str(item) for item in preferences or [] if str(item).strip()]
+    if not prefs:
+        return slides
+    fewer = _wants(prefs, "fewer bullets")
+    shorter = _wants(prefs, "shorter bullets")
+    limit = _shorter_limit(prefs) if shorter else 0
+    add_notes = _wants(prefs, "speaker notes")
+    sentence = _wants(prefs, "sentence-case")
+    styled: list[dict[str, Any]] = []
+    for slide in slides:
+        current = dict(slide)
+        bullets: list[Any] = []
+        for bullet in current.get("bullets") or []:
+            if isinstance(bullet, dict):
+                row = dict(bullet)
+                text = str(row.get("text") or "")
+                if shorter:
+                    row["text"] = _shorten(text, limit)
+                bullets.append(row)
+            else:
+                text = str(bullet)
+                if shorter:
+                    text = _shorten(text, limit)
+                bullets.append(text)
+        if fewer:
+            bullets = bullets[:1]
+        current["bullets"] = bullets
+        notes = str(current.get("speaker_notes") or current.get("notes") or "").strip()
+        if add_notes and not notes:
+            filename = _citation_filename({"bullets": bullets})
+            note = f"From the notes - {filename}" if filename else "From the notes"
+            current["notes"] = note
+            if "speaker_notes" in current:
+                current["speaker_notes"] = note
+        if sentence:
+            current["title"] = _sentence_case(str(current.get("title") or ""))
+        styled.append(current)
+    return styled
+
+
 def run_slide_studio(
     objectives: list[str],
     chunks: list[dict[str, Any]],
     template: bytes | None = None,
     title: str = "Slide studio",
     instructions: str = "",
+    outline: dict[str, Any] | None = None,
+    dossier: dict[str, Any] | None = None,
+    preferences: list[str] | None = None,
 ) -> dict[str, Any]:
     skill = load_skill("slide-studio")
 
@@ -159,6 +258,7 @@ def run_slide_studio(
             slides.append(cite_slide(objective, related))
         if tool_enabled("slide_studio", "critique"):
             slides = critique(slides, state.get("chunks") or [])
+        slides = apply_style_preferences(slides, state.get("preferences") or [])
         return {"slides": slides}
 
     graph = StateGraph(SlideState)
@@ -169,11 +269,22 @@ def run_slide_studio(
     graph.add_edge("plan", "retrieve")
     graph.add_edge("retrieve", "draft")
     graph.add_edge("draft", END)
-    result, _url = invoke_graph(
+    result, trace_url = invoke_graph(
         graph.compile(),
-        {"objectives": objectives, "chunks": chunks, "skill": skill["instructions"]},
+        {
+            "objectives": objectives,
+            "chunks": chunks,
+            "outline": outline or {},
+            "dossier": dossier or {},
+            "preferences": preferences or [],
+            "skill": skill["instructions"],
+        },
         name="slide-studio",
-        metadata={"kind": "slide_studio", "professor_instructions": instructions},
+        metadata={
+            "kind": "slide_studio",
+            "professor_instructions": instructions,
+            "preferences": preferences or [],
+        },
     )
     slides = result.get("slides") or []
     pptx = b""
@@ -204,5 +315,7 @@ def run_slide_studio(
         "tools": skill["tools"],
         "slides": slides,
         "gaps": [slide["objective"] for slide in slides if slide.get("gap")],
+        "preferences": preferences or [],
         "pptx": pptx,
+        "trace_url": trace_url or "",
     }

@@ -17,6 +17,9 @@ from app.profassist.runtime import DEFAULT_PROMPTS
 logger = logging.getLogger(__name__)
 
 _actor: ContextVar[dict[str, str] | None] = ContextVar("pa_actor", default=None)
+# The latest model-step trace for the current request. Consumers read it only
+# for a top-level response key, never inside the parsed artifact JSON.
+_step_trace: ContextVar[str | None] = ContextVar("pa_step_trace", default=None)
 _prompt_cache: dict[str, tuple[str, int]] = {}
 
 
@@ -52,6 +55,22 @@ def trace_url(trace_id: str | None) -> str | None:
     return f"{public_base()}/project/{project_id()}/traces/{trace_id}"
 
 
+def trace_about() -> str:
+    """The portrait for Langfuse: identity lines removed, body still scrubbed.
+
+    The professor's own name, role, and course codes stay out of the trace
+    store. Imported lazily because ``runtime`` imports this module.
+    """
+    from app.profassist.lessons import split_identity
+    from app.profassist.runtime import labelled_about
+
+    labelled = labelled_about()
+    if not labelled:
+        return ""
+    _, body = split_identity(labelled)
+    return body.strip()[:900]
+
+
 def _client():
     if not langfuse_enabled():
         return None
@@ -81,9 +100,7 @@ def invoke_graph(
     graph: Any, state: dict, *, name: str, metadata: dict[str, Any] | None = None
 ) -> tuple[Any, str | None]:
     """Run a graph and return (result, public trace url)."""
-    from app.profassist.runtime import labelled_about
-
-    about = labelled_about()
+    about = trace_about()
     meta = {**actor_metadata(), **(metadata or {})}
     if about:
         meta["about_this_professor"] = about
@@ -112,6 +129,16 @@ def invoke_graph(
     return result, trace_url(trace_id)
 
 
+def reset_step_trace() -> None:
+    """Start a request with no remembered model-step trace."""
+    _step_trace.set(None)
+
+
+def step_trace_url() -> str | None:
+    """The public URL of the last model step traced in this request, if any."""
+    return _step_trace.get()
+
+
 def record_step(name: str, *, input_data: Any, output_data: Any, model: str) -> None:
     """One generation span. Safe to call when no parent trace is open."""
     client = _client()
@@ -126,6 +153,10 @@ def record_step(name: str, *, input_data: Any, output_data: Any, model: str) -> 
             metadata=actor_metadata(),
         ):
             client.update_current_trace(name=name, metadata=actor_metadata())
+            trace_id = client.get_current_trace_id()
+        link = trace_url(trace_id)
+        if link:
+            _step_trace.set(link)
         client.flush()
     except Exception:
         logger.info("Langfuse step %s was not stored", name)

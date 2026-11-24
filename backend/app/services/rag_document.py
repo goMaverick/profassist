@@ -1,6 +1,7 @@
 # ruff: noqa: I001 - Imports structured for Jinja2 template conditionals
 """RAG document service."""
 
+import asyncio
 import logging
 import os
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from app.schemas.rag import RAGIngestResponse, RAGTrackedDocumentItem, RAGTracke
 from app.services.file_storage import get_file_storage
 
 logger = logging.getLogger(__name__)
+
+_BACKGROUND_TASKS: set[asyncio.Task[object]] = set()
 
 
 class RAGDocumentService:
@@ -173,10 +176,9 @@ class RAGDocumentService:
         tmp_path = os.path.join(tmp_dir, f"{doc_id!s}{ext}")
         with open(tmp_path, "wb") as f:
             f.write(file_data)
-        import asyncio
         from app.worker.tasks.rag_tasks import ingest_document_flow
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             ingest_document_flow(
                 rag_document_id=str(doc_id),
                 collection_name=collection_name,
@@ -185,6 +187,8 @@ class RAGDocumentService:
                 replace=replace,
             )
         )
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
 
         return RAGIngestResponse(
             id=str(doc_id),

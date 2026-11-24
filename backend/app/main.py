@@ -72,14 +72,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[LifespanState, None]:
                     logger.info("Auto-promoted %s to app-admin (FIRST_ADMIN_EMAIL)", _first_admin)
         except Exception as _e:
             logger.warning("FIRST_ADMIN_EMAIL promotion failed: %s", _e)
-    import os
-
-    if os.getenv("PROFASSIST_AUTO_SEED", "").lower() in {"1", "true", "yes"}:
-        from app.profassist.seed import seed_demo
-
-        async with get_db_context() as _seed_db:
-            await seed_demo(_seed_db)
-            logger.info("ProfAssist demo workspace is ready")
     try:
         from app.profassist.observe import seed_prompts
 

@@ -16,7 +16,14 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion } from "@/components/ai-elements/suggestion";
-import { Dropdown } from "@carbon/react";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface CourseOption {
   id: string;
@@ -29,7 +36,7 @@ import { sendChat, useChat } from "@/components/profassist/chat-store";
 const CHIPS = [
   "Create a course outline",
   "Generate assessments",
-  "Create assignment 2 for MAAI 903 due 15 Dec",
+  "Create an assignment",
   "Check dropout risk",
   "Form groups for the project",
   "What is the Moodle sync status?",
@@ -68,17 +75,27 @@ export function HomeChat({
       <div className="pa-greet">
         <h2>Hi Professor {name}, what do you want to do?</h2>
         {courses.length > 0 && onCourse && (
-          <Dropdown
-            id="course-switcher"
-            titleText="Course"
-            label="Choose a course"
-            items={courses}
-            itemToString={(item) => (item ? `${item.code} · ${item.title}` : "")}
-            selectedItem={courses.find((item) => item.id === courseId) || courses[0]}
-            onChange={({ selectedItem }) => {
-              if (selectedItem) onCourse(selectedItem.id);
-            }}
-          />
+          <div className="grid gap-2">
+            <Label htmlFor="course-switcher">Course</Label>
+            <Select
+              value={(courses.find((item) => item.id === courseId) || courses[0])?.id}
+              onValueChange={(id) => {
+                const next = courses.find((item) => item.id === id);
+                if (next) onCourse(next.id);
+              }}
+            >
+              <SelectTrigger id="course-switcher" aria-label="Course">
+                <SelectValue placeholder="Choose a course" />
+              </SelectTrigger>
+              <SelectContent>
+                {courses.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {`${item.code} · ${item.title}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
       </div>
       <div className="pa-chat-column">
@@ -116,6 +133,7 @@ export function HomeChat({
       {error && <p role="alert">{error}</p>}
       {turns.length > 0 && (() => {
         const last = turns[turns.length - 1];
+        if (!last) return null;
         return (
           <div className="pa-thread">
             <div className="pa-user-bubble">

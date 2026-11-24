@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendFetch, BackendApiError } from "@/lib/server-api";
+import { backendFetch, backendFetchWithStatus, BackendApiError } from "@/lib/server-api";
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,7 +7,8 @@ export async function GET(request: NextRequest) {
     const headers: Record<string, string> = {};
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-    const data = await backendFetch("/api/v1/rag/sync/sources", { headers });
+    const qs = request.nextUrl.searchParams.toString();
+    const data = await backendFetch(`/api/v1/rag/sync/sources${qs ? `?${qs}` : ""}`, { headers });
     return NextResponse.json(data);
   } catch (error) {
     if (error instanceof BackendApiError) {
@@ -24,12 +25,12 @@ export async function POST(request: NextRequest) {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-    const data = await backendFetch("/api/v1/rag/sync/sources", {
+    const { data, status } = await backendFetchWithStatus("/api/v1/rag/sync/sources", {
       method: "POST",
       headers,
       body: JSON.stringify(body),
     });
-    return NextResponse.json(data, { status: 201 });
+    return NextResponse.json(data, { status });
   } catch (error) {
     if (error instanceof BackendApiError) {
       return NextResponse.json({ detail: error.message }, { status: error.status });

@@ -1,5 +1,6 @@
 """Professor workflows. Models draft. These functions refuse to push early."""
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -9,9 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User
 from app.profassist import agents, stubs
+from app.profassist.council_config import load_council_roles
+from app.profassist.course_context import (
+    grading_outline,
+    load_outline,
+    ready_chunks,
+    trim_outline,
+)
+from app.profassist.course_memory.service import dossier_ai_context
 from app.profassist.errors import ProfassistError
 from app.profassist.grading import assert_can_push, is_blind_sample, redact_blind
-from app.profassist.lessons import condense_about, extract_lessons, same_lesson
+from app.profassist.lessons import (
+    condense_about,
+    extract_lessons,
+    identity_lines,
+    same_lesson,
+    split_identity,
+)
 from app.profassist.llm import complete as llm_complete
 from app.profassist.llm import mode as llm_mode
 from app.profassist.memory import list_memories, recall, remember
@@ -20,12 +35,15 @@ from app.profassist.models import (
     Assessment,
     Chunk,
     Course,
+    CourseDossier,
     GradeDraft,
     IntegrityFlag,
     Material,
+    MoodleActivity,
     MoodlePush,
     Objective,
     PiiVault,
+    ProfessorMemory,
     Reflection,
     RubricCriterion,
     SlideDeck,
@@ -34,14 +52,18 @@ from app.profassist.models import (
     Submission,
     SubmissionFile,
 )
-from app.profassist.moodle import CLOS
 from app.profassist.pii import scrub
 from app.profassist.rag import chunk_text, index_chunks, rank_chunks
 from app.profassist.runtime import set_about
-from app.profassist.settings_admin import load_runtime
+from app.profassist.settings_admin import load_runtime, professor_identity
 from app.profassist.similarity import compare_submissions
+from app.profassist.slide_memory import slide_preferences
 from app.profassist.slides import build_pptx, deck_plan, render_thumbnails
 from app.profassist.storage import extract_text, read_bytes, save_bytes
+
+REFLECT_EVERY = 5
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SOUL = """# My style
 
@@ -74,6 +96,40 @@ async def _owned(
     if user_id is not None and owner is not None and owner != user_id:
         raise ProfassistError(404, "Not found in this workspace")
     return row
+
+
+APPROVED_RUBRIC_LOCKED = (
+    "Approved rubrics stay as you approved them. Create a new rubric to change it."
+)
+
+
+def _rubric_weight(value: Any) -> int:
+    """Keep an explicit weight. A missing or unusable value becomes 1."""
+    try:
+        return max(0, min(1000, int(value)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _rubric_criteria(criteria: list[Any]) -> list[dict[str, Any]]:
+    """Normalise what the page, a paste, or Moodle sent before it reaches the table."""
+    cleaned: list[dict[str, Any]] = []
+    for item in criteria:
+        if not isinstance(item, dict):
+            raise ProfassistError(400, "Each criterion needs a name and its levels.")
+        levels = item.get("levels")
+        cleaned.append(
+            {
+                "name": str(item.get("name") or "").strip(),
+                "weight": _rubric_weight(item.get("weight")),
+                "levels": (
+                    {str(key): str(value or "") for key, value in levels.items()}
+                    if isinstance(levels, dict)
+                    else {}
+                ),
+            }
+        )
+    return cleaned
 
 
 async def _names(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID) -> list[str]:
@@ -169,6 +225,40 @@ async def home(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[
         waiting = len(submissions)
     else:
         waiting = 0
+    identity = await professor_identity(db, org_id, user_id)
+    material_rows = await db.execute(
+        select(Material).where(
+            Material.organization_id == org_id,
+            Material.owner_user_id == user_id,
+            Material.status == "ready",
+        )
+    )
+    documents = sum(
+        1 for row in material_rows.scalars().all() if not (row.pii_report or {}).get("quarantined")
+    )
+    memory_topics = 0
+    memory_assessments = 0
+    if course_ids:
+        dossier_rows = await db.execute(
+            select(CourseDossier).where(
+                CourseDossier.organization_id == org_id,
+                CourseDossier.course_id == course_ids[0],
+                CourseDossier.owner_user_id == user_id,
+                CourseDossier.status == "ready",
+            )
+        )
+        dossier = dossier_rows.scalars().first()
+        body = dossier.body if dossier is not None and isinstance(dossier.body, dict) else {}
+        memory_topics = len(body.get("topics") or [])
+        memory_assessments = len(body.get("assessments") or [])
+    reflection_rows = await db.execute(
+        select(Reflection).where(
+            Reflection.organization_id == org_id,
+            Reflection.owner_user_id == user_id,
+            Reflection.status == "proposed",
+        )
+    )
+    reflections = len(list(reflection_rows.scalars().all()))
     from app.integrations.moodle.gateway import adapter
 
     connector = adapter()
@@ -183,6 +273,13 @@ async def home(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[
         "llm_mode": llm_mode(),
         "calibrator": stubs.grade_calibrator(),
         "early_warning": {"status": "not_trained", "trained": False},
+        "professor": identity,
+        "memory": {
+            "documents": documents,
+            "topics": memory_topics,
+            "assessments": memory_assessments,
+            "reflections": reflections,
+        },
         "principle": "AI drafts only. Nothing is pushed to Moodle until you approve it.",
     }
 
@@ -193,8 +290,14 @@ async def _index_material(
     course_id: uuid.UUID,
     material: Material,
     text: str,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
 ) -> None:
+    """Chunk, embed, and only then mark the material ready.
+
+    A failed model load or a rejected upsert leaves the material in ``error``
+    with the reason in ``pii_report["index_error"]``. It is never marked ready,
+    so drafting will not quote notes that have no vectors behind them.
+    """
     rows = []
     for ordinal, part in enumerate(chunk_text(text)):
         chunk = Chunk(
@@ -208,7 +311,23 @@ async def _index_material(
         db.add(chunk)
         await db.flush()
         rows.append({"id": str(chunk.id), "text": part, "filename": material.filename})
-    index_chunks(str(org_id), str(course_id), rows, owner_user_id=str(user_id))
+    try:
+        if not rows:
+            raise RuntimeError("There was no text to embed, so the material is not ready.")
+        indexed = index_chunks(str(org_id), str(course_id), rows, owner_user_id=str(user_id or ""))
+        if not indexed:
+            raise RuntimeError(
+                "The vector store is unreachable, so the notes were not indexed. "
+                "Start Qdrant and re-run `uv run profassist cmd rag-reindex`."
+            )
+    except Exception as exc:
+        material.status = "error"
+        material.pii_report = {**(material.pii_report or {}), "index_error": str(exc)}
+        return
+    material.status = "ready"
+    report = dict(material.pii_report or {})
+    report.pop("index_error", None)
+    material.pii_report = report
 
 
 async def add_material(
@@ -226,9 +345,9 @@ async def add_material(
     if not raw.strip():
         raise ProfassistError(400, "That file had no text to read.")
     cleaned = scrub(raw, await _names(db, org_id, course_id))
-    allowed = (".pdf", ".docx", ".pptx", ".txt", ".md", ".potx")
+    allowed = (".pdf", ".docx", ".pptx", ".potx", ".txt", ".md", ".html", ".htm")
     if not filename.lower().endswith(allowed):
-        raise ProfassistError(400, "Attach a PDF, DOCX, PPTX, TXT, or Markdown file.")
+        raise ProfassistError(400, "Attach a PDF, DOCX, PPTX, HTML, TXT, or Markdown file.")
     storage_key = save_bytes(
         f"{org_id}/{user_id}/{course.id}/{filename}", data, "application/octet-stream"
     )
@@ -239,7 +358,9 @@ async def add_material(
         filename=filename,
         text_content=raw,
         scrubbed_text=cleaned.text,
-        status="quarantined" if cleaned.quarantined else "ready",
+        # Ready means "indexed with real vectors". Until _index_material
+        # succeeds the file is deliberately not ready to quote.
+        status="quarantined" if cleaned.quarantined else "processing",
         pii_report={
             "replacements": len(cleaned.replacements),
             "uncertain": cleaned.uncertain,
@@ -251,6 +372,18 @@ async def add_material(
     db.add(material)
     await db.flush()
     await _remember_pii(db, org_id, cleaned.replacements, f"material:{material.id}")
+    try:
+        await remember(
+            db,
+            org_id,
+            user_id,
+            f"Professor added {filename} as a course source.",
+            kind="materials",
+            source=f"material:{material.id}",
+        )
+        await maybe_propose_reflection(db, org_id, user_id, f"material:{material.id}")
+    except Exception:
+        logger.info("Material memory skipped; the upload stands")
     if not cleaned.quarantined:
         await _index_material(db, org_id, course.id, material, cleaned.text, user_id)
     return _material_dict(material)
@@ -258,13 +391,36 @@ async def add_material(
 
 def _material_dict(row: Material) -> dict[str, Any]:
     report = row.pii_report or {}
+    insight = row.insight if isinstance(row.insight, dict) else {}
+    topics = [
+        str(item.get("name") or "").strip()
+        for item in insight.get("topics") or []
+        if isinstance(item, dict)
+    ]
+    terms = [
+        str(item.get("term") or "").strip()
+        for item in insight.get("key_terms") or []
+        if isinstance(item, dict)
+    ]
+    tags: list[str] = []
+    for value in [*topics, *terms]:
+        if value and value not in tags:
+            tags.append(value)
+        if len(tags) >= 12:
+            break
     return {
         "id": str(row.id),
         "filename": row.filename,
         "status": row.status,
+        "index_error": report.get("index_error", ""),
         "pii_report": report,
         "size": int(report.get("bytes") or 0),
         "scrubbed": int(report.get("replacements") or 0) > 0,
+        "insight_status": str(row.insight_status or ""),
+        "kind": str(insight.get("document_kind") or ""),
+        "tags": tags,
+        "summary": str(insight.get("summary") or ""),
+        "trace_url": str(row.trace_url or ""),
     }
 
 
@@ -286,6 +442,22 @@ async def delete_material(
     await db.execute(Chunk.__table__.delete().where(Chunk.material_id == row.id))
     await db.delete(row)
     await db.flush()
+    dossier = (
+        (
+            await db.execute(
+                select(CourseDossier).where(
+                    CourseDossier.organization_id == org_id,
+                    CourseDossier.course_id == course_id,
+                    CourseDossier.owner_user_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if dossier is not None:
+        dossier.status = "stale"
+        await db.flush()
     return {"deleted": str(material_id)}
 
 
@@ -303,6 +475,72 @@ async def list_materials(
     return [_material_dict(row) for row in result.scalars().all()]
 
 
+async def reindex_materials(
+    db: AsyncSession,
+    org_id: uuid.UUID | None = None,
+    course_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    """Rebuild note chunks and vectors with the currently configured embeddings.
+
+    Use after switching EMBEDDING_PROVIDER/EMBEDDING_MODEL or recreating the
+    Qdrant collection. Quarantined notes are left untouched.
+    """
+    from app.profassist.rag import delete_chunks
+
+    query = select(Material)
+    if org_id is not None:
+        query = query.where(Material.organization_id == org_id)
+    if course_id is not None:
+        query = query.where(Material.course_id == course_id)
+    if user_id is not None:
+        query = query.where(Material.owner_user_id == user_id)
+    materials = list((await db.execute(query)).scalars().all())
+
+    reindexed = 0
+    skipped = 0
+    failed: list[dict[str, str]] = []
+    for material in materials:
+        if (material.pii_report or {}).get("quarantined"):
+            skipped += 1
+            continue
+        old_ids = [
+            str(row_id)
+            for row_id in (
+                await db.execute(select(Chunk.id).where(Chunk.material_id == material.id))
+            )
+            .scalars()
+            .all()
+        ]
+        await db.execute(delete(Chunk).where(Chunk.material_id == material.id))
+        await db.flush()
+        delete_chunks(old_ids)
+        await _index_material(
+            db,
+            material.organization_id,
+            material.course_id,
+            material,
+            material.scrubbed_text or material.text_content,
+            material.owner_user_id or user_id,
+        )
+        if material.status == "ready":
+            reindexed += 1
+        else:
+            failed.append(
+                {
+                    "id": str(material.id),
+                    "filename": material.filename,
+                    "error": str((material.pii_report or {}).get("index_error") or "not indexed"),
+                }
+            )
+    return {
+        "materials": len(materials),
+        "reindexed": reindexed,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
 async def draft_objectives(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
@@ -318,16 +556,19 @@ async def draft_objectives(
         title=course.title,
         query="course learning outcome",
         chunks=payload_chunks,
-        clos=course.clos or CLOS,
+        clos=course.clos or [],
         soul=(await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories),
     )
     created = []
-    for ordinal, objective in enumerate(result.get("objectives") or []):
+    for raw in result.get("objectives") or []:
+        objective = agents.normalise_objective(raw)
+        if objective is None:
+            continue
         row = Objective(
             organization_id=org_id,
             course_id=course.id,
             owner_user_id=user_id,
-            ordinal=ordinal + 1,
+            ordinal=len(created) + 1,
             text=objective.get("text") or "",
             status="proposed",
             source_chunk_ids=objective.get("source_chunk_ids") or [],
@@ -390,6 +631,25 @@ async def approve_objective(
     return _objective_dict(row)
 
 
+def _grounded_slides(slides: list[Any], chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only slides whose bullets appear verbatim in the ready notes."""
+    source = "\n".join(str(chunk.get("text") or "") for chunk in chunks)
+    kept: list[dict[str, Any]] = []
+    for slide in slides:
+        if not isinstance(slide, dict):
+            continue
+        bullets = [
+            bullet
+            for bullet in slide.get("bullets") or []
+            if isinstance(bullet, str) and bullet and bullet in source
+        ]
+        if bullets:
+            row = dict(slide)
+            row["bullets"] = bullets
+            kept.append(row)
+    return kept
+
+
 async def draft_slides(
     db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
 ) -> dict[str, Any]:
@@ -405,15 +665,21 @@ async def draft_slides(
     ]
     query = " ".join(row["text"] for row in approved)
     ranked = rank_chunks(query, chunks, limit=4)
-    result = agents.run_course(
+    dossier = await dossier_ai_context(db, org_id, user_id, course.id, budget=6000)
+    preferences = await slide_preferences(db, org_id, user_id, f"{course.code} {query}")
+    result = llm_complete(
         "slides",
-        title=course.title,
-        query=query,
-        chunks=ranked,
-        clos=course.clos or CLOS,
-        soul=await _soul(db, org_id, user_id),
+        {
+            "title": course.title,
+            "chunks": ranked,
+            "clos": course.clos or [],
+            "soul": await _soul(db, org_id, user_id),
+            "message": "",
+            "dossier": dossier,
+            "preferences": preferences,
+        },
     )
-    slides = result.get("slides") or []
+    slides = _grounded_slides(result.get("slides") or [], ranked)
     if not slides:
         raise ProfassistError(
             422,
@@ -448,6 +714,8 @@ def _deck_dict(row: SlideDeck) -> dict[str, Any]:
         "instructions": row.instructions or "",
         "slides": row.slides,
         "previews": render_thumbnails(plan[:8]),
+        "review": getattr(row, "review", None) or {},
+        "review_trace_url": getattr(row, "review_trace_url", "") or "",
     }
 
 
@@ -468,7 +736,7 @@ async def list_decks(
 async def approve_deck(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, deck_id: uuid.UUID
 ) -> dict[str, Any]:
-    row = await _owned(db, SlideDeck, org_id, deck_id)
+    row = await _owned(db, SlideDeck, org_id, deck_id, user_id)
     row.status = "approved"
     db.add(
         Approval(
@@ -480,22 +748,44 @@ async def approve_deck(
             note="",
         )
     )
-    titles = " ".join(str(slide.get("title", "")) for slide in (row.slides or []))
-    await reflect_on_change(db, org_id, user_id, "slides", titles, titles, "deck-approve")
+    await reflect_on_change(
+        db,
+        org_id,
+        user_id,
+        "slides",
+        "",
+        _deck_text(row.slides),
+        "deck-approve",
+        propose=True,
+    )
     return _deck_dict(row)
 
 
-async def deck_bytes(db: AsyncSession, org_id: uuid.UUID, deck_id: uuid.UUID) -> tuple[str, bytes]:
-    row = await _owned(db, SlideDeck, org_id, deck_id)
+async def deck_bytes(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, deck_id: uuid.UUID
+) -> tuple[str, bytes]:
+    row = await _owned(db, SlideDeck, org_id, deck_id, user_id)
     data = read_bytes(row.storage_key) if row.storage_key else build_pptx(row.title, row.slides)
     return f"{row.title}.pptx", data
 
 
 async def draft_assessment(
-    db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    assessment_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     await load_runtime(db, org_id, user_id)
     course = await _course(db, org_id, course_id)
+    if assessment_id is not None:
+        assessment = await _owned(db, Assessment, org_id, assessment_id, user_id)
+        if assessment.course_id != course.id:
+            raise ProfassistError(404, "Assessment not found in this course")
+    else:
+        assessment = await _primary_assessment(db, org_id, course, user_id)
+    if assessment.status == "approved":
+        raise ProfassistError(409, APPROVED_RUBRIC_LOCKED)
     memories = await recall(db, org_id, user_id)
     chunks = [
         {"id": str(row.id), "text": row.text}
@@ -508,12 +798,11 @@ async def draft_assessment(
         title="Group report",
         query="assessment rubric",
         chunks=rank_chunks("assessment rubric feedback", chunks, limit=3),
-        clos=course.clos or CLOS,
+        clos=course.clos or [],
         soul=(await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories),
     )
-    assessment = await _primary_assessment(db, org_id, course, user_id)
     assessment.brief = result.get("brief") or assessment.brief
-    assessment.clos = course.clos or CLOS
+    assessment.clos = course.clos or []
     assessment.status = "draft"
     await db.execute(
         delete(RubricCriterion).where(
@@ -521,15 +810,15 @@ async def draft_assessment(
             RubricCriterion.assessment_id == assessment.id,
         )
     )
-    for ordinal, criterion in enumerate(result.get("criteria") or []):
+    for ordinal, criterion in enumerate(_rubric_criteria(result.get("criteria") or []), start=1):
         db.add(
             RubricCriterion(
                 organization_id=org_id,
                 assessment_id=assessment.id,
-                ordinal=ordinal + 1,
-                name=criterion.get("name") or f"Criterion {ordinal + 1}",
-                weight=int(criterion.get("weight") or 1),
-                levels=criterion.get("levels") or {},
+                ordinal=ordinal,
+                name=criterion["name"] or f"Criterion {ordinal}",
+                weight=criterion["weight"],
+                levels=criterion["levels"],
             )
         )
     await db.flush()
@@ -540,10 +829,15 @@ async def _primary_assessment(
     db: AsyncSession, org_id: uuid.UUID, course: Course, user_id: uuid.UUID
 ) -> Assessment:
     result = await db.execute(
-        select(Assessment).where(
+        select(Assessment)
+        .where(
             Assessment.organization_id == org_id,
             Assessment.course_id == course.id,
             Assessment.owner_user_id == user_id,
+        )
+        # A draft is the working rubric. An approved one is only picked when it is all there is.
+        .order_by(
+            Assessment.status == "approved", Assessment.created_at.desc(), Assessment.id.desc()
         )
     )
     row = result.scalars().first()
@@ -555,7 +849,7 @@ async def _primary_assessment(
         owner_user_id=user_id,
         title="Group report 1",
         brief="",
-        clos=course.clos or CLOS,
+        clos=course.clos or [],
         status="draft",
         external_id="asg-901",
     )
@@ -567,7 +861,10 @@ async def _primary_assessment(
 async def _assessment_dict(db: AsyncSession, row: Assessment) -> dict[str, Any]:
     result = await db.execute(
         select(RubricCriterion)
-        .where(RubricCriterion.assessment_id == row.id)
+        .where(
+            RubricCriterion.organization_id == row.organization_id,
+            RubricCriterion.assessment_id == row.id,
+        )
         .order_by(RubricCriterion.ordinal)
     )
     criteria = [
@@ -599,10 +896,14 @@ async def get_assessment(
 ) -> dict | None:
     course = await _course(db, org_id, course_id)
     result = await db.execute(
-        select(Assessment).where(
+        select(Assessment)
+        .where(
             Assessment.organization_id == org_id,
             Assessment.course_id == course.id,
             Assessment.owner_user_id == user_id,
+        )
+        .order_by(
+            Assessment.status == "approved", Assessment.created_at.desc(), Assessment.id.desc()
         )
     )
     row = result.scalars().first()
@@ -616,11 +917,13 @@ async def list_assessments(
 ) -> list[dict[str, Any]]:
     course = await _course(db, org_id, course_id)
     result = await db.execute(
-        select(Assessment).where(
+        select(Assessment)
+        .where(
             Assessment.organization_id == org_id,
             Assessment.course_id == course.id,
             Assessment.owner_user_id == user_id,
         )
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc())
     )
     return [await _assessment_dict(db, row) for row in result.scalars().all()]
 
@@ -635,24 +938,13 @@ async def create_rubric(
         owner_user_id=user_id,
         title=title.strip() or "Untitled rubric",
         brief="",
-        clos=course.clos or CLOS,
+        clos=course.clos or [],
         status="draft",
         external_id="",
         kind="assignment",
     )
     db.add(row)
     await db.flush()
-    blank = {
-        "name": "Evidence",
-        "weight": 1,
-        "levels": {
-            "beginning": "",
-            "developing": "",
-            "proficient": "",
-            "advanced": "",
-        },
-    }
-    await _apply_imported_criteria(db, org_id, row, [blank], "manual")
     return await _assessment_dict(db, row)
 
 
@@ -666,12 +958,26 @@ async def save_rubric(
 ) -> dict[str, Any]:
     row = await _owned(db, Assessment, org_id, assessment_id, user_id)
     if row.status == "approved":
-        raise ProfassistError(
-            409, "Approved rubrics stay as you approved them. Start a new version from a draft."
-        )
+        raise ProfassistError(409, APPROVED_RUBRIC_LOCKED)
+    before_criteria = await _stored_criteria(db, org_id, row.id)
+    before_brief = row.brief or ""
+    normalised = _rubric_criteria(criteria)
     if brief is not None:
         row.brief = brief
-    await _apply_imported_criteria(db, org_id, row, criteria, "edit")
+    await _apply_imported_criteria(db, org_id, row, normalised, "edit")
+    await capture_movement(
+        db,
+        org_id,
+        user_id,
+        "rubric",
+        _criteria_text(before_criteria),
+        _criteria_text(normalised),
+        "rubric-edit",
+    )
+    if (row.brief or "") != before_brief:
+        await capture_movement(
+            db, org_id, user_id, "objective", before_brief, row.brief or "", "rubric-edit"
+        )
     return await _assessment_dict(db, row)
 
 
@@ -687,6 +993,7 @@ async def import_rubric(
     from app.profassist.rubric_build import parse_rubric_file, parse_rubric_text
 
     row = await _owned(db, Assessment, org_id, assessment_id, user_id)
+    before_criteria = await _stored_criteria(db, org_id, row.id)
     if pasted.strip():
         criteria = parse_rubric_text(pasted)
     else:
@@ -696,7 +1003,17 @@ async def import_rubric(
             400,
             "No criteria were found. Use lines like 'Criterion: Evidence' and 'Beginning: ...'.",
         )
-    await _apply_imported_criteria(db, org_id, row, criteria, "import")
+    normalised = _rubric_criteria(criteria)
+    await _apply_imported_criteria(db, org_id, row, normalised, "import")
+    await capture_movement(
+        db,
+        org_id,
+        user_id,
+        "rubric",
+        _criteria_text(before_criteria),
+        _criteria_text(normalised),
+        "rubric-import",
+    )
     return await _assessment_dict(db, row)
 
 
@@ -799,11 +1116,30 @@ async def approve_assessment(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, assessment_id: uuid.UUID
 ) -> dict[str, Any]:
     row = await _owned(db, Assessment, org_id, assessment_id, user_id)
-    criteria = await db.execute(
-        select(RubricCriterion).where(RubricCriterion.assessment_id == row.id)
+    if row.status == "approved":
+        # Approving twice keeps the same approved copy instead of writing a second audit row.
+        return await _assessment_dict(db, row)
+    criteria = list(
+        (
+            await db.execute(
+                select(RubricCriterion).where(
+                    RubricCriterion.organization_id == org_id,
+                    RubricCriterion.assessment_id == row.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    if not list(criteria.scalars().all()):
+    if not criteria:
         raise ProfassistError(400, "Design the rubric before you approve it.")
+    described = any(
+        str(value or "").strip()
+        for criterion in criteria
+        for value in (criterion.levels or {}).values()
+    )
+    if not described:
+        raise ProfassistError(400, "Describe at least one level before you approve the rubric.")
     row.status = "approved"
     db.add(
         Approval(
@@ -815,8 +1151,14 @@ async def approve_assessment(
             note="",
         )
     )
+    criteria_text = _criteria_text(
+        [
+            {"name": criterion.name, "weight": criterion.weight, "levels": criterion.levels or {}}
+            for criterion in criteria
+        ]
+    )
     await reflect_on_change(
-        db, org_id, user_id, "rubric", row.brief or "", row.brief or "", "rubric-approve"
+        db, org_id, user_id, "rubric", "", criteria_text, "rubric-approve", propose=True
     )
     return await _assessment_dict(db, row)
 
@@ -836,7 +1178,7 @@ async def push_record(
         raise ProfassistError(409, str(exc)) from exc
     from app.integrations.moodle.gateway import push as moodle_push
 
-    receipt = await moodle_push({"type": target_type, "id": target_id, **payload})
+    receipt = await moodle_push({"type": target_type, "id": target_id, **payload}, db, org_id)
     db.add(
         MoodlePush(
             organization_id=org_id,
@@ -919,8 +1261,14 @@ async def _apply_imported_criteria(
 ) -> None:
     from app.profassist.rubric_build import alignment
 
+    if assessment.status == "approved":
+        raise ProfassistError(409, APPROVED_RUBRIC_LOCKED)
+    criteria = _rubric_criteria(criteria)
     existing = await db.execute(
-        select(RubricCriterion).where(RubricCriterion.assessment_id == assessment.id)
+        select(RubricCriterion).where(
+            RubricCriterion.organization_id == org_id,
+            RubricCriterion.assessment_id == assessment.id,
+        )
     )
     current = [
         {"name": item.name, "weight": item.weight, "levels": item.levels}
@@ -943,9 +1291,9 @@ async def _apply_imported_criteria(
                 organization_id=org_id,
                 assessment_id=assessment.id,
                 ordinal=ordinal,
-                name=criterion.get("name") or f"Criterion {ordinal}",
-                weight=int(criterion.get("weight") or 1),
-                levels=criterion.get("levels") or {},
+                name=criterion["name"] or f"Criterion {ordinal}",
+                weight=criterion["weight"],
+                levels=criterion["levels"],
             )
         )
     assessment.alignment = alignment(criteria, [str(item) for item in (assessment.clos or [])])
@@ -978,7 +1326,7 @@ async def pull_moodle(
                 title=remote["title"],
                 term=remote.get("term") or "",
                 external_id=str(remote["id"]),
-                clos=CLOS,
+                clos=[],
             )
             db.add(course)
             await db.flush()
@@ -1003,6 +1351,7 @@ async def pull_moodle(
                 created["students"] += 1
         await db.flush()
         names = await _names(db, org_id, course.id)
+        board_assignments: list[dict[str, Any]] = []
         for assignment in connector.list_assignments(str(remote["id"])):
             found = await db.execute(
                 select(Assessment).where(
@@ -1018,13 +1367,28 @@ async def pull_moodle(
                     owner_user_id=user_id,
                     title=assignment["name"],
                     brief="",
-                    clos=course.clos or CLOS,
+                    clos=course.clos or [],
                     status="draft",
                     external_id=str(assignment["id"]),
                 )
                 db.add(assessment)
                 await db.flush()
-            for submission in connector.list_submissions(str(assignment["id"])):
+            board_item = {
+                "number": str(assessment.external_id or assignment["id"] or "1"),
+                "title": assessment.title,
+                "submissions": [],
+            }
+            for submission in connector.list_submissions(str(assignment["id"]), str(remote["id"])):
+                text, files = _remote_text(submission)
+                cleaned = scrub(text, names)
+                board_item["submissions"].append(
+                    {
+                        "id": str(submission["id"]),
+                        "group_name": submission["group_name"],
+                        "topic": submission.get("topic") or "",
+                        "text": cleaned.text,
+                    }
+                )
                 found_sub = await db.execute(
                     select(Submission).where(
                         Submission.organization_id == org_id,
@@ -1035,8 +1399,6 @@ async def pull_moodle(
                 if existing_sub is not None:
                     await _fill_missing_files(db, org_id, existing_sub, submission, names)
                     continue
-                text, files = _remote_text(submission)
-                cleaned = scrub(text, names)
                 row = Submission(
                     organization_id=org_id,
                     course_id=course.id,
@@ -1060,10 +1422,18 @@ async def pull_moodle(
                 await _store_files(db, org_id, row, files)
                 await _remember_pii(db, org_id, cleaned.replacements, f"submission:{row.id}")
                 created["submissions"] += 1
+            if len(board_item["submissions"]) >= 2:
+                board_assignments.append(board_item)
             if assignment.get("rubric") and assessment.status != "approved":
                 await _apply_imported_criteria(
                     db, org_id, assessment, assignment["rubric"], "moodle"
                 )
+        if board_assignments:
+            # The integrity page reads an in-memory board. Register the pairs a
+            # demo can inspect immediately after the sync, using scrubbed text.
+            from app.profassist.integrity_board import register_synced_submissions
+
+            register_synced_submissions(course.code, course.title, board_assignments)
         for workshop in connector.list_workshops(str(remote["id"])):
             found = await db.execute(
                 select(Assessment).where(
@@ -1079,7 +1449,7 @@ async def pull_moodle(
                     owner_user_id=user_id,
                     title=workshop["name"],
                     brief="",
-                    clos=course.clos or CLOS,
+                    clos=course.clos or [],
                     status="draft",
                     external_id=str(workshop["id"]),
                     kind="workshop",
@@ -1119,10 +1489,49 @@ async def pull_moodle(
                 await db.flush()
                 await _store_files(db, org_id, row, files)
                 created["submissions"] += 1
+        activity_note = ""
+        try:
+            activity_rows = connector.list_activity(str(remote["id"]))
+        except ProfassistError as exc:
+            # local_profassist_get_activity ships with the demo simulator. A stock
+            # Moodle refuses it, which is a data gap, not a failed sync.
+            activity_rows = []
+            activity_note = f" Activity features were not available: {exc.detail}"
+        stored = 0
+        for activity in activity_rows:
+            if not isinstance(activity, dict):
+                continue
+            student_external_id = str(activity.get("userid") or "")
+            features = activity.get("features")
+            if not student_external_id or not isinstance(features, dict):
+                continue
+            found_activity = await db.execute(
+                select(MoodleActivity).where(
+                    MoodleActivity.organization_id == org_id,
+                    MoodleActivity.course_id == course.id,
+                    MoodleActivity.student_external_id == student_external_id,
+                )
+            )
+            row = found_activity.scalars().first()
+            if row is None:
+                row = MoodleActivity(
+                    organization_id=org_id,
+                    course_id=course.id,
+                    student_external_id=student_external_id,
+                )
+                db.add(row)
+            row.features = dict(features)
+            row.source = connector.mode
+            row.synced_at = datetime.now(UTC)
+            stored += 1
+        await db.flush()
+        if stored:
+            activity_note = f" Activity features stored for {stored} students."
         course.last_sync_at = datetime.now(UTC)
         course.last_sync_status = (
             f"Synced from {connector.mode} Moodle. "
             f"{created['submissions']} new submissions, {created['students']} new students."
+            f"{activity_note}"
         )
     return {"moodle_mode": connector.mode, **created, "last_sync_status": course.last_sync_status}
 
@@ -1218,6 +1627,20 @@ async def run_grade(
         )
     await _course(db, org_id, submission.course_id)
     await load_runtime(db, org_id, user_id)
+    grading_roles = await load_council_roles(db, org_id, "grading")
+    personas = [
+        role["role_key"]
+        for role in grading_roles
+        if role.get("kind") == "llm" and role.get("enabled")
+    ]
+    persona_config = {
+        role["role_key"]: {
+            "prompt_override": role.get("persona_prompt") or "",
+            "model": role.get("model") or "",
+        }
+        for role in grading_roles
+        if role.get("kind") == "llm" and role.get("enabled")
+    }
     assessment = await db.get(Assessment, submission.assessment_id)
     if assessment is None or assessment.organization_id != org_id:
         raise ProfassistError(404, "This submission has no assignment in this workspace.")
@@ -1249,6 +1672,14 @@ async def run_grade(
         raise ProfassistError(409, "This draft is already approved, so it was not regenerated.")
     memories = await recall(db, org_id, user_id)
     soul = (await _soul(db, org_id, user_id)) + "\n" + "\n".join(memories)
+    outline_row = await load_outline(db, org_id, user_id, submission.course_id)
+    outline = grading_outline(trim_outline(outline_row)) if outline_row is not None else {}
+    clos = [
+        str(item.get("text") or item.get("code") or "") if isinstance(item, dict) else str(item)
+        for item in assessment.clos or []
+    ]
+    clos = [code for code in clos if code]
+    dossier = await dossier_ai_context(db, org_id, user_id, submission.course_id, budget=4000)
     results = []
     feedback_parts = []
     for criterion in criteria:
@@ -1270,6 +1701,11 @@ async def run_grade(
             soul,
             title=assessment.title,
             peer_reviews=peer_view,
+            outline=outline,
+            clos=clos,
+            dossier=dossier,
+            personas=personas,
+            persona_config=persona_config,
         )
         judge = outcome["judge"]
         calibrator = stubs.grade_calibrator(
@@ -1442,6 +1878,7 @@ async def push_draft(
 ) -> dict[str, Any]:
     draft = await _owned(db, GradeDraft, org_id, draft_id, user_id)
     submission = await _owned(db, Submission, org_id, draft.submission_id)
+    assessment = await db.get(Assessment, submission.assessment_id)
     receipt = await push_record(
         db,
         org_id,
@@ -1453,11 +1890,7 @@ async def push_draft(
             "group": submission.group_name,
             "feedback": draft.overall_feedback,
             "levels": draft.professor_levels or {"council": "see draft"},
-            "assignment_external_id": (
-                (await db.get(Assessment, submission.assessment_id)).external_id
-                if await db.get(Assessment, submission.assessment_id)
-                else ""
-            ),
+            "assignment_external_id": assessment.external_id if assessment else "",
             "author_external_id": submission.author_external_id,
             "grade": _grade_number(draft.professor_levels or {}),
         },
@@ -1583,10 +2016,23 @@ async def list_students(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUI
         }
         for row in result.scalars().all()
     ]
+    activity_result = await db.execute(
+        select(MoodleActivity).where(
+            MoodleActivity.organization_id == org_id,
+            MoodleActivity.course_id == course.id,
+        )
+    )
+    features_by_student = {
+        row.student_external_id: row.features
+        for row in activity_result.scalars().all()
+        if row.student_external_id and row.features
+    }
     return {
         "students": students,
         "course": {"id": str(course.id), "code": course.code, "title": course.title},
-        "early_warning": stubs.at_risk_snapshot(students, course_code=course.code),
+        "early_warning": stubs.at_risk_snapshot(
+            students, course_code=course.code, features_by_student=features_by_student
+        ),
     }
 
 
@@ -1613,11 +2059,6 @@ async def _style_row(
     return row
 
 
-async def _course_codes(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
-    result = await db.execute(select(Course).where(Course.organization_id == org_id))
-    return [row.code for row in result.scalars().all()]
-
-
 async def refresh_about(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, source: str
 ) -> str:
@@ -1625,9 +2066,18 @@ async def refresh_about(
     profile = await _style_row(db, org_id, user_id, create=True)
     assert profile is not None
     memories = await list_memories(db, org_id, user_id)
-    drafted = condense_about(profile.soul_md or "", memories, await _course_codes(db, org_id))
-    cleaned = scrub(drafted)
-    text = "" if cleaned.quarantined else cleaned.text.strip()
+    identity = await professor_identity(db, org_id, user_id)
+    drafted = condense_about(profile.soul_md or "", memories, identity["courses"], identity)
+    identity_lines, body = split_identity(drafted)
+    cleaned = scrub(body)
+    if cleaned.quarantined:
+        text = "\n".join(identity_lines)
+    else:
+        body_text = cleaned.text.strip()
+        parts = [*identity_lines]
+        if body_text:
+            parts.append(body_text)
+        text = "\n".join(parts)
     if text == (profile.about_md or "").strip():
         set_about(text)
         return text
@@ -1641,7 +2091,123 @@ async def refresh_about(
     return text
 
 
-async def reflect_on_change(
+async def _apply_reflection_text(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    proposal: str,
+    identity: dict[str, Any],
+) -> None:
+    """Put a proposal in the editable portrait unless it is unsafe or unchanged."""
+    profile = await _style_row(db, org_id, user_id, create=True)
+    assert profile is not None
+    _, body = split_identity(proposal or "")
+    cleaned = scrub(body)
+    if cleaned.quarantined:
+        return
+    body_lines = cleaned.text.strip().splitlines()
+    header = "About this professor:"
+    if body_lines and body_lines[0].strip().lower() == header.lower():
+        body_lines = body_lines[1:]
+    body_text = "\n".join(body_lines).strip()
+    text = "\n".join([header, *identity_lines(identity), body_text]) if body_text else ""
+    current = (profile.about_md or "").strip()
+    if not text or text == current:
+        return
+    history = list(profile.about_history or [])
+    if current:
+        history.append(
+            {"version": len(history) + 1, "text": profile.about_md, "source": "reflection-auto"}
+        )
+    profile.about_history = history[-20:]
+    profile.about_md = text
+    set_about(profile.about_md)
+
+
+async def _apply_reflection(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    proposal: str,
+    *,
+    identity: dict[str, Any] | None = None,
+    row: Reflection | None = None,
+) -> Reflection:
+    """Auto-apply one proposal and keep the reflection row for history."""
+    identity = identity or await professor_identity(db, org_id, user_id)
+    await _apply_reflection_text(db, org_id, user_id, proposal, identity)
+    if row is None:
+        row = Reflection(
+            organization_id=org_id,
+            owner_user_id=user_id,
+            proposal=proposal or "",
+            status="applied",
+        )
+        db.add(row)
+    else:
+        row.status = "applied"
+    await db.flush()
+    return row
+
+
+def _criteria_text(criteria: list[dict[str, Any]] | None) -> str:
+    """Readable criteria, including the level wording the professor kept."""
+    lines: list[str] = []
+    for item in criteria or []:
+        levels = item.get("levels") or {}
+        described = "; ".join(
+            f"{str(key).strip()}: {str(value).strip()}"
+            for key, value in levels.items()
+            if str(value).strip()
+        )
+        name = str(item.get("name") or "").strip()
+        weight = item.get("weight", "")
+        line = f"{name} ({weight}%): {described}".strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _deck_text(slides: list[dict[str, Any]] | None) -> str:
+    """Full deck content: title, bullets, and speaker notes."""
+    blocks: list[str] = []
+    for slide in slides or []:
+        if not isinstance(slide, dict):
+            continue
+        title = str(slide.get("title") or "").strip()
+        bullets = [
+            str(bullet).strip() for bullet in slide.get("bullets") or [] if str(bullet).strip()
+        ]
+        notes = str(slide.get("speaker_notes") or "").strip()
+        parts = [title]
+        if bullets:
+            parts.append("Bullets: " + " | ".join(bullets))
+        if notes:
+            parts.append("Notes: " + notes)
+        block = "\n".join(part for part in parts if part)
+        if block:
+            blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+async def _stored_criteria(
+    db: AsyncSession, org_id: uuid.UUID, assessment_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    result = await db.execute(
+        select(RubricCriterion)
+        .where(
+            RubricCriterion.organization_id == org_id,
+            RubricCriterion.assessment_id == assessment_id,
+        )
+        .order_by(RubricCriterion.ordinal)
+    )
+    return [
+        {"name": item.name, "weight": item.weight, "levels": item.levels or {}}
+        for item in result.scalars().all()
+    ]
+
+
+async def remember_movement(
     db: AsyncSession,
     org_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -1649,9 +2215,12 @@ async def reflect_on_change(
     before: str,
     after: str,
     source: str,
-) -> None:
-    """Compare her final version with the draft, then update her private memory."""
-    for lesson in extract_lessons(kind, before, after):
+) -> list[dict[str, str]]:
+    """Deterministic memory update. No model call, so edits stay cheap."""
+    if org_id is None or user_id is None:
+        return []
+    lessons = extract_lessons(kind, before, after)
+    for lesson in lessons:
         await remember(
             db,
             org_id,
@@ -1661,49 +2230,143 @@ async def reflect_on_change(
             source=source,
         )
     await refresh_about(db, org_id, user_id, source)
-    lessons = extract_lessons(kind, before, after)
-    if not lessons:
-        return
-    seed = "Lessons from her latest edit:\n" + "\n".join(item["text"] for item in lessons)
-    proposal = agents.run_reflection(seed)
-    open_rows = (
-        await db.execute(
-            select(Reflection).where(
-                Reflection.organization_id == org_id,
-                Reflection.owner_user_id == user_id,
-                Reflection.status == "proposed",
+    return lessons
+
+
+async def maybe_propose_reflection(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, source: str
+) -> Reflection | None:
+    """Auto-apply at most one reflection after REFLECT_EVERY new memories."""
+    if org_id is None or user_id is None:
+        return None
+    try:
+        memories = (
+            (
+                await db.execute(
+                    select(ProfessorMemory).where(
+                        ProfessorMemory.organization_id == org_id,
+                        ProfessorMemory.owner_user_id == user_id,
+                    )
+                )
             )
+            .scalars()
+            .all()
         )
-    ).scalars()
-    for existing in open_rows:
-        if same_lesson(existing.proposal, proposal) or any(
-            lesson["text"][:80] in existing.proposal for lesson in lessons
-        ):
-            return
-    db.add(
-        Reflection(
-            organization_id=org_id,
-            owner_user_id=user_id,
-            proposal=proposal,
-            status="proposed",
+        reflections = (
+            (
+                await db.execute(
+                    select(Reflection).where(
+                        Reflection.organization_id == org_id,
+                        Reflection.owner_user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-    )
-    await db.flush()
+        latest = max(
+            (row.created_at for row in reflections if getattr(row, "created_at", None) is not None),
+            default=None,
+        )
+        fresh = [
+            row
+            for row in memories
+            if latest is None
+            or (getattr(row, "created_at", None) is not None and row.created_at > latest)
+        ]
+        if len(fresh) < REFLECT_EVERY:
+            return None
+        identity = await professor_identity(db, org_id, user_id)
+        seed_lines = [f"New lessons since the last reflection ({source or 'edits'}):"]
+        seed_lines.extend(f"- {row.text}" for row in fresh[-8:])
+        seed_lines.extend(identity_lines(identity))
+        proposal = agents.run_reflection("\n".join(seed_lines), professor=identity) or ""
+        if any(same_lesson(row.proposal, proposal) for row in reflections):
+            return None
+        return await _apply_reflection(db, org_id, user_id, proposal, identity=identity)
+    except Exception:
+        logger.info("Reflection proposal skipped; the underlying save stands")
+        return None
+
+
+async def reflect_on_change(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    kind: str,
+    before: str,
+    after: str,
+    source: str,
+    *,
+    propose: bool = True,
+) -> None:
+    """Compare her final version with the draft, then update her private memory.
+
+    ``propose=False`` keeps the deterministic memory update but skips the model.
+    """
+    try:
+        lessons = await remember_movement(db, org_id, user_id, kind, before, after, source)
+    except Exception:
+        logger.info("Movement not captured; the underlying save stands")
+        return
+    if not propose or not lessons:
+        return
+    try:
+        seed = "Lessons from her latest edit:\n" + "\n".join(item["text"] for item in lessons)
+        proposal = agents.run_reflection(seed) or ""
+        existing_rows = (
+            await db.execute(
+                select(Reflection).where(
+                    Reflection.organization_id == org_id,
+                    Reflection.owner_user_id == user_id,
+                )
+            )
+        ).scalars()
+        for existing in existing_rows:
+            if same_lesson(existing.proposal, proposal) or any(
+                lesson["text"][:80] in existing.proposal for lesson in lessons
+            ):
+                return
+        await _apply_reflection(db, org_id, user_id, proposal)
+    except Exception:
+        logger.info("Reflection proposal skipped; the underlying save stands")
+
+
+async def capture_movement(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    kind: str,
+    before: str,
+    after: str,
+    source: str,
+) -> None:
+    """Remember the edit now, and let the portrait reflect once five pile up."""
+    if org_id is None or user_id is None:
+        return
+    try:
+        await remember_movement(db, org_id, user_id, kind, before, after, source)
+        await maybe_propose_reflection(db, org_id, user_id, source)
+    except Exception:
+        logger.info("Movement not captured; the underlying save stands")
 
 
 async def get_style(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
     profile = await _style_row(db, org_id, user_id, create=False)
     owner = await db.get(User, user_id)
+    identity = await professor_identity(db, org_id, user_id)
     soul = profile.soul_md if profile and profile.soul_md else DEFAULT_SOUL
     about = profile.about_md if profile and profile.about_md else ""
     if not about:
         memories = await list_memories(db, org_id, user_id)
-        about = condense_about(soul, memories, await _course_codes(db, org_id))
+        about = condense_about(soul, memories, identity["courses"], identity)
     return {
         "soul_md": soul,
         "about_md": about,
         "about_history": list(profile.about_history or []) if profile else [],
         "owner_name": owner.full_name if owner and owner.full_name else "",
+        "owner_role": identity["role"],
+        "courses": identity["courses"],
         "template_name": (profile.template_key if profile else "").rsplit("/", 1)[-1],
     }
 
@@ -1725,18 +2388,25 @@ async def save_about(
 ) -> dict[str, Any]:
     profile = await _style_row(db, org_id, user_id, create=True)
     assert profile is not None
-    cleaned = scrub(about_md or "")
+    identity = await professor_identity(db, org_id, user_id)
+    _, body = split_identity(about_md or "")
+    cleaned = scrub(body)
     if cleaned.quarantined:
         raise ProfassistError(
             400, "That note still looks like it names a person. Remove the name and save again."
         )
-    if cleaned.text.strip() == (profile.about_md or "").strip():
+    header = "About this professor:"
+    body_lines = cleaned.text.strip().splitlines()
+    if body_lines and body_lines[0].strip().lower() == header.lower():
+        body_lines = body_lines[1:]
+    text = "\n".join([header, *identity_lines(identity), *body_lines])
+    if text == (profile.about_md or "").strip():
         return await get_style(db, org_id, user_id)
     history = list(profile.about_history or [])
     if (profile.about_md or "").strip():
         history.append({"version": len(history) + 1, "text": profile.about_md, "source": "edit"})
     profile.about_history = history[-20:]
-    profile.about_md = cleaned.text.strip()
+    profile.about_md = text
     set_about(profile.about_md)
     await db.flush()
     return await get_style(db, org_id, user_id)
@@ -1768,6 +2438,7 @@ async def save_template(
 
 async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
     await load_runtime(db, org_id, user_id)
+    identity = await professor_identity(db, org_id, user_id)
     result = await db.execute(
         select(GradeDraft).where(
             GradeDraft.organization_id == org_id, GradeDraft.owner_user_id == user_id
@@ -1786,17 +2457,32 @@ async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
             )
             if council and level and level != council:
                 changes.append(f"{name}: council {council}, you chose {level}")
-    seed = (
-        "The professor changed levels: " + "; ".join(changes)
-        if changes
-        else "No level changes are stored yet. Propose a cautious note she can ignore."
-    )
-    text = agents.run_reflection(seed)
-    row = Reflection(
-        organization_id=org_id, owner_user_id=user_id, proposal=text, status="proposed"
-    )
-    db.add(row)
-    await db.flush()
+    who = identity["name"] or "this professor"
+    if identity["role"]:
+        who = f"{who} — {identity['role']}"
+    seed_lines = [f"Professor: {who}"]
+    if identity["courses"]:
+        seed_lines.append("Teaches: " + ", ".join(identity["courses"]))
+    profile = await _style_row(db, org_id, user_id, create=False)
+    current = (profile.about_md if profile else "") or (profile.soul_md if profile else "")
+    if current.strip():
+        seed_lines.append("Current portrait:\n" + current.strip()[:900])
+    if changes:
+        seed_lines.append("Open grade-level changes: " + "; ".join(changes))
+        seed_lines.append(
+            "Rewrite the 'About this professor' portrait in under 120 words from these facts "
+            "and the current portrait. Do not invent students, credentials, or titles. "
+            "Return only the portrait."
+        )
+    else:
+        seed_lines.append(
+            "No grade-level changes are stored yet. Rewrite the 'About this professor' portrait "
+            "in under 120 words from these facts and the current portrait. Do not invent a change, "
+            "a student, a credential, or a title. Return only the portrait."
+        )
+    seed = "\n".join(seed_lines)
+    text = agents.run_reflection(seed, professor=identity) or ""
+    row = await _apply_reflection(db, org_id, user_id, text, identity=identity)
     return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
 
 
@@ -1818,21 +2504,9 @@ async def approve_reflection(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, reflection_id: uuid.UUID
 ) -> dict[str, Any]:
     row = await _owned(db, Reflection, org_id, reflection_id, user_id)
-    row.status = "approved"
-    style = await db.execute(
-        select(StyleProfile).where(
-            StyleProfile.organization_id == org_id, StyleProfile.user_id == user_id
-        )
-    )
-    profile = style.scalar_one_or_none()
-    addition = f"\n\n# Learned from your edits\n\n{row.proposal}\n"
-    if profile is None:
-        db.add(
-            StyleProfile(organization_id=org_id, user_id=user_id, soul_md=DEFAULT_SOUL + addition)
-        )
-    else:
-        profile.soul_md = (profile.soul_md or "") + addition
-    await refresh_about(db, org_id, user_id, "reflection-approve")
+    if row.status == "applied":
+        return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
+    await _apply_reflection(db, org_id, user_id, row.proposal or "", row=row)
     return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
 
 
@@ -1860,70 +2534,105 @@ async def build_cited_deck(
     from app.profassist.skills.slide_studio import run_slide_studio
 
     await load_runtime(db, org_id, user_id)
+    council_roles = await load_council_roles(db, org_id, "material")
     course = await _course(db, org_id, course_id)
+    outline_row = await load_outline(db, org_id, user_id, course.id)
+    outline = trim_outline(outline_row) if outline_row is not None else {}
+    dossier = await dossier_ai_context(db, org_id, user_id, course.id, budget=6000)
     objectives = [
         row["text"]
         for row in await list_objectives(db, org_id, course.id, user_id)
         if row["status"] == "approved"
     ]
-    if not objectives:
-        raise ProfassistError(400, "Approve an objective before building a cited deck.")
     title = f"{course.code} cited deck"
     if week:
-        from app.profassist.design import get_design
-
-        design = await get_design(db, org_id, course.id, user_id)
-        match = next(
-            (item for item in design.get("weeks") or [] if int(item.get("week") or 0) == week),
+        outline_week = next(
+            (item for item in outline.get("weeks") or [] if int(item.get("week") or 0) == week),
             None,
         )
-        if match:
-            codes = set(match.get("clos") or [])
+        if outline_week is not None:
+            codes = set(outline_week.get("lo_codes") or [])
             wanted = [
                 item.get("text")
-                for item in design.get("clos") or []
+                for item in outline.get("clos") or []
                 if item.get("code") in codes and item.get("text")
             ]
             if wanted:
                 objectives = wanted
-            title = f"Week {week}: {match.get('topic') or course.code}"[:255]
-    materials = {
-        row.id: row.filename
-        for row in (
-            await db.execute(
-                select(Material).where(
-                    Material.organization_id == org_id,
-                    Material.course_id == course.id,
-                    Material.owner_user_id == user_id,
-                )
+            title = f"Week {week}: {outline_week.get('topic') or course.code}"[:255]
+        else:
+            from app.profassist.design import get_design
+
+            design = await get_design(db, org_id, course.id, user_id)
+            match = next(
+                (item for item in design.get("weeks") or [] if int(item.get("week") or 0) == week),
+                None,
             )
-        ).scalars()
-    }
-    chunks = []
-    for row in await _chunks(db, org_id, course.id, user_id):
-        chunks.append(
-            {
-                "id": str(row.id),
-                "text": row.text,
-                "filename": materials.get(row.material_id, "note"),
-                "section": "note",
-            }
-        )
+            if match:
+                codes = set(match.get("clos") or [])
+                wanted = [
+                    item.get("text")
+                    for item in design.get("clos") or []
+                    if item.get("code") in codes and item.get("text")
+                ]
+                if wanted:
+                    objectives = wanted
+                title = f"Week {week}: {match.get('topic') or course.code}"[:255]
+    used_outline_clos = False
+    if not objectives:
+        objectives = [
+            str(item.get("text"))
+            for item in outline.get("clos") or []
+            if isinstance(item, dict) and item.get("text")
+        ]
+        used_outline_clos = bool(objectives)
+    if not objectives and isinstance(dossier, dict):
+        outcomes = dossier.get("outcomes")
+        clos = outcomes.get("clos") if isinstance(outcomes, dict) else None
+        objectives = [
+            str(item.get("text"))
+            for item in clos or []
+            if isinstance(item, dict) and item.get("text")
+        ]
+    if not objectives:
+        raise ProfassistError(400, "Approve an objective before building a cited deck.")
+    chunks = [
+        {
+            "id": item["id"],
+            "text": item["text"],
+            "filename": item.get("filename") or "note",
+            "section": "note",
+        }
+        for item in await ready_chunks(db, org_id, user_id, course.id)
+    ]
     if not chunks:
         raise ProfassistError(400, "Upload a course note before building a cited deck.")
     note = (instructions or course.ai_instructions or "").strip()
     if instructions:
         course.ai_instructions = note
+    deck_note = note
+    if used_outline_clos:
+        deck_note = f"{note}\n\nDrafted from the official outline CLOs.".strip()
+    preferences = await slide_preferences(db, org_id, user_id, f"{course.code} {title} {deck_note}")
     profile = await _style_row(db, org_id, user_id, create=False)
     template = read_bytes(profile.template_key) if profile and profile.template_key else None
-    built = run_slide_studio(objectives, chunks, template=template, title=title, instructions=note)
+    built = run_slide_studio(
+        objectives,
+        chunks,
+        template=template,
+        title=title,
+        instructions=deck_note,
+        outline=outline,
+        dossier=dossier,
+        preferences=preferences,
+    )
     deck = SlideDeck(
         organization_id=org_id,
         course_id=course.id,
         owner_user_id=user_id,
         title=title,
         week=week,
-        instructions=note,
+        instructions=deck_note,
         slides=built["slides"],
         status="draft",
     )
@@ -1938,4 +2647,75 @@ async def build_cited_deck(
     payload = _deck_dict(deck)
     payload["gaps"] = built["gaps"]
     payload["skill"] = built["skill"]
+    payload["preferences"] = preferences
+    try:
+        review = agents.run_slide_review(
+            _review_deck_payload(deck, built["gaps"]),
+            outline=outline,
+            dossier=dossier,
+            preferences=preferences,
+            chunks=chunks,
+            council_roles=council_roles,
+        )
+    except Exception:
+        logger.info("Deck review failed; the cited deck stands")
+        review = {}
+    if review:
+        _store_review(deck, review)
+        await db.flush()
+    payload["review"] = review
+    payload["review_trace_url"] = deck.review_trace_url or ""
+    payload["trace_url"] = built.get("trace_url") or ""
     return payload
+
+
+def _review_deck_payload(row: SlideDeck, gaps: list[str] | None = None) -> dict[str, Any]:
+    """The deck as the reviewer sees it. No storage key and no owner id."""
+    return {
+        "title": row.title or "",
+        "week": row.week,
+        "instructions": row.instructions or "",
+        "slides": list(row.slides or []),
+        "gaps": list(gaps or []),
+    }
+
+
+def _store_review(row: SlideDeck, review: dict[str, Any]) -> None:
+    row.review = dict(review)
+    row.review_trace_url = str(review.get("trace_url") or "")
+
+
+async def review_deck(db: AsyncSession, org: Any, user: Any, deck_id: uuid.UUID) -> dict[str, Any]:
+    """Owner-scoped review of a stored deck. It advises; it does not rewrite."""
+    from app.profassist.course_context import load_outline, trim_outline
+    from app.profassist.course_memory.service import dossier_ai_context
+    from app.profassist.slide_memory import slide_preferences
+
+    deck = await _owned(db, SlideDeck, org.id, deck_id, user.id)
+    await load_runtime(db, org.id, user.id)
+    council_roles = await load_council_roles(db, org.id, "material")
+    outline_row = await load_outline(db, org.id, user.id, deck.course_id)
+    outline = trim_outline(outline_row) if outline_row is not None else {}
+    dossier = await dossier_ai_context(db, org.id, user.id, deck.course_id, budget=6000)
+    query = f"{deck.title or ''} {deck.instructions or ''}".strip()
+    preferences = await slide_preferences(db, org.id, user.id, query)
+    chunks = [
+        {
+            "id": item["id"],
+            "text": item["text"],
+            "filename": item.get("filename") or "note",
+            "section": "note",
+        }
+        for item in await ready_chunks(db, org.id, user.id, deck.course_id)
+    ]
+    review = agents.run_slide_review(
+        _review_deck_payload(deck),
+        outline=outline,
+        dossier=dossier,
+        preferences=preferences,
+        chunks=chunks,
+        council_roles=council_roles,
+    )
+    _store_review(deck, review)
+    await db.flush()
+    return {"review": review, "trace_url": review.get("trace_url") or ""}

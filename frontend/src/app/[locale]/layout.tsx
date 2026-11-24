@@ -3,8 +3,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 
-import "@carbon/styles/css/styles.css";
-
+import { DesktopOnly } from "@/components/layout/desktop-only";
 import { CookieBanner } from "@/components/marketing/cookie-banner";
 import { locales, type Locale } from "@/i18n";
 import { OG_LOCALE, SITE } from "@/lib/seo";
@@ -62,7 +61,7 @@ export default async function LocaleLayout({
         <a href="#main" className="skip-link">
           {t("skipToContent")}
         </a>
-        {children}
+        <DesktopOnly>{children}</DesktopOnly>
         <CookieBanner />
       </NextIntlClientProvider>
     </Providers>

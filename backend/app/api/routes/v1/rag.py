@@ -28,7 +28,7 @@ from app.api.deps import (
     VectorStoreSvc,
 )
 from app.core.config import settings
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.rag import (
     RAGCollectionInfo,
     RAGCollectionList,
@@ -154,10 +154,29 @@ async def list_documents(
 async def search_documents(
     request: RAGSearchRequest,
     retrieval_service: RetrievalSvc,
-    _: CurrentUser,
+    kb_svc: KnowledgeBaseSvc,
+    current_user: CurrentUser,
+    active_org: ActiveOrg,
     use_reranker: bool = Query(False, description="Whether to use reranking (if configured)"),
 ) -> Any:
-    """Search for relevant document chunks. Supports multi-collection search."""
+    """Search for relevant document chunks. Supports multi-collection search.
+
+    Every requested collection must be reachable through a Knowledge Base the
+    caller can see (their own, or an org-scoped one in the active workspace).
+    A name outside that set is a 404 for that collection, never a wider search.
+    """
+    requested = list(request.collection_names or []) or [request.collection_name]
+    accessible = set(
+        await kb_svc.list_accessible_collection_names(
+            user_id=current_user.id, organization_id=active_org.id
+        )
+    )
+    for name in requested:
+        if name not in accessible:
+            raise NotFoundError(
+                message=f"Collection '{name}' not found",
+                details={"collection": name},
+            )
     if request.collection_names and len(request.collection_names) > 1:
         results = await retrieval_service.retrieve_multi(
             query=request.query,
@@ -217,8 +236,18 @@ async def ingest_file(
     file: UploadFile = File(...),
     replace: bool = Query(False),
 ) -> Any:
-    """Upload and queue a file for ingestion into a collection."""
-    data = await file.read()
+    """Upload and queue a file for ingestion into a collection.
+
+    Read one byte past the limit so an oversized upload is rejected before the
+    rest of the body is buffered in memory; ``dispatch_upload`` re-checks.
+    """
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise BadRequestError(
+            message=f"File too large. Maximum {settings.MAX_UPLOAD_SIZE_MB}MB.",
+            details={"max_mb": settings.MAX_UPLOAD_SIZE_MB},
+        )
     return await rag_doc_svc.dispatch_upload(
         collection_name=name,
         file_data=data,
@@ -425,15 +454,18 @@ async def list_connectors(
 @router.get("/status/stream", response_class=EventSourceResponse)
 async def rag_status_stream(
     rag_status_svc: RAGStatusSvc,
+    current_user: CurrentUser,
+    active_org: ActiveOrg,
 ) -> AsyncIterable[ServerSentEvent]:
     """SSE endpoint for real-time RAG ingestion status updates.
 
     Subscribes to the ``rag_status`` Redis pub/sub channel; the browser auto-reconnects
-    via the EventSource API.
+    via the EventSource API. Requires authentication and only streams events
+    for the caller's active organization.
 
     The endpoint is itself an async generator: FastAPI's native SSE producer
     streams what it yields. Returning the generator object instead (with
     ``response_class``) makes the producer mis-iterate it → HTTP 500.
     """
-    async for event in rag_status_svc.stream_events():
+    async for event in rag_status_svc.stream_events(organization_id=active_org.id):
         yield event

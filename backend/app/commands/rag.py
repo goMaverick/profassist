@@ -16,11 +16,13 @@ Commands:
 import asyncio
 import hashlib
 import json
+import uuid
 from pathlib import Path
 
 import click
 
 from app.commands import command, error, info, success, warning
+from app.core.config import settings as app_settings
 from app.db.session import get_db_context
 from app.schemas.sync_source import SyncSourceCreate
 from app.services.rag.config import DocumentExtensions, RAGSettings
@@ -50,7 +52,7 @@ def get_rag_services() -> tuple[
     Returns:
         Tuple of (settings, vector_store, processor, retrieval, ingestion) services.
     """
-    settings = RAGSettings()
+    settings = app_settings.rag
     embedder = EmbeddingService(settings=settings)
     vector_store = QdrantVectorStore(settings=settings, embedding_service=embedder)
     processor = DocumentProcessor(settings=settings)
@@ -450,6 +452,99 @@ async def stats_async(settings: RAGSettings, vector_store: BaseVectorStore) -> N
         click.echo(f"\nTotal vectors: {total_vectors:,}")
 
     click.echo()
+
+
+@command("rag-reset-collection", help="Recreate a collection with the configured vector size")
+@click.option(
+    "--collection",
+    "-c",
+    default="",
+    help="Collection name (default: RAG_DEFAULT_COLLECTION)",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Drop the collection even when it still holds vectors",
+)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def rag_reset_collection(collection: str, force: bool, yes: bool) -> None:
+    """Drop and recreate a collection so its vector size matches the model.
+
+    Existing vectors are protected: a non-empty collection needs --force.
+    Re-ingest (or `rag-reindex` for note chunks) afterwards.
+    """
+    from app.services.rag.vectorstore import reset_collection
+
+    name = collection or app_settings.rag.collection_name
+    if not yes:
+        click.confirm(
+            f"Drop collection '{name}' and recreate it with "
+            f"{app_settings.rag.embeddings_config.dim}-dim vectors?",
+            abort=True,
+        )
+
+    async def _reset() -> None:
+        try:
+            result = await reset_collection(name, force=force)
+        except RuntimeError as exc:
+            error(str(exc))
+            return
+        if result["action"] == "missing":
+            info(f"Collection '{name}' does not exist; nothing to reset.")
+            return
+        success(
+            f"Collection '{name}' recreated at {result['dim']} dims "
+            f"({result['vectors']} old vector(s) removed)."
+        )
+        info("Re-index your documents: `rag-ingest` for the knowledge base or `rag-reindex`.")
+
+    asyncio.run(_reset())
+
+
+@command("rag-reindex", help="Rebuild note chunks with the configured embeddings")
+@click.option("--all", "reindex_all", is_flag=True, help="Reindex every material")
+@click.option("--organization", "organization_id", type=click.UUID, default=None)
+@click.option("--course", "course_id", type=click.UUID, default=None)
+@click.option("--user", "user_id", type=click.UUID, default=None)
+def rag_reindex(
+    reindex_all: bool,
+    organization_id: uuid.UUID | None,
+    course_id: uuid.UUID | None,
+    user_id: uuid.UUID | None,
+) -> None:
+    """Re-chunk and re-embed existing notes with the current provider/model.
+
+    Use after switching from OpenAI to local embeddings or after recreating
+    the `profassist` collection. Safe to run repeatedly. Pass --all, or narrow
+    it to one organization, course, or owner.
+    """
+    from app.profassist.service import reindex_materials
+
+    if not reindex_all and organization_id is None and course_id is None and user_id is None:
+        error("Pass --all, or narrow the run with --organization/--course/--user.")
+        return
+
+    async def _reindex() -> None:
+        async with get_db_context() as db:
+            result = await reindex_materials(
+                db,
+                org_id=organization_id,
+                course_id=course_id,
+                user_id=user_id,
+            )
+        info(
+            f"Scanned {result['materials']} material(s): "
+            f"{result['reindexed']} reindexed, {result['skipped']} skipped "
+            f"(quarantined), {len(result['failed'])} failed."
+        )
+        for item in result["failed"]:
+            error(f"  {item['filename']} ({item['id']}): {item['error']}")
+        if result["failed"]:
+            error("Some notes are not ready. Fix the cause, then run `rag-reindex` again.")
+        else:
+            success("Note chunks now use the configured embeddings.")
+
+    asyncio.run(_reindex())
 
 
 @command("rag-sync-s3")

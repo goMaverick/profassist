@@ -16,7 +16,7 @@ export default function NotFound() {
       </p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Button asChild>
-          <Link href={ROUTES.HOME}>Go home</Link>
+          <Link href={ROUTES.LOGIN}>Sign in</Link>
         </Button>
         <NotFoundBackButton />
         <Button variant="secondary" asChild>

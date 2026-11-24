@@ -50,12 +50,39 @@ def alignment(criteria: list[dict[str, Any]], clos: list[str]) -> dict[str, Any]
     return {"flags": flags, "covered": covered, "clos": clos}
 
 
+def _blocks(text: str) -> list[list[str]]:
+    """Split a paste into criteria.
+
+    Blank lines separate criteria, and a second ``Criterion:`` line closes the
+    previous one so a paste without blank lines does not collapse into one row.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for raw in re.split(r"\n\s*\n", text.strip()):
+        for line in (item.strip() for item in raw.splitlines()):
+            if not line:
+                continue
+            label = line.partition(":")[0].strip().lower()
+            if label in {"criterion", "name", "criteria"} and _started(current):
+                blocks.append(current)
+                current = []
+            current.append(line)
+        if current:
+            blocks.append(current)
+            current = []
+    return blocks
+
+
+def _started(lines: list[str]) -> bool:
+    """A header starts a new criterion only once the previous one has a field."""
+    keys = {line.partition(":")[0].strip().lower() for line in lines}
+    return bool(keys & {*LEVELS, "weight"})
+
+
 def parse_rubric_text(text: str) -> list[dict[str, Any]]:
     """Read a pasted or extracted rubric. Blank lines separate criteria."""
-    blocks = re.split(r"\n\s*\n", text.strip())
     criteria = []
-    for block in blocks:
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
+    for lines in _blocks(text):
         if not lines:
             continue
         name = ""
