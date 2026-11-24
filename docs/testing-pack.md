@@ -5,7 +5,7 @@ This pack records the local end-to-end (E2E) verification of ProfAssist against 
 - **Date:** 2026-11-24.
 - **Environment:** local Docker Compose (`docker-compose.yml` + `docker-compose.override.yml`), Windows host, Docker Desktop.
 - **Source changes during E2E:** none. Nothing was committed.
-- **Scope:** councils, Moodle, students/dropout, integrity, models/MLflow, Mem0, reflection/style, Langfuse, and the two test suites.
+- **Scope:** councils, Moodle, students/dropout, integrity, models/MLflow, Mem0, reflection/style, Langfuse, GIF capture, and the two test suites.
 
 ## 1. Stack state
 
@@ -39,7 +39,7 @@ cd backend
 uv run --frozen pytest -q
 ```
 
-**1112 passed, 4 skipped, 125 warnings in 72.98s.**
+**1120 passed, 4 skipped, 125 warnings.**
 
 The 4 skips are the destructive Alembic migration tests (`tests/test_migrations.py`); see section 8. The suite uses a mocked async session, so it needs no Postgres, Redis, Qdrant, MinIO, or model key.
 
@@ -62,7 +62,7 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 
 | Suite | Command | Passed | Failed | Skipped | Notes |
 |---|---|---:|---:|---:|---|
-| Backend | `uv run --frozen pytest -q` | 1112 | 0 | 4 | 72.98s, 125 warnings |
+| Backend | `uv run --frozen pytest -q` | 1120 | 0 | 4 | 125 warnings |
 | Frontend | `npx vitest run` | 117 | 0 | 0 | 16 files, 32.06s |
 | Frontend type check | `npm run type-check` | - | 0 | - | exit 0 |
 | Frontend lint | `npx eslint ...` | - | 0 | - | 2 warnings, no errors |
@@ -72,7 +72,7 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 
 | Area | What is covered | Primary tests | E2E evidence |
 |---|---|---|---|
-| **Backend platform** | Auth, users, orgs, RAG, files, repositories, exceptions, OpenAPI, health, migrations guards | 70 `test_*.py` modules under `backend/tests/`, mocked async DB | `pytest` 1112 passed |
+| **Backend platform** | Auth, users, orgs, RAG, files, repositories, exceptions, OpenAPI, health, migrations guards | 70 `test_*.py` modules under `backend/tests/`, mocked async DB | `pytest` 1120 passed |
 | **Frontend shell** | Auth store/hooks, API client, cookies, layout, command palette, UI primitives, council page, assignment pages, studio collab, login form, header utilities | 16 `*.test.tsx` / `*.test.ts` files | `vitest` 16 files / 117 tests |
 | **Login and header navigation** | Two-column login form: controls, password visibility, submit, error banner, loading state (5 tests); header renders no top-level Home/Grading links and keeps brand/search/theme/menu (4 tests); studio collab roster copy (13 tests) | `components/auth/login-form.test.tsx`, `components/layout/header.test.tsx`, `components/profassist/studio-collab.test.tsx` | `vitest` 5 + 4 + 13 tests |
 | **Material council** | Default roster, validation, enable/disable, chair-last ordering, persistence, reset, slide collaboration, slide review | `test_council_settings.py`, `test_slide_collab.py`, `test_slide_review.py`, `test_profassist.py`, `admin/councils/page.test.tsx` | Live single-week SSE with Design disabled |
@@ -93,7 +93,7 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 | Area | Result | Detail |
 |---|---|---|
 | Stack health | **Pass** | API, frontend, MLflow, mock Moodle, Prefect all 200; migrations at head |
-| Backend suite | **Pass** | 1112 passed, 4 skipped |
+| Backend suite | **Pass** | 1120 passed, 4 skipped |
 | Frontend suite | **Pass** | 16 files, 117 tests |
 | Council settings | **Pass** | Four councils, ordered positions, exactly one chair each; saved rosters obeyed |
 | Material council | **Pass** | Design disabled -> silent; Evidence spoke before Curriculum; roster restored |
@@ -184,6 +184,19 @@ The eleven images below are copied from `frontend/screenshots-final/` into `docs
 | [style-reflection.png](images/style-reflection.png) | 1440x1668 | 207,791 | Auto-applied reflection history; no Approve button |
 
 **Missing selected screenshots:** none. `login.png` and `dashboard.png` are now copied into `docs/images/`. The README gallery also links `docs/images/councils-outline.png` (the Outline tab of the same Councils screen); it resolves locally but is not part of the eleven images captured for this run. The remaining files in `frontend/screenshots-final/` (outline, rubric, assignments, integrity-groups-final, assignment-council-page) were deliberately not copied.
+
+### GIFs
+
+The four README GIFs are captured from the same local Docker run against the demo course and live in `docs/gifs/`:
+
+| GIF | Bytes | What it shows |
+|---|---:|---|
+| [profassist-create-all.gif](gifs/profassist-create-all.gif) | 1,490,678 | All four creation flows back to back |
+| [outline-create.gif](gifs/outline-create.gif) | 369,608 | Course outline drafted step by step |
+| [slide-studio-create.gif](gifs/slide-studio-create.gif) | 501,766 | Cited slide deck built in the studio |
+| [assignment-create.gif](gifs/assignment-create.gif) | 620,732 | Assignment brief and rubric drafted with the council |
+
+The material and assignment captures show advisory council verdicts, including drafts that land as **Needs revision**; the council never blocks saving, and the professor decides. Captions in the README say "demo course" because the captures are the local seeded demo, not real UOWD/MAAI904 data.
 
 ## 7. E2E failures: root cause and status
 
