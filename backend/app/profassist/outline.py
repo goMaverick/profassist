@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.profassist.council_config import load_council_roles, role_of
 from app.profassist.course_memory.service import dossier_ai_context
 from app.profassist.errors import ProfassistError
 from app.profassist.models import (
@@ -1978,6 +1979,16 @@ async def generate_outline(
 
     row = await get_outline(db, org_id, user_id, outline_id)
     await load_runtime(db, org_id, user_id)
+    roles = await load_council_roles(db, org_id, "outline")
+    creator = role_of(roles, "creator")
+    creator_request: dict[str, Any] = {}
+    if creator is not None:
+        creator_prompt = str(creator.get("persona_prompt") or "").strip()
+        if creator_prompt:
+            creator_request["prompt_override"] = creator_prompt
+        creator_model = str(creator.get("model") or "").strip()
+        if creator_model:
+            creator_request["model"] = creator_model
     cleaned = scrub(message or "")
     if cleaned.quarantined:
         raise ProfassistError(400, "That request still looks like it names a student.")
@@ -2014,6 +2025,7 @@ async def generate_outline(
             "existing": {key: body.get(key) for key in CONTENT_SECTIONS},
             "dossier": dossier,
             "preferences": preferences,
+            **creator_request,
         },
     )
     updated, changed_sections, missing = _generate_body(body, drafted)
@@ -2042,11 +2054,23 @@ async def generate_outline(
         reply = f"{reply} Not drafted yet: {', '.join(missing)}."
     if not chunks and "no ready notes" not in reply.lower():
         reply = f"{reply} No ready notes are available, so this draft uses only your instructions."
+    review: dict[str, Any] | None = None
+    try:
+        from app.profassist.outline_review import run_review
+
+        review = await run_review(
+            db, org_id, user_id, outline_id, mode="council", reviewer="curriculum"
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).info("Outline review after generation did not complete")
     return {
         "outline": _public(row),
         "reply": reply,
         "sources": sources,
         "changed_sections": changed_sections,
+        "review": review,
         "trace_url": step_trace_url() or "",
     }
 

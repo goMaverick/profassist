@@ -54,6 +54,8 @@ def _wire(monkeypatch: pytest.MonkeyPatch, reply: Any) -> list[tuple[str, dict[s
         calls.append((task, payload))
         if isinstance(reply, Exception):
             raise reply
+        if callable(reply):
+            return reply(task, payload)
         return reply
 
     monkeypatch.setattr(assignment_council.llm, "complete", fake_complete)
@@ -175,25 +177,32 @@ def test_a_clean_assignment_has_no_findings_and_four_messages(
     ]
     assert review["messages"][1]["text"] == "No issues from my pass."
     assert "The brief is complete." in review["messages"][-1]["text"]
-    assert calls[0][0] == "assignment_review"
-    assert calls[0][1]["dossier"] == {"summary": "Course memory."}
+    assert [task for task, _payload in calls] == [
+        "council_review",
+        "council_review",
+        "council_review",
+        "assignment_review",
+    ]
+    chair_call = next(payload for task, payload in calls if task == "assignment_review")
+    assert chair_call["dossier"] == {"summary": "Course memory."}
 
 
 def test_the_chair_cannot_invent_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    chair_reply = {
+        "verdict": "revise",
+        "summary": "The rubric is perfect.",
+        "strengths": [],
+        "issues": [
+            {
+                "reviewer": "rubric",
+                "severity": "high",
+                "issue": "The rubric is perfect, which is suspicious.",
+            }
+        ],
+    }
     _wire(
         monkeypatch,
-        {
-            "verdict": "revise",
-            "summary": "The rubric is perfect.",
-            "strengths": [],
-            "issues": [
-                {
-                    "reviewer": "rubric",
-                    "severity": "high",
-                    "issue": "The rubric is perfect, which is suspicious.",
-                }
-            ],
-        },
+        lambda task, _payload: chair_reply if task == "assignment_review" else {"issues": []},
     )
 
     review = assignment_council.run_assignment_council(
@@ -207,15 +216,24 @@ def test_the_chair_cannot_invent_a_finding(monkeypatch: pytest.MonkeyPatch) -> N
     assert review["verdict"] == "pass"
 
 
-def test_deterministic_findings_are_capped_and_merged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rubric = [{"name": f"Criterion {index}", "weight": 10, "levels": {}} for index in range(6)]
-    _wire(monkeypatch, {"verdict": "revise", "summary": "", "strengths": []})
+def test_role_issues_are_capped_and_merged(monkeypatch: pytest.MonkeyPatch) -> None:
+    model_issues = [
+        {"severity": "medium", "issue": f"Model finding {index}", "fix": "Tighten."}
+        for index in range(20)
+    ]
+
+    def reply(task: str, payload: dict[str, Any]) -> Any:
+        if task == "council_review" and payload.get("reviewer") == "rubric":
+            return {"issues": model_issues}
+        if task == "assignment_review":
+            return {"verdict": "revise", "summary": "", "strengths": []}
+        return {"issues": []}
+
+    _wire(monkeypatch, reply)
 
     review = assignment_council.run_assignment_council(
         _document(),
-        rubric,
+        _rubric(),
         ["Design an end-to-end AI solution."],
         _outline(),
     )
@@ -223,6 +241,7 @@ def test_deterministic_findings_are_capped_and_merged(
     assert len(review["issues"]) == assignment_council.MAX_COUNCIL_ISSUES == 12
     assert review["score"] < 70
     assert review["verdict"] == "revise"
+    assert all(item["reviewer"] == "rubric" for item in review["issues"])
 
 
 def test_a_failed_chair_degrades_to_the_deterministic_checks(

@@ -353,6 +353,9 @@ async def test_create_fills_eleven_sections_and_a_rubric_that_totals_100(
     assert [name for name, _payload in patches.calls] == [
         "assignment_text",
         "rubric",
+        "council_review",
+        "council_review",
+        "council_review",
         "assignment_review",
     ]
     assert result["review"]["messages"][-1]["text"].startswith("The council verdict is")
@@ -1197,7 +1200,14 @@ async def test_create_does_not_retry_when_the_document_is_complete(
         db,
     )
 
-    assert calls == ["assignment_text", "rubric", "assignment_review"]
+    assert calls == [
+        "assignment_text",
+        "rubric",
+        "council_review",
+        "council_review",
+        "council_review",
+        "assignment_review",
+    ]
     assert result["document"]["overview"] == ["Design an AI solution architecture."]
 
 
@@ -1233,6 +1243,8 @@ async def test_refine_retries_once_when_the_stored_brief_is_hollow(
     def fake_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         if task == "assignment_review":
             return {"verdict": "pass", "summary": "No findings.", "strengths": []}
+        if task == "council_review":
+            return {"issues": []}
         calls.append(str(payload.get("prompt") or ""))
         return responses[len(calls) - 1]
 

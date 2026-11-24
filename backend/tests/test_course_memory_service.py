@@ -34,6 +34,9 @@ class _Result:
     def first(self) -> Any | None:
         return self._rows[0] if self._rows else None
 
+    def scalar_one_or_none(self) -> Any | None:
+        return self.first()
+
 
 class _Nested:
     """Minimal savepoint stand-in: tracks depth and propagates errors."""

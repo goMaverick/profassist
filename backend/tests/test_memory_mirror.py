@@ -131,6 +131,8 @@ def test_no_llm_key_keeps_mem0_off_even_when_enabled(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("MEM0_ENABLED", "true")
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     memory._mem0_add(str(uuid.uuid4()), str(uuid.uuid4()), "prefers short feedback")
     assert store.configured == []
@@ -316,6 +318,8 @@ def test_a_cloud_embedder_without_a_key_is_refused(
     monkeypatch.setenv("MEM0_EMBEDDER_PROVIDER", "openai")
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     with caplog.at_level(logging.INFO, logger="app.profassist.memory"):
         assert memory._mem0_config() is None

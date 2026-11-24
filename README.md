@@ -107,7 +107,7 @@ Four councils are configured per university. Defaults live in code; a saved rost
 
 **Edit them at `/admin/councils`.** The page is restricted to app admins and is scoped to the active organization. For each role the admin can enable or disable it, change its label, choose its provider/model, edit its persona prompt, and reorder it. Material and Assignment also accept custom LLM reviewer roles. **Reset** deletes the organization's rows so the code default speaks again. The page changes the actual graph, not a mock.
 
-**Langfuse boundary: prompts yes, roster no.** Prompt text is resolved in this order: Langfuse `production` label → database copy → code default. The council *roster* (which roles run, in what order, enabled/disabled, model, persona) is Postgres only; editing a Langfuse prompt cannot add or remove a council member. `/admin/ai` still controls the provider, model, tools, chat on/off, and shows which prompt copy is live; prompt text there is read-only. Traces are opened after the privacy gate, and the acting tenant/professor are stored as short hashes rather than emails.
+**Langfuse boundary: prompts yes, roster no.** Prompt text is resolved in this order: Langfuse `production` label → database copy → code default. For global agents, `/admin/ai` edits the prompt: each save writes a database version and, when Langfuse is enabled, publishes a new `production` version there. The database copy is the fallback when Langfuse is off or unreachable. The council *roster* (which roles run, in what order, enabled/disabled, model, persona) is Postgres only; editing a Langfuse prompt cannot add or remove a council member. `/admin/ai` also controls the provider, model, tools, chat on/off, and shows which prompt copy is live. Traces are opened after the privacy gate, and the acting tenant/professor are stored as short hashes rather than emails.
 
 Prompt URLs follow `http://localhost:3100/project/profassist-project/prompts/<name>`; trace URLs follow `.../traces/<id>`.
 
@@ -193,12 +193,21 @@ See [docs/memory.md](docs/memory.md) for the Mem0 embedder and telemetry setting
 
 - Docker Desktop (or Docker Engine with Compose v2).
 - Several GB of free memory for the full stack (Postgres, Redis, Qdrant, MinIO, Prefect, Langfuse, ClickHouse, MLflow, backend, frontend).
-- Optional: an LLM key if you want live drafting. Without one, drafting fails with an explicit `503`; nothing is fabricated.
+- A Google AI Studio key (`GEMINI_API_KEY`) for live drafting, the AI agent, and Mem0. Without one, drafting fails with an explicit `503`; nothing is fabricated.
 
-### Start
+### Start (one command)
 
 ```bash
-docker compose up --build
+cp .env.example .env
+# open .env and set GEMINI_API_KEY=...   (LLM_MODEL is optional)
+
+make demo
+```
+
+`make demo` builds the app, prefect-runner, and frontend images, starts the stack, and waits for `/api/v1/health`. Without `make`, use the platform script: `powershell -ExecutionPolicy Bypass -File scripts/demo.ps1` on Windows, or `sh scripts/demo.sh` on Linux/macOS/WSL. The plain Docker path is equivalent:
+
+```bash
+docker compose up -d --build
 ```
 
 The first start downloads images and installs Python and Node packages, so it takes a while. The backend entrypoint runs `alembic upgrade head` before starting Uvicorn. Confirm the migration state:
@@ -225,18 +234,14 @@ docker compose exec app alembic current
 | PostgreSQL | `localhost:5432` | Database `profassist` |
 | Redis | `localhost:6379` | Cache and rate limits |
 
-### Configure a model
+### Keys, models, and what is on
 
-Docker Compose reads the root `.env` for variable substitution and passes `LLM_API_KEY` / `OPENAI_API_KEY` into the app. Create a root `.env` (gitignored) or export the key in your shell:
+The only required value is **`GEMINI_API_KEY`** in the root `.env`. One Gemini key serves drafting, the AI agent, and Mem0; `LLM_API_KEY` / `OPENAI_API_KEY` are optional overrides, and `LLM_MODEL` / `AI_MODEL` default to `gemini/gemini-3.5-flash-lite`. A prefixed model (`gemini/...`, `openai/...`) selects the provider whose key is spent. Other supported providers include Anthropic, xAI, Mistral, Azure OpenAI, AWS Bedrock, Ollama, and any OpenAI-compatible base URL.
 
-```bash
-
-# root .env - never commit this file
-LLM_API_KEY=your-key-here
-LLM_MODEL=gemini/gemini-3.5-flash-lite
-```
-
-A bare `LLM_MODEL` chooses a model but not a provider; a prefixed value such as `gemini/...` or `openai/...` selects the key to spend. Supported providers include OpenAI, Anthropic, Gemini, xAI, Mistral, Azure OpenAI, AWS Bedrock, Ollama, and any OpenAI-compatible base URL. `/admin/ai` lists each provider and whether its environment key is set; it never shows the key. Each model-backed council role can use its own provider/model from `/admin/councils`.
+- **The key is never committed.** `.env` is gitignored and the tracked `.env.example` holds placeholders only. In a shared repo, each person copies `.env.example` to `.env` and adds their own key once; nothing else needs to change.
+- **Mem0 is on.** Compose sets `MEM0_ENABLED=true` with the local `fastembed` embedder (`BAAI/bge-small-en-v1.5`, 384 dims) and its history at `/app/data/mem0.db` on the `mem0_data` volume. Postgres remains the source of truth; if Mem0 is unavailable, the Postgres copy still answers.
+- **Langfuse and MLflow are on** in the bundled stack (URLs below). `/admin/ai` lists each provider and whether its environment key is set; it never shows the key. Each model-backed council role can use its own provider/model from `/admin/councils`.
+- **The Moodle connection is preconfigured** against the bundled mock (`MOODLE_BASE_URL=http://moodle-mock:8090`, `demo-token`, private hosts allowed). Open `/admin/integrations/moodle` and use **Test** and **Sync now**; the mock is seeded with one course, 12 students, 2 assessments, and 6 submissions.
 
 ### Create a login
 
@@ -245,7 +250,7 @@ A bare `LLM_MODEL` chooses a model but not a provider; a prefixed value such as 
 Create your own account:
 
 1. Open <http://localhost:3000/register> and register with any email and a password of at least 8 characters.
-2. The **first user to register** is automatically promoted to app-admin and gets a Personal organization. That is the account to use for `/admin/councils`, `/admin/models`, and `/admin/integrations/moodle`.
+2. **The first user to register** is automatically promoted to app-admin and gets a Personal organization, so register before sharing the URL. That is the account to use for `/admin/councils`, `/admin/models`, and `/admin/integrations/moodle`.
 3. To promote a later account, run:
 
 ```bash
@@ -323,6 +328,7 @@ docker-compose.yml          # Full local stack
 - [ML](docs/ml.md) - dropout and passage-reuse contracts.
 - [Moodle connector](docs/moodle-connector.md) - token, SSRF, scope, activity logs.
 - [Memory](docs/memory.md) - Postgres, Qdrant, Mem0.
+- [Prompts](docs/prompts.md) - global prompt versioning, fallback order, council prompts.
 - [Permissions](docs/permissions.md), [Security](SECURITY.md), [Configuration](docs/configuration.md), [Commands](docs/commands.md).
 - [Status vs design](docs/STATUS_VS_DESIGN.md) - what is done, partial, stubbed, or not done against the architecture report.
 

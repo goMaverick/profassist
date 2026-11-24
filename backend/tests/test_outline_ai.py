@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import app.profassist.outline as outline
+from app.profassist.council_config import default_roles
 from app.profassist.errors import ProfassistError
 from app.profassist.outline_data import (
     GENAI_POINTS,
@@ -94,8 +95,12 @@ def _wire(monkeypatch, row, *, sources=None, chunks=None, dossier=None, preferen
     async def fake_preferences(*args, **kwargs):
         return list(preferences or [])
 
+    async def fake_roles(*args, **kwargs):
+        return default_roles("outline")
+
     monkeypatch.setattr(outline, "dossier_ai_context", fake_dossier)
     monkeypatch.setattr(outline, "artifact_preferences", fake_preferences)
+    monkeypatch.setattr(outline, "load_council_roles", fake_roles)
     return course
 
 
@@ -246,6 +251,75 @@ def test_generate_body_accepts_gemini_provider_shape() -> None:
     assert body["clos"][1]["plos"] == ["PLO3"]
     assert "plos" not in missing
     assert "plos" in changed
+
+
+def test_generate_outline_uses_the_creator_and_returns_the_council_review(
+    monkeypatch,
+) -> None:
+    import app.profassist.outline_review as outline_review
+
+    row = _row()
+    _wire(monkeypatch, row)
+    roles = default_roles("outline")
+    creator = next(role for role in roles if role["role_key"] == "creator")
+    creator["persona_prompt"] = "Creator voice: draft from the notes."
+    creator["model"] = "creator-model"
+
+    async def fake_roles(*args, **kwargs):
+        return roles
+
+    monkeypatch.setattr(outline, "load_council_roles", fake_roles)
+    captured: dict[str, dict[str, Any]] = {}
+
+    def fake_complete(task: str, payload: dict[str, Any]) -> dict[str, Any]:
+        captured[task] = payload
+        return {"reply": "Drafted.", "basics": {"name": "Cloud Systems", "code": "CS 501"}}
+
+    monkeypatch.setattr("app.profassist.llm.complete", fake_complete)
+    review = {"id": "review-1", "findings": []}
+    called: dict[str, Any] = {}
+
+    async def fake_review(db, org_id, user_id, outline_id, *, mode, reviewer):
+        called.update(mode=mode, reviewer=reviewer, outline_id=outline_id)
+        return review
+
+    monkeypatch.setattr(outline_review, "run_review", fake_review)
+
+    result = asyncio.run(
+        outline.generate_outline(
+            _DB(row), row.organization_id, row.owner_user_id, row.id, "Draft it."
+        )
+    )
+
+    assert captured["outline_generate"]["prompt_override"] == "Creator voice: draft from the notes."
+    assert captured["outline_generate"]["model"] == "creator-model"
+    assert result["review"] == review
+    assert called == {"mode": "council", "reviewer": "curriculum", "outline_id": row.id}
+
+
+def test_a_failed_council_review_does_not_fail_generation(monkeypatch) -> None:
+    import app.profassist.outline_review as outline_review
+
+    row = _row()
+    _wire(monkeypatch, row)
+    _fake_model(
+        monkeypatch,
+        {"reply": "Drafted.", "basics": {"name": "Cloud Systems", "code": "CS 501"}},
+    )
+
+    async def failing_review(*args, **kwargs):
+        raise RuntimeError("council unavailable")
+
+    monkeypatch.setattr(outline_review, "run_review", failing_review)
+
+    result = asyncio.run(
+        outline.generate_outline(
+            _DB(row), row.organization_id, row.owner_user_id, row.id, "Draft it."
+        )
+    )
+
+    assert result["review"] is None
+    assert result["outline"]["body"]["basics"]["code"] == "CS 501"
 
 
 def test_generate_outline_requires_a_configured_model(monkeypatch) -> None:

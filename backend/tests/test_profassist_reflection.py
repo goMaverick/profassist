@@ -103,7 +103,8 @@ async def test_maybe_propose_waits_for_five_memories_and_dedupes(
     assert "Use shorter feedback with one evidence quote." in profile.about_md
     run.assert_called_once()
     _args, kwargs = run.call_args
-    assert kwargs["professor"] == identity
+    assert kwargs["professor"]["name"] == identity["name"]
+    assert kwargs["professor"]["voice"] == service.DEFAULT_SOUL
 
     for index in range(5):
         db.add(

@@ -2277,10 +2277,17 @@ async def maybe_propose_reflection(
         if len(fresh) < REFLECT_EVERY:
             return None
         identity = await professor_identity(db, org_id, user_id)
+        profile = await _style_row(db, org_id, user_id, create=False)
+        voice = (profile.soul_md if profile else "") or DEFAULT_SOUL
         seed_lines = [f"New lessons since the last reflection ({source or 'edits'}):"]
         seed_lines.extend(f"- {row.text}" for row in fresh[-8:])
         seed_lines.extend(identity_lines(identity))
-        proposal = agents.run_reflection("\n".join(seed_lines), professor=identity) or ""
+        if voice.strip():
+            seed_lines.append("Current voice:\n" + voice.strip()[:900])
+        proposal = (
+            agents.run_reflection("\n".join(seed_lines), professor={**identity, "voice": voice})
+            or ""
+        )
         if any(same_lesson(row.proposal, proposal) for row in reflections):
             return None
         return await _apply_reflection(db, org_id, user_id, proposal, identity=identity)
@@ -2379,6 +2386,17 @@ async def save_style(
     before = profile.soul_md or ""
     profile.soul_md = soul_md
     await db.flush()
+    try:
+        await remember(
+            db,
+            org_id,
+            user_id,
+            "Voice: " + (soul_md or "")[:2000],
+            kind="soul",
+            source="soul.md",
+        )
+    except Exception:
+        logger.info("Voice not remembered; the style save stands")
     await reflect_on_change(db, org_id, user_id, "style", before, soul_md, "soul.md")
     return await get_style(db, org_id, user_id)
 
@@ -2439,6 +2457,9 @@ async def save_template(
 async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any]:
     await load_runtime(db, org_id, user_id)
     identity = await professor_identity(db, org_id, user_id)
+    profile = await _style_row(db, org_id, user_id, create=False)
+    voice = (profile.soul_md if profile else "") or DEFAULT_SOUL
+    professor = {**identity, "voice": voice}
     result = await db.execute(
         select(GradeDraft).where(
             GradeDraft.organization_id == org_id, GradeDraft.owner_user_id == user_id
@@ -2463,8 +2484,9 @@ async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
     seed_lines = [f"Professor: {who}"]
     if identity["courses"]:
         seed_lines.append("Teaches: " + ", ".join(identity["courses"]))
-    profile = await _style_row(db, org_id, user_id, create=False)
-    current = (profile.about_md if profile else "") or (profile.soul_md if profile else "")
+    if voice.strip():
+        seed_lines.append("Current voice:\n" + voice.strip()[:900])
+    current = (profile.about_md if profile else "") or voice
     if current.strip():
         seed_lines.append("Current portrait:\n" + current.strip()[:900])
     if changes:
@@ -2481,7 +2503,7 @@ async def run_reflection(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
             "a student, a credential, or a title. Return only the portrait."
         )
     seed = "\n".join(seed_lines)
-    text = agents.run_reflection(seed, professor=identity) or ""
+    text = agents.run_reflection(seed, professor=professor) or ""
     row = await _apply_reflection(db, org_id, user_id, text, identity=identity)
     return {"id": str(row.id), "proposal": row.proposal, "status": row.status}
 

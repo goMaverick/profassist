@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.config import settings
-from app.db.models.organization import OrganizationMember
+from app.db.models.organization import Organization, OrganizationMember
 from app.db.models.user import User
 from app.profassist import agents, briefing, service
 from app.profassist.errors import ProfassistError
@@ -67,6 +67,22 @@ async def _workspace():
         )
     )
     db.add(OrganizationMember(organization_id=org_id, user_id=user_id, role="owner"))
+    db.add(
+        Organization(
+            id=org_id,
+            name="Assurance University",
+            slug=f"org-{org_id.hex[:12]}",
+            created_by_user_id=user_id,
+        )
+    )
+    db.add(
+        Organization(
+            id=other_org,
+            name="Other University",
+            slug=f"org-{other_org.hex[:12]}",
+            created_by_user_id=user_id,
+        )
+    )
     course = Course(organization_id=org_id, code="AAA101", title="Assurance Studio", term="2026")
     second = Course(organization_id=org_id, code="AAA102", title="Assurance Lab", term="2026")
     third = Course(organization_id=org_id, code="AAA103", title="Assurance Practice", term="2026")
@@ -290,6 +306,7 @@ async def test_home_keeps_existing_keys_and_adds_professor_and_memory() -> None:
     assert payload["professor"] == {
         "name": "Dr Pat",
         "role": "owner",
+        "organization": "Assurance University",
         "courses": ["AAA101"],
     }
     assert payload["memory"] == {
