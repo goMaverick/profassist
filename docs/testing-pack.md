@@ -39,7 +39,7 @@ cd backend
 uv run --frozen pytest -q
 ```
 
-**1071 passed, 4 skipped, 125 warnings in 100.62s.**
+**1112 passed, 4 skipped, 125 warnings in 72.98s.**
 
 The 4 skips are the destructive Alembic migration tests (`tests/test_migrations.py`); see section 8. The suite uses a mocked async session, so it needs no Postgres, Redis, Qdrant, MinIO, or model key.
 
@@ -54,7 +54,7 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 ```
 
 - `type-check`: exit 0.
-- `vitest`: **16 files passed, 107 tests passed** in 7.18s.
+- `vitest`: **16 files passed, 117 tests passed** in 32.06s.
 - `eslint`: exit 0, **0 errors, 2 warnings**: unused `showPassage` and `SubmissionCard` in `frontend/src/app/[locale]/(dashboard)/integrity/page.tsx`.
 - `prettier --check`: all matched files pass.
 
@@ -62,8 +62,8 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 
 | Suite | Command | Passed | Failed | Skipped | Notes |
 |---|---|---:|---:|---:|---|
-| Backend | `uv run --frozen pytest -q` | 1071 | 0 | 4 | 100.62s, 125 warnings |
-| Frontend | `npx vitest run` | 107 | 0 | 0 | 16 files, 7.18s |
+| Backend | `uv run --frozen pytest -q` | 1112 | 0 | 4 | 72.98s, 125 warnings |
+| Frontend | `npx vitest run` | 117 | 0 | 0 | 16 files, 32.06s |
 | Frontend type check | `npm run type-check` | - | 0 | - | exit 0 |
 | Frontend lint | `npx eslint ...` | - | 0 | - | 2 warnings, no errors |
 | Frontend format | `npx prettier --check ...` | - | 0 | - | all matched files pass |
@@ -72,13 +72,13 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 
 | Area | What is covered | Primary tests | E2E evidence |
 |---|---|---|---|
-| **Backend platform** | Auth, users, orgs, RAG, files, repositories, exceptions, OpenAPI, health, migrations guards | 67 `test_*.py` modules under `backend/tests/`, mocked async DB | `pytest` 1071 passed |
-| **Frontend shell** | Auth store/hooks, API client, cookies, layout, command palette, UI primitives, council page, assignment pages, studio collab, login form, header utilities | 16 `*.test.tsx` / `*.test.ts` files | `vitest` 16 files / 107 tests |
+| **Backend platform** | Auth, users, orgs, RAG, files, repositories, exceptions, OpenAPI, health, migrations guards | 70 `test_*.py` modules under `backend/tests/`, mocked async DB | `pytest` 1112 passed |
+| **Frontend shell** | Auth store/hooks, API client, cookies, layout, command palette, UI primitives, council page, assignment pages, studio collab, login form, header utilities | 16 `*.test.tsx` / `*.test.ts` files | `vitest` 16 files / 117 tests |
 | **Login and header navigation** | Two-column login form: controls, password visibility, submit, error banner, loading state (5 tests); header renders no top-level Home/Grading links and keeps brand/search/theme/menu (4 tests); studio collab roster copy (13 tests) | `components/auth/login-form.test.tsx`, `components/layout/header.test.tsx`, `components/profassist/studio-collab.test.tsx` | `vitest` 5 + 4 + 13 tests |
 | **Material council** | Default roster, validation, enable/disable, chair-last ordering, persistence, reset, slide collaboration, slide review | `test_council_settings.py`, `test_slide_collab.py`, `test_slide_review.py`, `test_profassist.py`, `admin/councils/page.test.tsx` | Live single-week SSE with Design disabled |
-| **Assignment council** | Deterministic checks, chair summary, rubric role, roster filtering, brief/rubric documents | `test_assignment_council.py`, `test_assignment_ai.py`, `test_assignment_doc.py`, assignment page tests | Rubric disabled -> Alignment, Brief, Chair only |
+| **Assignment council** | LLM reviewer findings, chair summary, rubric role, roster filtering, brief/rubric documents | `test_assignment_council.py`, `test_assignment_ai.py`, `test_assignment_doc.py`, assignment page tests | Rubric disabled -> Alignment, Brief, Chair only |
 | **Grading council** | Level spread, debate threshold, quote verification, contradiction handling, no-reliable-evidence path, judge | `test_grading_context.py`, `test_agents.py`, `test_profassist.py` | Strict disabled -> Evidence and Supportive votes only |
-| **Outline review** | Deterministic findings, severity, section/object ids, one-click fixes, reviewer roster, approval | `test_outline_ai.py`, `test_outline_doc.py`, `test_outline_context.py`, `test_course_dossier_migration.py` | Student disabled -> Balance reviewer only |
+| **Outline review** | LLM reviewer findings, severity, section/object ids, one-click fixes, reviewer roster, approval | `test_outline_ai.py`, `test_outline_doc.py`, `test_outline_context.py`, `test_course_dossier_migration.py` | Student disabled -> Balance reviewer only |
 | **Moodle connector** | Mock catalogue, web-service calls, token encryption/redaction, SSRF, course scope, sync runs, activity features, schedule | `test_mock_moodle.py`, `test_moodle_connection.py`, `test_moodle_connection_migration.py`, `test_ssrf.py` | Test 200 + 5/5 checklist + 19 capabilities; sync 1/12/2/6/12; UI per-run 0 |
 | **Dropout ML** | 14-feature contract, missing-feature data gap, threshold, bands, synthetic flag, no automatic actions, model cards | `test_ml_gateway.py`, `test_ml_admin.py` | 12 students, trained/synthetic, 5 review / 7 routine |
 | **Integrity** | DB-backed flags, pair detail, matrix, confirm/dismiss, document text, no verdict | `test_integrity_board_db.py`, `test_profassist_security.py`, `test_profassist.py` | 6 groups, 3 pairs, 1 concern, real text, all flags open |
@@ -93,8 +93,8 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 | Area | Result | Detail |
 |---|---|---|
 | Stack health | **Pass** | API, frontend, MLflow, mock Moodle, Prefect all 200; migrations at head |
-| Backend suite | **Pass** | 1071 passed, 4 skipped |
-| Frontend suite | **Pass** | 16 files, 107 tests |
+| Backend suite | **Pass** | 1112 passed, 4 skipped |
+| Frontend suite | **Pass** | 16 files, 117 tests |
 | Council settings | **Pass** | Four councils, ordered positions, exactly one chair each; saved rosters obeyed |
 | Material council | **Pass** | Design disabled -> silent; Evidence spoke before Curriculum; roster restored |
 | Assignment council | **Pass** | Rubric disabled -> Alignment, Brief, Chair only; 5 model-busy 503s then success |
@@ -113,6 +113,8 @@ npx prettier --check "src/app/[locale]/(dashboard)/admin/councils/page.tsx" "src
 ## 5. Council E2E detail
 
 All calls used `Authorization: Bearer <demo token>` and `X-Organization-Id: <UOWD org>`.
+
+All four councils run model reviewers only: every default role is `creator`, `llm`, or `chair`, and the settings page states "Every reviewer is an LLM agent with its own prompt and model". A row saved by an older build can still be `deterministic`; the code keeps a deterministic fallback for that row, but no default roster uses one.
 
 `GET /api/v1/profassist/admin/councils` returned four councils, ordered positions, and exactly one chair each:
 
@@ -181,7 +183,7 @@ The eleven images below are copied from `frontend/screenshots-final/` into `docs
 | [admin-models-final.png](images/admin-models-final.png) | 1440x1032 | 168,892 | Dropout ready/synthetic; plagiarism not installed; MLflow reachable |
 | [style-reflection.png](images/style-reflection.png) | 1440x1668 | 207,791 | Auto-applied reflection history; no Approve button |
 
-**Missing selected screenshots:** none. `login.png` and `dashboard.png` are now copied into `docs/images/`. The remaining files in `frontend/screenshots-final/` (outline, rubric, assignments, integrity-groups-final, assignment-council-page) were deliberately not copied.
+**Missing selected screenshots:** none. `login.png` and `dashboard.png` are now copied into `docs/images/`. The README gallery also links `docs/images/councils-outline.png` (the Outline tab of the same Councils screen); it resolves locally but is not part of the eleven images captured for this run. The remaining files in `frontend/screenshots-final/` (outline, rubric, assignments, integrity-groups-final, assignment-council-page) were deliberately not copied.
 
 ## 7. E2E failures: root cause and status
 
@@ -190,7 +192,7 @@ All four findings named in the E2E report are fixed in the current tree: the en 
 | # | Finding | Root cause (evidence) | Status |
 |---|---|---|---|
 | 1 | **Outline step save returned 500 on an en dash range.** `PUT /profassist/outlines/{id}/step` with `step=grades` and `85 – 84%` failed with `json.decoder.JSONDecodeError: Invalid \uXXXX escape` at `backend/app/profassist/outline.py`. | `save_step` did `json.loads(strip_contacts(json.dumps(payload)))`. The phone regex rewrote digits inside the JSON escape `\u2013`, corrupting it into an invalid escape. Reproduced standalone: `strip_contacts(json.dumps(demo_outline()["grades"]))` corrupts `\u2013`; `ensure_ascii=False` round-trips correctly. | **Fixed.** `save_step` now scrubs string leaves with `strip_contacts_in_payload(payload)` before serialization (`outline.py:181-185`). Regression tests: `test_save_step_keeps_an_en_dash_range_in_the_grades`, `test_save_step_route_saves_an_en_dash_grades_step`, plus `test_save_step_still_scrubs_a_contact_in_a_string_leaf` and `test_save_step_strict_gate_still_quarantines_student_pii` in `backend/tests/test_outline_doc.py`. |
-| 2 | **Material collaboration copy counted the full roster even after a role was disabled.** The header said `5 agents` and named curriculum, evidence, and design after Design was disabled. | `frontend/src/components/profassist/studio-collab.tsx:498-499` now derives the badge from `state.roles` (`state.roles.length + 1`, so `5 agents` with every seat enabled and `4 agents` when one is disabled); `:521-522` says the `enabled reviewers` each check a different angle instead of naming fixed seats. | **Fixed.** Tests in `frontend/src/components/profassist/studio-collab.test.tsx` (13 tests) assert `5 agents` for the full roster, `4 agents` with Design disabled, the generic `enabled reviewers` copy, and no literal `5 agents` when the stream names only four seats. Full frontend suite: 107 tests in 16 files. |
+| 2 | **Material collaboration copy counted the full roster even after a role was disabled.** The header said `5 agents` and named curriculum, evidence, and design after Design was disabled. | `frontend/src/components/profassist/studio-collab.tsx:498-499` now derives the badge from `state.roles` (`state.roles.length + 1`, so `5 agents` with every seat enabled and `4 agents` when one is disabled); `:521-522` says the `enabled reviewers` each check a different angle instead of naming fixed seats. | **Fixed.** Tests in `frontend/src/components/profassist/studio-collab.test.tsx` (13 tests) assert `5 agents` for the full roster, `4 agents` with Design disabled, the generic `enabled reviewers` copy, and no literal `5 agents` when the stream names only four seats. Full frontend suite: 117 tests in 16 files. |
 | 3 | **Moodle "last run" shows 0 courses / 0 students / 0 submissions while DB totals are correct.** | `status.counts` and the Moodle screen report rows imported **this run**. An idempotent re-sync imports nothing new, so it reports 0. The database and API totals remain 1 course / 12 students / 2 assessments / 6 submissions / 12 activity rows. | **Fixed (UX).** The page now labels the two rows **Last run** and **Currently synced** (`frontend/src/app/[locale]/(dashboard)/admin/integrations/moodle/page.tsx:521-529`), so per-run zeros are distinguishable from stored totals. Not data loss. |
 | 4 | **MLflow reachability flapped once.** The first `/profassist/admin/models` read after restart returned `reachable: false`, then `true` on retry and in the screenshot. | Ten-second reachability cache racing the MLflow startup; no lasting failure. | **Fixed.** Only a successful reachability result is cached; a failure is never cached, so the next read recovers (`backend/app/profassist/tracking.py:23-25,111-121`). The screenshot and later reads show `reachable: true`. |
 | 5 | **Auth rate limiting during repeated browser logins.** | Default auth limit is 5 requests per 15 minutes per IP; the run hit `Rate limit exceeded for category 'auth'` (665s). Screenshots used the already-issued JWT cookie. | **Expected protection.** Not an application failure. |
