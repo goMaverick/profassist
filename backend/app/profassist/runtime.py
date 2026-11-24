@@ -129,11 +129,14 @@ DEFAULT_TOOLS: dict[str, list[str]] = {
     ],
 }
 
+SOUL_LIMIT = 1500
+
 _about: ContextVar[str | None] = ContextVar("pa_about", default=None)
 _professor: ContextVar[dict[str, Any] | None] = ContextVar("pa_professor", default=None)
 _prompts: ContextVar[dict[str, str] | None] = ContextVar("pa_prompts", default=None)
 _tools: ContextVar[dict[str, bool] | None] = ContextVar("pa_tools", default=None)
 _model: ContextVar[dict[str, Any] | None] = ContextVar("pa_model", default=None)
+_soul: ContextVar[str | None] = ContextVar("pa_soul", default=None)
 
 
 def bind_runtime(prompts: dict[str, str], tools: dict[str, bool], model: dict[str, Any]) -> None:
@@ -149,6 +152,31 @@ def set_about(text: str) -> None:
 def set_professor(identity: dict[str, Any] | None) -> None:
     """The signed-in professor's name, title, university, and courses."""
     _professor.set(dict(identity or {}))
+
+
+def set_soul(text: str) -> None:
+    """The professor's saved voice. It rides along on every model call."""
+    _soul.set(text or "")
+
+
+def soul_block() -> str:
+    """The saved voice, after the privacy gate. Empty when unusable.
+
+    The voice is the professor's own writing, but it can still quote a student,
+    so it takes the same scrub and quarantine gate as the portrait.
+    """
+    from app.profassist.pii import scrub
+
+    raw = (_soul.get() or "").strip()
+    if not raw:
+        return ""
+    cleaned = scrub(raw)
+    if cleaned.quarantined:
+        return ""
+    text = cleaned.text.strip()
+    if not text:
+        return ""
+    return "## How this professor writes\n" + text[:SOUL_LIMIT]
 
 
 def professor_name() -> str:

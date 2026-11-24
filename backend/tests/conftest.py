@@ -40,7 +40,13 @@ def restore_profassist_runtime() -> Iterator[None]:
     """
     from app.profassist import runtime
 
-    variables = (runtime._prompts, runtime._tools, runtime._model, runtime._professor)
+    variables = (
+        runtime._prompts,
+        runtime._tools,
+        runtime._model,
+        runtime._professor,
+        runtime._soul,
+    )
     saved = tuple(variable.get() for variable in variables)
     yield
     for variable, value in zip(variables, saved):

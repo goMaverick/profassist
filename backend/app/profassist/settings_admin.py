@@ -34,6 +34,7 @@ from app.profassist.runtime import (
     catalog,
     set_about,
     set_professor,
+    set_soul,
 )
 
 
@@ -147,6 +148,7 @@ async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID |
     if user_id is None:
         set_about("")
         set_professor({})
+        set_soul("")
         return
     profile = (
         await db.execute(
@@ -157,6 +159,9 @@ async def _prime_about(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID |
     ).scalar_one_or_none()
     identity = await professor_identity(db, org_id, user_id)
     set_professor(identity)
+    from app.profassist.service import DEFAULT_SOUL
+
+    set_soul(profile.soul_md if profile and profile.soul_md else DEFAULT_SOUL)
     memories = await list_memories(db, org_id, user_id)
     saved = profile.about_md if profile else ""
     set_about(

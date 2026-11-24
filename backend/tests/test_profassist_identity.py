@@ -114,7 +114,9 @@ async def test_service_run_reflection_passes_the_professor(
     result = await service.run_reflection(db, org_id, user_id)
 
     args, kwargs = run.call_args
-    assert kwargs["professor"] == identity
+    assert kwargs["professor"]["name"] == identity["name"]
+    assert kwargs["professor"]["courses"] == identity["courses"]
+    assert kwargs["professor"]["voice"] == service.DEFAULT_SOUL
     assert "Professor: Jane Doe \u2014 owner" in args[0]
     assert "Teaches: AAS910" in args[0]
     assert "No grade-level changes" in args[0]
