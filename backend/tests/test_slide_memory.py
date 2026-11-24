@@ -546,3 +546,21 @@ async def test_artifact_preferences_accepts_an_explicit_kind_set(
     )
 
     assert preferences == ["Prefers a more concise outline."]
+
+
+def test_a_twenty_character_preference_falls_back_to_the_40_character_floor() -> None:
+    quote = "a" * 47
+    slides = [
+        {
+            "title": "Floor",
+            "bullets": [{"text": quote, "citation": {"filename": "notes.pdf", "quote": quote}}],
+        }
+    ]
+
+    styled = slide_studio.apply_style_preferences(
+        slides, ["Prefers shorter bullets (about 20 characters)"]
+    )
+
+    assert slide_studio._shorter_limit(["shorter bullets (about 20 characters)"]) == 40
+    assert styled[0]["bullets"][0]["text"] == "a" * 40
+    assert styled[0]["bullets"][0]["citation"]["quote"] == quote

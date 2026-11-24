@@ -335,6 +335,55 @@ def _strictest(issues: list[dict[str, Any]], limit: int = 3) -> list[str]:
     ][:limit]
 
 
+_CONTRADICTING_PHRASES = (
+    "meets all requirements",
+    "meet all requirements",
+    "all requirements are met",
+    "no issues",
+    "nothing to change",
+    "fully compliant",
+    "ready to submit",
+    "clean bill",
+)
+_REVISION_MARKERS = (
+    "revise",
+    "revision",
+    "issue",
+    "fix",
+    "address",
+    "missing",
+    "gap",
+    "incomplete",
+    "insufficient",
+    "needs",
+    "should",
+    "lacks",
+    "clarify",
+    "improve",
+    "inconsistent",
+    "unclear",
+)
+
+
+def _acknowledges_revision(summary: str) -> bool:
+    """Whether a model summary fits a revise verdict instead of contradicting it."""
+    text = " ".join(_text(summary).lower().split())
+    if not text:
+        return False
+    if any(phrase in text for phrase in _CONTRADICTING_PHRASES):
+        return False
+    return any(marker in text for marker in _REVISION_MARKERS)
+
+
+def _deterministic_summary(issues: list[dict[str, Any]]) -> str:
+    """A summary derived only from the strictest findings, never the model prose."""
+    strictest = _strictest(issues)
+    if not strictest:
+        return ""
+    lead = f"The council found {len(issues)} issue(s)."
+    return f"{lead} The strictest: {'; '.join(strictest)}."
+
+
 def _chair_text(verdict: str, score: int, issues: list[dict[str, Any]], summary: str = "") -> str:
     message = f"The council verdict is {verdict} with a score of {score}."
     if summary:
@@ -476,7 +525,14 @@ def _merge(state: AssignmentCouncilState) -> AssignmentCouncilState:
     chair_verdict = _text(drafted.get("verdict")).lower()
     if verdict == "pass" and chair_verdict == "revise" and issues:
         verdict = "revise"
-    summary = " ".join(_text(drafted.get("summary")).split())
+    model_summary = " ".join(_text(drafted.get("summary")).split())
+    if issues and not _acknowledges_revision(model_summary):
+        # A positive model summary beside real findings is a contradiction.
+        summary = _deterministic_summary(issues)
+        chair_summary = ""
+    else:
+        summary = model_summary
+        chair_summary = model_summary
     strengths = [
         _text(item)
         for item in drafted.get("strengths") or []
@@ -488,7 +544,7 @@ def _merge(state: AssignmentCouncilState) -> AssignmentCouncilState:
         "verdict": verdict,
         "summary": summary,
         "strengths": strengths,
-        "messages": build_messages(issues, verdict, score, summary, roles=role_keys),
+        "messages": build_messages(issues, verdict, score, chair_summary, roles=role_keys),
         "roles": role_keys,
     }
 
