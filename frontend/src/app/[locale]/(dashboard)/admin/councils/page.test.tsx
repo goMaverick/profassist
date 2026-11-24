@@ -129,9 +129,18 @@ const VIEW = {
   ],
 };
 
+function inspector() {
+  return screen.getByTestId("role-inspector");
+}
+
+async function selectTab(name: string) {
+  fireEvent.mouseDown(screen.getByRole("tab", { name }));
+}
+
 beforeEach(() => {
   pa.mockReset();
 });
+
 describe("councils admin page", () => {
   it("loads every council and saves a reordered, disabled role payload", async () => {
     pa.mockResolvedValue(VIEW);
@@ -142,8 +151,10 @@ describe("councils admin page", () => {
       expect(screen.getByRole("tab", { name })).toBeInTheDocument();
     }
 
-    fireEvent.click(screen.getByRole("button", { name: "Move Creator down" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Chair enabled" }));
+    fireEvent.click(within(inspector()).getByRole("button", { name: "Move Creator down" }));
+    const rail = screen.getByRole("group", { name: "Material Studio flow" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Chair" }));
+    fireEvent.click(within(inspector()).getByRole("switch", { name: "Chair enabled" }));
     fireEvent.click(screen.getByRole("button", { name: "Save council" }));
 
     await waitFor(() =>
@@ -184,14 +195,20 @@ describe("councils admin page", () => {
     ]);
     for (const node of nodes) expect(node).toHaveAttribute("data-enabled", "true");
 
-    fireEvent.click(screen.getByRole("switch", { name: "Curriculum enabled" }));
+    fireEvent.click(within(rail).getByRole("button", { name: "Curriculum" }));
+    fireEvent.click(within(inspector()).getByRole("switch", { name: "Curriculum enabled" }));
 
     expect(screen.getByTestId("flow-node-curriculum")).toHaveAttribute("data-enabled", "false");
     expect(screen.getByTestId("flow-node-curriculum").className).toContain("line-through");
-    expect(screen.getByText("Deterministic check - prompt not used.")).toBeInTheDocument();
+    expect(within(inspector()).getAllByText("Code check").length).toBeGreaterThan(0);
+    expect(
+      within(inspector()).getByText(/This reviewer runs deterministic backend rules/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Persona prompt for Curriculum")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Model for Curriculum")).not.toBeInTheDocument();
   });
 
-  it("selects a node and highlights its editor card", async () => {
+  it("selects a node and highlights the inspector", async () => {
     pa.mockResolvedValue(VIEW);
     render(<CouncilsAdminPage />);
 
@@ -202,29 +219,36 @@ describe("councils admin page", () => {
     expect(chair).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("role-card-chair")).toHaveAttribute("data-selected", "true");
     expect(screen.getByTestId("flow-node-creator")).toHaveAttribute("aria-pressed", "false");
+    expect(within(inspector()).getByRole("heading", { name: "Chair" })).toBeInTheDocument();
   });
 
-  it("adds an LLM reviewer to the outline council", async () => {
+  it("adds an LLM reviewer to the outline council from the rail", async () => {
     pa.mockResolvedValue(VIEW);
     render(<CouncilsAdminPage />);
 
     await screen.findByRole("heading", { name: "Creator" });
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Outline" }));
+    await selectTab("Outline");
 
     const rail = await screen.findByRole("group", { name: "Outline flow" });
     fireEvent.click(within(rail).getByRole("button", { name: "Add agent" }));
 
     expect(await screen.findByRole("heading", { name: "Reviewer 1" })).toBeInTheDocument();
     expect(screen.getByTestId("flow-node-reviewer_1")).toHaveAttribute("aria-pressed", "true");
+
+    const row = screen.getByTestId("agent-row-reviewer_1");
+    expect(within(row).getByText("Reviewer 1")).toBeInTheDocument();
+    expect(within(row).getByText("reviewer_1")).toBeInTheDocument();
+    expect(within(row).getByText("LLM")).toBeInTheDocument();
+    expect(within(row).getByText("custom")).toBeInTheDocument();
   });
 
   it("saves custom reviewers before the chair in node order", async () => {
     pa.mockResolvedValue(VIEW);
     render(<CouncilsAdminPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add agent" }));
-    const card = await screen.findByTestId("role-card-reviewer_1");
-    fireEvent.change(within(card).getByLabelText("Persona prompt for Reviewer 1"), {
+    await screen.findByRole("heading", { name: "Creator" });
+    fireEvent.click(screen.getByTestId("list-add-agent"));
+    fireEvent.change(await screen.findByLabelText("Persona prompt for Reviewer 1"), {
       target: { value: "Review the material carefully." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save council" }));
@@ -249,17 +273,70 @@ describe("councils admin page", () => {
     expect(payload.roles.map((role: { position: number }) => role.position)).toEqual([0, 1, 2, 3]);
   });
 
+  it("reorders a custom reviewer from the inspector and keeps the chair last", async () => {
+    pa.mockResolvedValue(VIEW);
+    render(<CouncilsAdminPage />);
+
+    await screen.findByRole("heading", { name: "Creator" });
+    fireEvent.click(screen.getByTestId("list-add-agent"));
+    fireEvent.change(await screen.findByLabelText("Persona prompt for Reviewer 1"), {
+      target: { value: "Review the material carefully." },
+    });
+    fireEvent.click(within(inspector()).getByRole("button", { name: "Move Reviewer 1 up" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save council" }));
+
+    await waitFor(() =>
+      expect(pa).toHaveBeenCalledWith(
+        "/admin/councils/material",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+
+    const call = pa.mock.calls.find(
+      ([path, init]) => path === "/admin/councils/material" && init?.method === "PUT",
+    );
+    const payload = JSON.parse((call?.[1] as { body: string }).body);
+    expect(payload.roles.map((role: { role_key: string }) => role.role_key)).toEqual([
+      "creator",
+      "reviewer_1",
+      "curriculum",
+      "chair",
+    ]);
+  });
+
   it("requires a persona prompt for a custom reviewer before saving", async () => {
     pa.mockResolvedValue(VIEW);
     render(<CouncilsAdminPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add agent" }));
+    await screen.findByRole("heading", { name: "Creator" });
+    fireEvent.click(screen.getByTestId("list-add-agent"));
     fireEvent.click(screen.getByRole("button", { name: "Save council" }));
 
     expect(
       await screen.findByText("Reviewer 1 needs a persona prompt before you can save."),
     ).toBeInTheDocument();
     expect(pa).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an unsaved notice and clears it after saving", async () => {
+    pa.mockResolvedValue(VIEW);
+    render(<CouncilsAdminPage />);
+
+    await screen.findByRole("heading", { name: "Creator" });
+    expect(screen.getByTestId("save-state")).toHaveTextContent("All changes saved.");
+
+    fireEvent.change(screen.getByLabelText("Model for Creator"), {
+      target: { value: "openai/gpt-4.1" },
+    });
+
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Unsaved changes.");
+    expect(screen.getByTestId("unsaved-badge")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save council" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("save-state")).toHaveTextContent("All changes saved."),
+    );
   });
 
   it("resets the active council to defaults", async () => {
@@ -283,7 +360,7 @@ describe("councils admin page", () => {
     render(<CouncilsAdminPage />);
 
     await screen.findByRole("heading", { name: "Creator" });
-    fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+    fireEvent.click(screen.getByTestId("list-add-agent"));
 
     expect(await screen.findByRole("heading", { name: "Reviewer 1" })).toBeInTheDocument();
     const model = screen.getByLabelText("Model for Reviewer 1");
@@ -291,10 +368,11 @@ describe("councils admin page", () => {
     fireEvent.change(model, { target: { value: "openai/gpt-4.1" } });
     expect(screen.getByLabelText("Model for Reviewer 1")).toHaveValue("openai/gpt-4.1");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete Reviewer 1" }));
+    fireEvent.click(within(inspector()).getByRole("button", { name: "Delete Reviewer 1" }));
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "Reviewer 1" })).not.toBeInTheDocument(),
     );
+    expect(screen.queryByTestId("agent-row-reviewer_1")).not.toBeInTheDocument();
   });
 
   it("shows a real load error instead of fake roles", async () => {
