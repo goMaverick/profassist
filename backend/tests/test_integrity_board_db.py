@@ -31,7 +31,9 @@ SHARED_TEXT = (
 
 
 def test_report_highlights_the_stored_occurrence_across_paragraphs() -> None:
-    text = "Repeated wording.\r\n\r\nBefore the repeated wording.\r\n\r\nA second paragraph follows."
+    text = (
+        "Repeated wording.\r\n\r\nBefore the repeated wording.\r\n\r\nA second paragraph follows."
+    )
     start = text.index("repeated")
     end = text.index(" follows")
     passages = [
@@ -283,7 +285,7 @@ async def test_matrix_uses_the_stored_flag_score_over_the_computed_one() -> None
             "shared": 1,
             "writing": False,
             "status": "Review",
-                "analysis_source": "legacy-record",
+            "analysis_source": "legacy-record",
         }
     ]
 
@@ -325,13 +327,18 @@ async def test_worker_pair_detail_uses_immutable_version_text_and_offsets() -> N
         courses=[_course()],
         assessments=[_assessment()],
         assignments=[_assignment()],
-        submissions=[_submission("s-a", "Group A", "mutable left"), _submission("s-b", "Group B", "mutable right")],
+        submissions=[
+            _submission("s-a", "Group A", "mutable left"),
+            _submission("s-b", "Group B", "mutable right"),
+        ],
         flags=[flag],
     )
-    session._batches.append([
-        SimpleNamespace(id=left_version_id, submission_id="s-a", text_content=left_text),
-        SimpleNamespace(id=right_version_id, submission_id="s-b", text_content=right_text),
-    ])
+    session._batches.append(
+        [
+            SimpleNamespace(id=left_version_id, submission_id="s-a", text_content=left_text),
+            SimpleNamespace(id=right_version_id, submission_id="s-b", text_content=right_text),
+        ]
+    )
 
     detail = await pair_detail_db(session, ORG, USER, "MAAI903", "1", "A", "B")
 

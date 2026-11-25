@@ -20,12 +20,24 @@ class ProfAssistDropoutExport(Base, TimestampMixin):
 
     __tablename__ = "pa_dropout_exports"
     __table_args__ = (
-        UniqueConstraint("organization_id", "course_id", "checksum", name="uq_pa_dropout_export_checksum"),
+        UniqueConstraint(
+            "organization_id", "course_id", "checksum", name="uq_pa_dropout_export_checksum"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid()
-    organization_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     external_export_id: Mapped[str] = mapped_column(String(128), nullable=False)
     schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -51,8 +63,18 @@ class ProfAssistDropoutIdentity(Base, TimestampMixin):
     )
 
     id: Mapped[uuid.UUID] = _uuid()
-    organization_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    student_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_students.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_students.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     student_key: Mapped[str] = mapped_column(String(128), nullable=False)
 
 
@@ -61,14 +83,43 @@ class ProfAssistDropoutPrediction(Base, TimestampMixin):
 
     __tablename__ = "pa_dropout_predictions"
     __table_args__ = (
-        UniqueConstraint("organization_id", "course_id", "student_id", "cutoff_at", "model_name", "model_version", "export_checksum", name="uq_pa_dropout_prediction_input"),
+        UniqueConstraint(
+            "organization_id",
+            "course_id",
+            "student_id",
+            "cutoff_at",
+            "model_name",
+            "model_version",
+            "export_checksum",
+            name="uq_pa_dropout_prediction_input",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid()
-    organization_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_courses.id", ondelete="CASCADE"), nullable=False, index=True)
-    export_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_dropout_exports.id", ondelete="RESTRICT"), nullable=False, index=True)
-    student_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_students.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    export_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_dropout_exports.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pa_students.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     student_key: Mapped[str] = mapped_column(String(128), nullable=False)
     cutoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

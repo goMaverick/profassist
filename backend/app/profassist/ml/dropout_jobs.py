@@ -1131,8 +1131,7 @@ async def change_dropout_release(
     if (
         not candidate.verified
         or not candidate.gate_passed
-        or candidate.action == "candidate"
-        and rollback
+        or (candidate.action == "candidate" and rollback)
     ):
         return {
             "error": "Only a verified release that passed its gate can be activated or rolled back."

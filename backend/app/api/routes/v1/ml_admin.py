@@ -222,7 +222,9 @@ async def ml_job_metrics(
         if release and release.organization_id == org.id:
             legacy = (release.gate_evidence or {}).get("training_summary") or {}
             run_id = legacy.get("mlflow_run_id")
-    return await training_metrics(run_id, job.operation) if isinstance(run_id, str) and run_id else {}
+    return (
+        await training_metrics(run_id, job.operation) if isinstance(run_id, str) and run_id else {}
+    )
 
 
 @router.post("/admin/ml/plagiarism/snapshot")

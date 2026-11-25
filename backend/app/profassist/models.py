@@ -568,7 +568,9 @@ class IntegrityFlag(Base, TimestampMixin):
     rare_details: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="legacy")
-    job_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
     left_version_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     right_version_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     left_start: Mapped[int | None] = mapped_column(nullable=True)
@@ -582,15 +584,23 @@ class IntegritySourceVersion(Base, TimestampMixin):
 
     __tablename__ = "pa_integrity_source_versions"
     __table_args__ = (
-        UniqueConstraint("organization_id", "submission_id", "version", name="uq_pa_integrity_source_version"),
-        UniqueConstraint("organization_id", "submission_id", "content_hash", name="uq_pa_integrity_source_hash"),
+        UniqueConstraint(
+            "organization_id", "submission_id", "version", name="uq_pa_integrity_source_version"
+        ),
+        UniqueConstraint(
+            "organization_id", "submission_id", "content_hash", name="uq_pa_integrity_source_hash"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid()
     organization_id: Mapped[uuid.UUID] = _org()
     course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    assessment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    submission_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pa_submissions.id", ondelete="CASCADE"), nullable=False)
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("pa_submissions.id", ondelete="CASCADE"), nullable=False
+    )
     version: Mapped[int] = mapped_column(nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     text_content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -601,14 +611,22 @@ class ProfAssistMLJob(Base, TimestampMixin):
 
     __tablename__ = "pa_ml_jobs"
     __table_args__ = (
-        UniqueConstraint("organization_id", "operation", "input_fingerprint", name="uq_pa_ml_job_input"),
+        UniqueConstraint(
+            "organization_id", "operation", "input_fingerprint", name="uq_pa_ml_job_input"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid()
     organization_id: Mapped[uuid.UUID] = _org()
-    course_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
-    assignment_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
-    requested_by: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    assignment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
     operation: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
     input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -628,8 +646,12 @@ class IntegrityPairReview(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = _uuid()
     organization_id: Mapped[uuid.UUID] = _org()
     course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    assessment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
     left_version_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     right_version_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     revision: Mapped[int] = mapped_column(nullable=False, default=1)
@@ -643,13 +665,17 @@ class IntegrityDatasetSnapshot(Base, TimestampMixin):
 
     __tablename__ = "pa_integrity_dataset_snapshots"
     __table_args__ = (
-        UniqueConstraint("organization_id", "assessment_id", "checksum", name="uq_pa_integrity_snapshot_checksum"),
+        UniqueConstraint(
+            "organization_id", "assessment_id", "checksum", name="uq_pa_integrity_snapshot_checksum"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid()
     organization_id: Mapped[uuid.UUID] = _org()
     course_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    assessment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     manifest_checksum: Mapped[str] = mapped_column(String(64), nullable=False, default="")
@@ -668,15 +694,21 @@ class ProfAssistMLRelease(Base, TimestampMixin):
     model_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     model_name: Mapped[str] = mapped_column(String(128), nullable=False)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    course_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
-    assignment_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    assignment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
     snapshot_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     model_bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     gate_evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     gate_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    previous_release_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    previous_release_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
     action: Mapped[str] = mapped_column(String(16), nullable=False, default="candidate")
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False, default="")

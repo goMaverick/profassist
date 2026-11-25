@@ -813,10 +813,7 @@ def _pair_map(
             )
         entry["percent"] = max(int(entry["percent"]), percent)
         writing = str(getattr(flag, "kind", "") or "").lower() == "writing"
-        if (
-            source == "worker"
-            and str(getattr(flag, "section", "")) == "coverage"
-        ):
+        if source == "worker" and str(getattr(flag, "section", "")) == "coverage":
             continue
         entry["passages"].append(
             {
@@ -913,7 +910,9 @@ def _card_for_ref(ref: dict[str, Any]) -> dict[str, Any]:
         "highest": highest,
         "writing_flags": writing,
         "status": _overall_status(statuses),
-        "analysis_sources": sorted({str(pair.get("analysis_source") or "legacy-heuristic") for pair in pairs}),
+        "analysis_sources": sorted(
+            {str(pair.get("analysis_source") or "legacy-heuristic") for pair in pairs}
+        ),
         "line": (
             f"{_count(groups, 'group', 'groups')} · "
             f"{_count(flagged, 'pair', 'pairs')} to read · "

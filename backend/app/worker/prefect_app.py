@@ -14,8 +14,8 @@ import logging
 from prefect import aserve
 from prefect.client.schemas.schedules import IntervalSchedule
 
-from app.profassist.ml.jobs import profassist_ml_job_flow
 from app.profassist.ml.dropout_jobs import profassist_dropout_job_flow
+from app.profassist.ml.jobs import profassist_ml_job_flow
 from app.worker.tasks.profassist_tasks import (
     course_memory_flow,
     grade_batch_flow,

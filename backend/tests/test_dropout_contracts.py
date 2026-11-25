@@ -42,9 +42,12 @@ def test_noncanonical_upload_has_stable_worker_manifest_checksum() -> None:
     stored_worker_bytes = _manifest_bytes(parsed)
 
     assert uploaded != stored_worker_bytes
-    assert hashlib.sha256(stored_worker_bytes).hexdigest() == hashlib.sha256(
-        _manifest_bytes(_json(stored_worker_bytes, "stored manifest"))
-    ).hexdigest()
+    assert (
+        hashlib.sha256(stored_worker_bytes).hexdigest()
+        == hashlib.sha256(
+            _manifest_bytes(_json(stored_worker_bytes, "stored manifest"))
+        ).hexdigest()
+    )
 
 
 def test_training_manifest_requires_all_three_split_sets() -> None:

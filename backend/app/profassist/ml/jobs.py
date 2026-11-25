@@ -474,7 +474,12 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                     }
                     job.status = "completed"
                     await db.flush()
-                    return {"ok": True, "job_id": job_id, "status": job.status, "gate_passed": False}
+                    return {
+                        "ok": True,
+                        "job_id": job_id,
+                        "status": job.status,
+                        "gate_passed": False,
+                    }
                 candidate_version = str(
                     summary.get("candidate_version") or summary.get("model_version") or ""
                 )
@@ -610,7 +615,7 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                 if left is None or right is None or left.group_name == right.group_name:
                     continue
                 seen_pairs.add(tuple(sorted((left_id, right_id))))
-                passages = flag.get("passages") or []
+                passages: list[dict[str, Any]] = flag.get("passages") or []
                 if not passages and isinstance(flag.get("representative"), dict):
                     representative = flag["representative"]
                     passages = [
@@ -625,10 +630,11 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                         }
                     ]
                 for passage in passages:
-                    side_a = passage.get("left") if isinstance(passage.get("left"), dict) else {}
-                    side_b = passage.get("right") if isinstance(passage.get("right"), dict) else {}
-                    text_a = side_a.get("text") if side_a else passage.get("left")
-                    text_b = side_b.get("text") if side_b else passage.get("right")
+                    left_passage, right_passage = passage.get("left"), passage.get("right")
+                    side_a = left_passage if isinstance(left_passage, dict) else {}
+                    side_b = right_passage if isinstance(right_passage, dict) else {}
+                    text_a = side_a.get("text") if side_a else left_passage
+                    text_b = side_b.get("text") if side_b else right_passage
                     raw_score = float(
                         passage.get("score") or passage.get("similarity") or flag.get("score") or 0
                     )

@@ -36,8 +36,18 @@ def upgrade() -> None:
     op.create_table(
         "pa_dropout_exports",
         sa.Column("id", PG_UUID(as_uuid=True), primary_key=True),
-        sa.Column("organization_id", PG_UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("course_id", PG_UUID(as_uuid=True), sa.ForeignKey("pa_courses.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "course_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("pa_courses.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("created_by", PG_UUID(as_uuid=True), nullable=False),
         sa.Column("external_export_id", sa.String(128), nullable=False),
         sa.Column("schema_version", sa.String(16), nullable=False),
@@ -52,9 +62,13 @@ def upgrade() -> None:
         sa.Column("row_count", sa.Integer(), nullable=False),
         sa.Column("outcome_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("status", sa.String(16), nullable=False, server_default="validated"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.UniqueConstraint("organization_id", "course_id", "checksum", name="uq_pa_dropout_export_checksum"),
+        sa.UniqueConstraint(
+            "organization_id", "course_id", "checksum", name="uq_pa_dropout_export_checksum"
+        ),
     )
     for column in ("organization_id", "course_id"):
         op.create_index(f"pa_dropout_exports_{column}_idx", "pa_dropout_exports", [column])
@@ -63,10 +77,22 @@ def upgrade() -> None:
     op.create_table(
         "pa_dropout_identities",
         sa.Column("id", PG_UUID(as_uuid=True), primary_key=True),
-        sa.Column("organization_id", PG_UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("student_id", PG_UUID(as_uuid=True), sa.ForeignKey("pa_students.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "student_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("pa_students.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("student_key", sa.String(128), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("organization_id", "student_key", name="uq_pa_dropout_identity_key"),
     )
@@ -77,10 +103,30 @@ def upgrade() -> None:
     op.create_table(
         "pa_dropout_predictions",
         sa.Column("id", PG_UUID(as_uuid=True), primary_key=True),
-        sa.Column("organization_id", PG_UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("course_id", PG_UUID(as_uuid=True), sa.ForeignKey("pa_courses.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("export_id", PG_UUID(as_uuid=True), sa.ForeignKey("pa_dropout_exports.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("student_id", PG_UUID(as_uuid=True), sa.ForeignKey("pa_students.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "course_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("pa_courses.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "export_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("pa_dropout_exports.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "student_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey("pa_students.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("student_key", sa.String(128), nullable=False),
         sa.Column("cutoff_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("predicted_at", sa.DateTime(timezone=True), nullable=False),
@@ -93,9 +139,20 @@ def upgrade() -> None:
         sa.Column("training_data_hash", sa.String(64), nullable=False),
         sa.Column("batch_id", sa.String(64), nullable=False),
         sa.Column("export_checksum", sa.String(64), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.UniqueConstraint("organization_id", "course_id", "student_id", "cutoff_at", "model_name", "model_version", "export_checksum", name="uq_pa_dropout_prediction_input"),
+        sa.UniqueConstraint(
+            "organization_id",
+            "course_id",
+            "student_id",
+            "cutoff_at",
+            "model_name",
+            "model_version",
+            "export_checksum",
+            name="uq_pa_dropout_prediction_input",
+        ),
     )
     for column in ("organization_id", "course_id", "export_id", "student_id", "batch_id"):
         op.create_index(f"pa_dropout_predictions_{column}_idx", "pa_dropout_predictions", [column])
