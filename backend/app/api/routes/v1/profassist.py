@@ -544,6 +544,157 @@ async def integrity_scan(
     return {"items": await scan_integrity(db, org.id, course_id, user.id)}
 
 
+class IntegrityJobBody(BaseModel):
+    assessment_id: uuid.UUID
+
+
+class IntegrityReviewSpan(BaseModel):
+    left_start: int = Field(ge=0)
+    left_end: int = Field(gt=0)
+    right_start: int = Field(ge=0)
+    right_end: int = Field(gt=0)
+
+
+class IntegrityReviewBody(BaseModel):
+    course_id: uuid.UUID
+    assessment_id: uuid.UUID
+    left_version_id: uuid.UUID
+    right_version_id: uuid.UUID
+    decision: str
+    spans: list[IntegrityReviewSpan] = Field(default_factory=list)
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/integrity/reviews")
+async def integrity_review_create(
+    body: IntegrityReviewBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    """Append a version-bound pair decision for training eligibility."""
+    from sqlalchemy import func, select, text
+
+    from app.profassist.models import (
+        Assessment,
+        Course,
+        IntegrityPairReview,
+        IntegritySourceVersion,
+    )
+
+    if body.decision not in {"ok", "flag"} or body.left_version_id == body.right_version_id:
+        return {"saved": False, "error": "Choose a valid report pair and decision."}
+    course = await db.get(Course, body.course_id)
+    assessment = await db.get(Assessment, body.assessment_id)
+    if (
+        course is None
+        or assessment is None
+        or course.organization_id != org.id
+        or assessment.organization_id != org.id
+        or assessment.course_id != course.id
+        or assessment.owner_user_id not in {None, user.id}
+    ):
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(404, "Assignment not found")
+    result = await db.execute(
+        select(IntegritySourceVersion).where(
+            IntegritySourceVersion.organization_id == org.id,
+            IntegritySourceVersion.course_id == course.id,
+            IntegritySourceVersion.assessment_id == assessment.id,
+            IntegritySourceVersion.id.in_([body.left_version_id, body.right_version_id]),
+        )
+    )
+    versions = {row.id: row for row in result.scalars().all()}
+    if set(versions) != {body.left_version_id, body.right_version_id}:
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(404, "Report version not found")
+    if (
+        versions[body.left_version_id].submission_id
+        == versions[body.right_version_id].submission_id
+    ):
+        return {"saved": False, "error": "A report cannot be reviewed against itself."}
+    left_key, right_key = sorted((str(body.left_version_id), str(body.right_version_id)))
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"review:{org.id}:{body.assessment_id}:{left_key}:{right_key}"},
+    )
+    revision_result = await db.execute(
+        select(func.max(IntegrityPairReview.revision)).where(
+            IntegrityPairReview.organization_id == org.id,
+            IntegrityPairReview.assessment_id == body.assessment_id,
+            IntegrityPairReview.left_version_id.in_([body.left_version_id, body.right_version_id]),
+            IntegrityPairReview.right_version_id.in_([body.left_version_id, body.right_version_id]),
+        )
+    )
+    revision = int(revision_result.scalar() or 0) + 1
+    if body.decision == "flag" and not body.spans:
+        return {
+            "saved": False,
+            "error": "Mark at least one matched span before labeling a pair as reuse.",
+        }
+    if body.decision == "ok" and body.spans:
+        return {"saved": False, "error": "A negative pair decision cannot include matched spans."}
+    for span in body.spans:
+        left_start, left_end = span.left_start, span.left_end
+        right_start, right_end = span.right_start, span.right_end
+        if (
+            left_start < 0
+            or left_start >= left_end
+            or left_end > len(versions[body.left_version_id].text_content)
+            or right_start < 0
+            or right_start >= right_end
+            or right_end > len(versions[body.right_version_id].text_content)
+        ):
+            return {
+                "saved": False,
+                "error": "A selected span does not match the displayed report version.",
+            }
+    review = IntegrityPairReview(
+        organization_id=org.id,
+        course_id=course.id,
+        assessment_id=assessment.id,
+        reviewer_user_id=user.id,
+        left_version_id=body.left_version_id,
+        right_version_id=body.right_version_id,
+        revision=revision,
+        decision=body.decision,
+        spans=[span.model_dump() for span in body.spans],
+        note=body.note.strip(),
+    )
+    db.add(review)
+    await db.flush()
+    return {
+        "saved": True,
+        "review_id": str(review.id),
+        "revision": revision,
+        "decision": review.decision,
+    }
+
+
+@router.post("/courses/{course_id}/integrity/jobs")
+async def integrity_job_create(
+    course_id: uuid.UUID, body: IntegrityJobBody, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    """Queue an assignment-scoped score over immutable submission versions."""
+    from app.profassist.ml.jobs import create_integrity_job
+
+    result = await create_integrity_job(db, org.id, user.id, course_id, body.assessment_id)
+    return result
+
+
+@router.get("/integrity/jobs/{job_id}")
+async def integrity_job_status(
+    job_id: uuid.UUID, user: CurrentUser, org: ProfOrg, db: DBSession
+) -> dict:
+    from app.profassist.ml.jobs import get_job
+
+    result = await get_job(db, org.id, user.id, job_id)
+    if result is None:
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(404, "Model job not found")
+    return result
+
+
 class IntegrityAction(BaseModel):
     course: str = "MAAI903"
     number: str = "1"

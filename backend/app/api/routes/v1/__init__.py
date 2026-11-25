@@ -29,6 +29,7 @@ from app.api.routes.v1 import deck_ai
 from app.api.routes.v1 import studio_collab
 from app.api.routes.v1 import moodle_connection
 from app.api.routes.v1 import ml_admin
+from app.api.routes.v1 import dropout_admin
 from app.api.routes.v1 import council_admin
 
 v1_router = APIRouter()
@@ -83,6 +84,7 @@ v1_router.include_router(
 )
 v1_router.include_router(moodle_connection.router, prefix="/profassist", tags=["profassist:moodle"])
 v1_router.include_router(ml_admin.router, prefix="/profassist", tags=["profassist:ml-admin"])
+v1_router.include_router(dropout_admin.router, prefix="/profassist", tags=["profassist:ml-dropout"])
 v1_router.include_router(
     council_admin.router, prefix="/profassist/admin", tags=["profassist:council-admin"]
 )

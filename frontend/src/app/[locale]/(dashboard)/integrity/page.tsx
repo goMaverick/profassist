@@ -56,6 +56,9 @@ interface AssignmentCard {
   writing_flags: number;
   status: string;
   line: string;
+  analysis_sources?: string[];
+  course_id?: string;
+  assessment_id?: string;
 }
 interface Overview {
   courses: CourseOption[];
@@ -75,6 +78,7 @@ interface PairRow {
   shared: number;
   writing: boolean;
   status: string;
+  analysis_source?: string | null;
 }
 interface Matrix {
   course: string;
@@ -120,6 +124,13 @@ interface Match {
   left_box: Box;
   right_box: Box;
   decision: string;
+  left_start?: number | null;
+  left_end?: number | null;
+  right_start?: number | null;
+  right_end?: number | null;
+  left_version_id?: string | null;
+  right_version_id?: string | null;
+  analysis_source?: "worker" | "legacy" | string | null;
 }
 interface DocSide {
   origin: string;
@@ -131,6 +142,10 @@ interface PairDetail {
   course: string;
   slug: string;
   assignment: string;
+  course_id?: string | null;
+  assessment_id?: string | null;
+  left_version_id?: string | null;
+  right_version_id?: string | null;
   name: string;
   left: string;
   right: string;
@@ -145,6 +160,14 @@ interface PairDetail {
   decisions: { flagged: number; ok: number; pending: number };
   documents: { left: DocSide; right: DocSide };
   why: string;
+}
+interface IntegrityJob {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+  assignment_id?: string;
+  model_version?: string;
+  reused?: boolean;
+  error?: string | null;
 }
 
 export default function IntegrityPage() {
@@ -177,6 +200,13 @@ function decisionLabel(decision: string) {
   if (decision === "ok") return "OK";
   if (decision === "flag") return "Flagged";
   return "Pending";
+}
+
+function analysisSourceLabel(source?: string | null) {
+  if (source === "worker") return "worker model";
+  if (source === "legacy-record") return "legacy stored result";
+  if (source === "legacy-heuristic" || source === "legacy") return "legacy heuristic";
+  return "source unreported";
 }
 
 function heat(percent: number) {
@@ -274,6 +304,9 @@ function IntegrityDrill() {
   const [hideCommon, setHideCommon] = useState(false);
   const [viewer, setViewer] = useState(false);
   const [cursor, setCursor] = useState(0);
+  const [job, setJob] = useState<IntegrityJob | null>(null);
+  const [scanning, setScanning] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     pa<Overview>(`/integrity/overview?course=${encodeURIComponent(course)}`)
@@ -281,7 +314,7 @@ function IntegrityDrill() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not open integrity"),
       );
-  }, [course]);
+  }, [course, refresh]);
 
   useEffect(() => {
     if (!assignment) {
@@ -293,7 +326,7 @@ function IntegrityDrill() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not open that assignment"),
       );
-  }, [course, assignment]);
+  }, [course, assignment, refresh]);
 
   useEffect(() => {
     if (!assignment || !pair) {
@@ -308,7 +341,32 @@ function IntegrityDrill() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not open that pair"),
       );
-  }, [course, assignment, pair]);
+  }, [course, assignment, pair, refresh]);
+
+  useEffect(() => {
+    if (!job?.job_id || job.status === "completed" || job.status === "failed") return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const status = await pa<IntegrityJob>(`/integrity/jobs/${job.job_id}`);
+        if (stopped) return;
+        setJob((current) => ({
+          ...current,
+          ...status,
+          model_version: status.model_version || current?.model_version,
+        }));
+        if (status.status === "completed") setRefresh((value) => value + 1);
+      } catch (err) {
+        if (!stopped) setError(err instanceof Error ? err.message : "Could not check scan status");
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 2000);
+    void poll();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.job_id, job?.status]);
 
   const visible = useMemo(() => {
     const rows = (detail?.matches || []).filter((item) => {
@@ -366,6 +424,62 @@ function IntegrityDrill() {
 
   async function act(action: "ok" | "flag" | "note") {
     if (!detail) return;
+    let recordedForTraining = false;
+    if (action === "ok" || action === "flag") {
+      const versionedMatches = detail.matches.filter(
+        (match) =>
+          match.decision === "flag" &&
+          typeof match.left_start === "number" &&
+          typeof match.left_end === "number" &&
+          typeof match.right_start === "number" &&
+          typeof match.right_end === "number",
+      );
+      const span = (match: Match) => ({
+        left_start: match.left_start as number,
+        left_end: match.left_end as number,
+        right_start: match.right_start as number,
+        right_end: match.right_end as number,
+      });
+      if (
+        !detail.course_id ||
+        !detail.assessment_id ||
+        !detail.left_version_id ||
+        !detail.right_version_id
+      ) {
+        setError(
+          "This pair has no immutable report versions yet, so it cannot be included in a training review.",
+        );
+        return;
+      }
+      if (action === "flag" && versionedMatches.length === 0) {
+        setError(
+          "Mark at least one versioned passage as Flagged before saving this pair as reuse.",
+        );
+        return;
+      }
+      const review = await run(
+        () =>
+          pa<{ saved: boolean; error?: string }>("/integrity/reviews", {
+            method: "POST",
+            body: JSON.stringify({
+              course_id: detail.course_id,
+              assessment_id: detail.assessment_id,
+              left_version_id: detail.left_version_id,
+              right_version_id: detail.right_version_id,
+              decision: action,
+              spans: action === "flag" ? versionedMatches.map(span) : [],
+              note,
+            }),
+          }),
+        setError,
+      );
+      if (!review) return;
+      if (!review.saved) {
+        setError(review.error || "The versioned review could not be saved.");
+        return;
+      }
+      recordedForTraining = true;
+    }
     const result = await run(
       () =>
         pa<{ message: string }>("/integrity/pair", {
@@ -381,7 +495,36 @@ function IntegrityDrill() {
         }),
       setError,
     );
-    if (result) setSaved(result.message);
+    if (result) {
+      setSaved(
+        recordedForTraining
+          ? `${result.message} Versioned pair review saved for training.`
+          : result.message,
+      );
+    }
+  }
+
+  async function startScan(item: AssignmentCard) {
+    if (!item.course_id || !item.assessment_id) {
+      setError("This assignment is missing the identifiers needed to start a verified scan.");
+      return;
+    }
+    setError("");
+    setScanning(item.assessment_id);
+    const result = await run(
+      () =>
+        pa<IntegrityJob & { error?: string }>(`/courses/${item.course_id}/integrity/jobs`, {
+          method: "POST",
+          body: JSON.stringify({ assessment_id: item.assessment_id }),
+        }),
+      setError,
+    );
+    setScanning("");
+    if (result?.error) {
+      setError(result.error);
+      return;
+    }
+    if (result) setJob(result);
   }
 
   const courseItems = [
@@ -469,34 +612,69 @@ function IntegrityDrill() {
           )}
           <div className="grid gap-3">
             {(overview?.items || []).map((item) => (
-              <button
-                key={`${item.slug}-${item.number}`}
-                type="button"
-                className="pa-panel pa-integrity-row"
-                onClick={() => go({ course: item.slug, assignment: item.number })}
-              >
-                <span className="pa-integrity-main">
+              <div key={`${item.slug}-${item.number}`} className="pa-panel pa-integrity-row">
+                <button
+                  type="button"
+                  className="pa-integrity-main text-left"
+                  onClick={() => go({ course: item.slug, assignment: item.number })}
+                >
                   <strong>
                     {item.course} · Assignment {item.number}
                   </strong>
                   <span> {item.name}</span>
                   <span className="pa-integrity-meta">{item.line}</span>
+                  {item.analysis_sources?.length ? (
+                    <span className="text-muted-foreground text-xs">
+                      Signals:{" "}
+                      {[...new Set(item.analysis_sources)]
+                        .map((source) => analysisSourceLabel(source))
+                        .join(" · ")}
+                    </span>
+                  ) : null}
                   <span className="pa-integrity-bar">
                     <span className="pa-mini-meter" aria-hidden="true">
                       <span style={{ width: `${item.highest}%`, background: heat(item.highest) }} />
                     </span>
                     Highest {item.highest}%
                   </span>
-                </span>
+                </button>
                 <span className="pa-integrity-side">
                   <Badge variant="outline" className={statusClass(item.status)}>
                     {item.status}
                   </Badge>
-                  <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      scanning === item.assessment_id ||
+                      (job != null && job.status !== "completed" && job.status !== "failed")
+                    }
+                    onClick={() => void startScan(item)}
+                  >
+                    {scanning === item.assessment_id ? "Starting…" : "Scan reports"}
+                  </Button>
+                  <button
+                    type="button"
+                    className="pa-why"
+                    aria-label={`Open assignment ${item.number}`}
+                    onClick={() => go({ course: item.slug, assignment: item.number })}
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  </button>
                 </span>
-              </button>
+              </div>
             ))}
           </div>
+          {job && (
+            <Alert variant={job.status === "failed" ? "destructive" : "default"}>
+              <AlertTitle>Report scan {job.status}</AlertTitle>
+              <AlertDescription>
+                {job.error ||
+                  `Job ${job.job_id}${job.model_version ? ` · model ${job.model_version}` : ""}${job.reused ? " · reused existing job" : ""}`}
+              </AlertDescription>
+            </Alert>
+          )}
         </>
       )}
       {assignment && !pair && matrix && (
@@ -571,6 +749,7 @@ function IntegrityDrill() {
                 </th>
                 <th>AI flag</th>
                 <th>Status</th>
+                <th>Signal source</th>
               </tr>
             </thead>
             <tbody>
@@ -592,6 +771,9 @@ function IntegrityDrill() {
                     <Badge variant="outline" className={statusClass(item.status)}>
                       {item.status}
                     </Badge>
+                  </td>
+                  <td className="text-muted-foreground text-xs">
+                    {analysisSourceLabel(item.analysis_source)}
                   </td>
                 </tr>
               ))}
@@ -669,6 +851,9 @@ function IntegrityDrill() {
                       <Badge variant="outline" className={sourceClass(item.source)}>
                         {item.tag}
                       </Badge>
+                      <span className="text-muted-foreground ml-1 text-xs">
+                        {analysisSourceLabel(item.analysis_source)}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={decisionClass(item.decision)}>
@@ -768,11 +953,17 @@ function IntegrityDrill() {
               {detail.why}
             </p>
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => act("ok")}>Mark as OK</Button>
-            <Button variant="destructive" onClick={() => act("flag")}>
-              Flag for follow-up
-            </Button>
+          <div className="border-border/70 mt-4 rounded-lg border p-3">
+            <p className="text-muted-foreground mb-2 text-xs">
+              Save a complete pair review for training. Flag the specific reused passages above
+              before recording a reuse decision.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => act("ok")}>Save reviewed as distinct reports</Button>
+              <Button variant="destructive" onClick={() => act("flag")}>
+                Save reviewed as report reuse
+              </Button>
+            </div>
           </div>
           <div className="mt-4 space-y-1.5">
             <Label htmlFor="integrity-note">Add a note</Label>

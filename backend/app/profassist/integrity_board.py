@@ -1,11 +1,19 @@
 """Integrity board for recognized submissions. Empty until real submissions are registered."""
 
 import re
+import uuid
 from typing import Any
 
 from sqlalchemy import select
 
-from app.profassist.models import Assessment, Course, GroupAssignment, IntegrityFlag, Submission
+from app.profassist.models import (
+    Assessment,
+    Course,
+    GroupAssignment,
+    IntegrityFlag,
+    IntegritySourceVersion,
+    Submission,
+)
 from app.profassist.similarity import compare_submissions
 
 COURSES: list[dict[str, Any]] = []
@@ -749,7 +757,13 @@ def _as_percent(score: Any) -> int:
 
 
 def _pair_entry(left: str, right: str) -> dict[str, Any]:
-    return {"left": left, "right": right, "percent": 0, "passages": []}
+    return {
+        "left": left,
+        "right": right,
+        "percent": 0,
+        "passages": [],
+        "analysis_source": "legacy-heuristic",
+    }
 
 
 def _group_of(row: Any, labels: dict[str, str]) -> str:
@@ -763,6 +777,11 @@ def _pair_map(
     by_id = {str(getattr(row, "id", "")): row for row in rows}
     pairs: dict[tuple[str, str], dict[str, Any]] = {}
     for flag in flags:
+        if (
+            getattr(flag, "source", "legacy") == "worker"
+            and getattr(flag, "status", "open") != "open"
+        ):
+            continue
         left = by_id.get(str(getattr(flag, "left_submission_id", "")))
         right = by_id.get(str(getattr(flag, "right_submission_id", "")))
         if left is None or right is None:
@@ -773,17 +792,50 @@ def _pair_map(
             continue
         key = (left_label, right_label) if left_label < right_label else (right_label, left_label)
         percent = _as_percent(getattr(flag, "score", 0))
+        reverse = left_label > right_label
         entry = pairs.setdefault(key, _pair_entry(key[0], key[1]))
+        source = str(getattr(flag, "source", "legacy") or "legacy")
+        entry["analysis_source"] = "worker" if source == "worker" else "legacy-record"
+        if source == "worker" and str(getattr(flag, "section", "")) != "coverage":
+            entry.setdefault(
+                "review_versions",
+                [
+                    str(
+                        getattr(flag, "right_version_id" if reverse else "left_version_id", "")
+                        or ""
+                    ),
+                    str(
+                        getattr(flag, "left_version_id" if reverse else "right_version_id", "")
+                        or ""
+                    ),
+                ],
+            )
         entry["percent"] = max(int(entry["percent"]), percent)
         writing = str(getattr(flag, "kind", "") or "").lower() == "writing"
+        if (
+            source == "worker"
+            and str(getattr(flag, "section", "")) == "coverage"
+        ):
+            continue
         entry["passages"].append(
             {
                 "id": f"{getattr(flag, 'section', '') or 'body'}-{len(entry['passages']) + 1}",
                 "percent": percent,
                 "common": False,
                 "writing": "High" if writing else ("Medium" if percent >= 50 else "Low"),
-                "left": str(getattr(flag, "passage_a", "") or ""),
-                "right": str(getattr(flag, "passage_b", "") or ""),
+                "left": str(getattr(flag, "passage_b" if reverse else "passage_a", "") or ""),
+                "right": str(getattr(flag, "passage_a" if reverse else "passage_b", "") or ""),
+                "left_version_id": str(
+                    getattr(flag, "right_version_id" if reverse else "left_version_id", "") or ""
+                ),
+                "right_version_id": str(
+                    getattr(flag, "left_version_id" if reverse else "right_version_id", "") or ""
+                ),
+                "left_start": getattr(flag, "right_start" if reverse else "left_start", None),
+                "left_end": getattr(flag, "right_end" if reverse else "left_end", None),
+                "right_start": getattr(flag, "left_start" if reverse else "right_start", None),
+                "right_end": getattr(flag, "left_end" if reverse else "right_end", None),
+                "source": str(getattr(flag, "source", "legacy") or "legacy"),
             }
         )
     stored = set(pairs)
@@ -860,6 +912,7 @@ def _card_for_ref(ref: dict[str, Any]) -> dict[str, Any]:
         "highest": highest,
         "writing_flags": writing,
         "status": _overall_status(statuses),
+        "analysis_sources": sorted({str(pair.get("analysis_source") or "legacy-heuristic") for pair in pairs}),
         "line": (
             f"{_count(groups, 'group', 'groups')} · "
             f"{_count(flagged, 'pair', 'pairs')} to read · "
@@ -896,17 +949,16 @@ def _prepare_refs(
 
 def _find_ref(refs: list[dict[str, Any]], number: str) -> dict[str, Any] | None:
     target = str(number)
+    # The overview links by display number. Resolve all display numbers
+    # before considering aliases, since another assignment's ordinal can match.
+    for ref in refs:
+        if target == str(ref["number"]):
+            return ref
     for ref in refs:
         assessment = ref["assessment"]
-        values = {
-            str(ref["number"]),
-            str(ref["title"]),
-            str(getattr(assessment, "external_id", "") or ""),
-            str(ref["order"]),
-        }
-        if target in values:
+        if target in {str(ref["title"]), str(getattr(assessment, "external_id", "") or "")}:
             return ref
-    return None
+    return next((ref for ref in refs if target == str(ref["order"])), None)
 
 
 async def overview_db(db: Any, org_id: Any, user_id: Any, course: str = "all") -> dict[str, Any]:
@@ -986,6 +1038,7 @@ async def assignment_matrix_db(
                         "shared": 0,
                         "writing": False,
                         "status": "Clear",
+                        "analysis_source": "legacy-heuristic",
                     }
                 )
                 continue
@@ -998,6 +1051,7 @@ async def assignment_matrix_db(
                     "shared": len([item for item in passages if not item.get("common")]),
                     "writing": _writing_flag(passages),
                     "status": _db_pair_status(entry),
+                    "analysis_source": entry.get("analysis_source", "legacy-heuristic"),
                 }
             )
     pairs.sort(key=lambda row: row["percent"], reverse=True)
@@ -1104,6 +1158,13 @@ def _matches_from_passages(
                 "left_box": dict(box),
                 "right_box": dict(box),
                 "decision": decisions.get(match_id, "pending"),
+                "left_start": passage.get("left_start"),
+                "left_end": passage.get("left_end"),
+                "right_start": passage.get("right_start"),
+                "right_end": passage.get("right_end"),
+                "left_version_id": passage.get("left_version_id"),
+                "right_version_id": passage.get("right_version_id"),
+                "analysis_source": passage.get("source") or "legacy-heuristic",
             }
         )
     matches.sort(key=lambda row: row["percent"], reverse=True)
@@ -1155,6 +1216,14 @@ async def pair_detail_db(
     key = (left_label, right_label) if left_label < right_label else (right_label, left_label)
     entry = ref["pairs"].get(key) or _pair_entry(key[0], key[1])
     passages = list(entry.get("passages") or [])
+    review_versions = entry.get("review_versions") or []
+    if review_versions:
+        passages = [
+            passage
+            for passage in passages
+            if passage.get("left_version_id") == review_versions[0]
+            and passage.get("right_version_id") == review_versions[1]
+        ]
     percent = int(entry.get("percent") or 0)
     pair_id = _pair_id(ref["slug"], str(ref["number"]), left_label, right_label)
     from app.profassist.integrity_docs import load_decisions, summarise
@@ -1167,16 +1236,78 @@ async def pair_detail_db(
     right_text = str(
         getattr(right_row, "scrubbed_text", "") or getattr(right_row, "raw_text", "") or ""
     )
+    version_ids = {
+        str(value)
+        for passage in passages
+        for value in (passage.get("left_version_id"), passage.get("right_version_id"))
+        if value
+    }
+    version_map: dict[str, IntegritySourceVersion] = {}
+    if version_ids:
+        version_result = await db.execute(
+            select(IntegritySourceVersion).where(
+                IntegritySourceVersion.organization_id == org_id,
+                IntegritySourceVersion.id.in_([uuid.UUID(value) for value in version_ids]),
+            )
+        )
+        version_map = {str(row.id): row for row in version_result.scalars().all()}
+        texts = {key: row.text_content for key, row in version_map.items()}
+        for passage in passages:
+            if passage.get("left_version_id") in texts:
+                left_text = texts[passage["left_version_id"]]
+                break
+        for passage in passages:
+            if passage.get("right_version_id") in texts:
+                right_text = texts[passage["right_version_id"]]
+                break
+    if review_versions:
+        left_version_id, right_version_id = review_versions
+        if left_version_id not in version_map or right_version_id not in version_map:
+            version_result = await db.execute(
+                select(IntegritySourceVersion).where(
+                    IntegritySourceVersion.organization_id == org_id,
+                    IntegritySourceVersion.id.in_(
+                        [uuid.UUID(left_version_id), uuid.UUID(right_version_id)]
+                    ),
+                ),
+            )
+            version_map.update({str(row.id): row for row in version_result.scalars().all()})
+        left_version = version_map.get(left_version_id)
+        right_version = version_map.get(right_version_id)
+        if left_version is not None and right_version is not None:
+            left_text = left_version.text_content
+            right_text = right_version.text_content
+            left_row = next(
+                (
+                    row
+                    for row in ref["rows"]
+                    if str(getattr(row, "id", "")) == str(left_version.submission_id)
+                ),
+                left_row,
+            )
+            right_row = next(
+                (
+                    row
+                    for row in ref["rows"]
+                    if str(getattr(row, "id", "")) == str(right_version.submission_id)
+                ),
+                right_row,
+            )
     course_row = ref["course"]
     return {
         "course": str(getattr(course_row, "code", "") or ""),
         "slug": ref["slug"],
         "assignment": str(ref["number"]),
+        "course_id": str(getattr(course_row, "id", "") or ""),
+        "assessment_id": str(getattr(ref["assessment"], "id", "") or ""),
         "name": str(ref["title"]),
         "left": left_label,
         "right": right_label,
+        "left_version_id": review_versions[0] if review_versions else None,
+        "right_version_id": review_versions[1] if review_versions else None,
         "percent": percent,
         "status": _db_pair_status(entry),
+        "analysis_source": entry.get("analysis_source", "legacy-heuristic"),
         "left_text": _document_paragraphs(left_text, passages, "left"),
         "right_text": _document_paragraphs(right_text, passages, "right"),
         "left_meta": {

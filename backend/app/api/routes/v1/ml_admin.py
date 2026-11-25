@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentAppAdmin
+from app.api.deps import CurrentAppAdmin, DBSession
 from app.profassist.deps import ProfOrg
 from app.profassist.ml.gateway import (
     PLAGIARISM_DATA_NEEDED,
@@ -26,6 +28,20 @@ from app.profassist.ml.gateway import (
 from app.profassist.tracking import list_registered_models_async
 
 router = APIRouter()
+
+
+class PlagiarismSnapshotBody(BaseModel):
+    course_id: uuid.UUID
+    assessment_id: uuid.UUID
+
+
+class PlagiarismTrainBody(BaseModel):
+    snapshot_id: uuid.UUID
+
+
+class ReleaseActionBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
 
 _PROBE_TIMEOUT_SECONDS = 3.5
 _PROBE_FAILED = (
@@ -163,3 +179,87 @@ async def plagiarism_contract(user: CurrentAppAdmin, org: ProfOrg) -> dict[str, 
         "threshold_note": "0.922696 is PAN-specific and must be re-selected for this corpus.",
         "license": "not vendored; external worker required",
     }
+
+
+@router.get("/admin/ml/jobs")
+async def ml_job_list(
+    user: CurrentAppAdmin,
+    org: ProfOrg,
+    db: DBSession,
+    operation: str | None = None,
+    course_id: uuid.UUID | None = None,
+    assessment_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    del user
+    from app.profassist.ml.training import list_jobs
+
+    return await list_jobs(db, org.id, operation, course_id, assessment_id)
+
+
+@router.post("/admin/ml/plagiarism/snapshot")
+async def plagiarism_snapshot_create(
+    body: PlagiarismSnapshotBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
+) -> dict[str, Any]:
+    from app.profassist.ml.training import create_snapshot_job
+
+    return await create_snapshot_job(db, org.id, user.id, body.course_id, body.assessment_id)
+
+
+@router.post("/admin/ml/plagiarism/train")
+async def plagiarism_train_create(
+    body: PlagiarismTrainBody, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
+) -> dict[str, Any]:
+    from app.profassist.ml.training import create_training_job
+
+    return await create_training_job(db, org.id, user.id, body.snapshot_id)
+
+
+@router.get("/admin/ml/releases")
+async def ml_release_list(
+    user: CurrentAppAdmin,
+    org: ProfOrg,
+    db: DBSession,
+    model_kind: str | None = None,
+    course_id: uuid.UUID | None = None,
+    assessment_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    del user
+    from app.profassist.ml.training import list_releases
+
+    return await list_releases(db, org.id, model_kind, course_id, assessment_id)
+
+
+@router.post("/admin/ml/releases/{release_id}/approve")
+async def ml_release_approve(
+    release_id: uuid.UUID,
+    body: ReleaseActionBody,
+    user: CurrentAppAdmin,
+    org: ProfOrg,
+    db: DBSession,
+) -> dict[str, Any]:
+    from app.profassist.ml.training import change_release
+
+    result = await change_release(db, org.id, user.id, release_id, body.reason)
+    if "error" in result:
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(409, result["error"])
+    return result
+
+
+@router.post("/admin/ml/releases/{release_id}/rollback")
+async def ml_release_rollback(
+    release_id: uuid.UUID,
+    body: ReleaseActionBody,
+    user: CurrentAppAdmin,
+    org: ProfOrg,
+    db: DBSession,
+) -> dict[str, Any]:
+    from app.profassist.ml.training import change_release
+
+    result = await change_release(db, org.id, user.id, release_id, body.reason, rollback=True)
+    if "error" in result:
+        from app.profassist.errors import ProfassistError
+
+        raise ProfassistError(409, result["error"])
+    return result
