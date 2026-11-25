@@ -31,6 +31,7 @@ from app.profassist.models import (
     ProfAssistMLRelease,
     Submission,
 )
+from app.profassist.tracking import training_namespace
 
 
 def _hash(text: str) -> str:
@@ -457,17 +458,43 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                 snapshot = await db.get(
                     IntegrityDatasetSnapshot, uuid.UUID(job.result["snapshot_id"])
                 )
+                summary = result.get("summary", result)
+                if not isinstance(summary, dict) or snapshot is None:
+                    raise ValueError("worker training result incomplete")
+                if "summary" in result and (
+                    summary.get("platform_scope") != scope
+                    or summary.get("platform_snapshot_sha256") != snapshot.manifest_checksum
+                ):
+                    raise ValueError("worker training result does not match the training dataset")
+                if summary.get("gate_passed") is False and not summary.get("candidate_version"):
+                    job.result = {
+                        "snapshot_id": str(snapshot.id),
+                        "gate_passed": False,
+                        "training_run_id": summary.get("mlflow_run_id"),
+                    }
+                    job.status = "completed"
+                    await db.flush()
+                    return {"ok": True, "job_id": job_id, "status": job.status, "gate_passed": False}
                 candidate_version = str(
-                    result.get("candidate_version") or result.get("model_version") or ""
+                    summary.get("candidate_version") or summary.get("model_version") or ""
                 )
-                candidate_name = str(result.get("model_name") or job.model_name)
-                if snapshot is None or not candidate_version or candidate_name != job.model_name:
+                candidate_name = str(summary.get("model_name") or "")
+                if "summary" in result:
+                    if not candidate_name and isinstance(summary.get("mlflow_run_id"), str):
+                        candidate_name = await training_namespace(summary["mlflow_run_id"])
+                    expected_corpus = snapshot.manifest_checksum
+                else:
+                    candidate_name = candidate_name or job.model_name
+                    expected_corpus = snapshot.checksum
+                    if candidate_name != job.model_name:
+                        raise ValueError("worker training model name mismatch")
+                if not candidate_version or not candidate_name:
                     raise ValueError("worker training result incomplete")
                 verify_body = {
                     "schema_version": 1,
                     "operation": "plagiarism-verify-release",
                     "context": {
-                        "job_id": job_id,
+                        "job_id": str(uuid.uuid5(job_uuid, "verify-release")),
                         "tracking_uri": os.getenv("MLFLOW_TRACKING_URI", "").strip(),
                         "model_name": candidate_name,
                         "version": candidate_version,
@@ -496,13 +523,13 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                     or release_data.get("model_name") != candidate_name
                     or str(release_data.get("model_version")) != candidate_version
                     or release_data.get("platform_scope") != scope
-                    or release_data.get("training_corpus_sha256") != snapshot.checksum
+                    or release_data.get("training_corpus_sha256") != expected_corpus
                     or not isinstance(release_data.get("model_bundle_sha256"), str)
                     or len(release_data["model_bundle_sha256"]) != 64
                 ):
                     raise ValueError("worker release verification failed")
                 gate_passed = bool(release_data.get("gate_passed")) and bool(
-                    result.get("gate_passed", True)
+                    summary.get("gate_passed", True)
                 )
                 release = ProfAssistMLRelease(
                     organization_id=job.organization_id,
@@ -518,7 +545,7 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                         "gate_report_artifact": release_data.get("gate_report_artifact"),
                         "gate_report_sha256": release_data.get("gate_report_sha256"),
                         "training_corpus_sha256": release_data.get("training_corpus_sha256"),
-                        "training_summary": result,
+                        "training_summary": summary,
                     },
                     gate_passed=gate_passed,
                     verified=True,
@@ -531,6 +558,7 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                     "release_id": str(release.id),
                     "candidate_version": candidate_version,
                     "gate_passed": gate_passed,
+                    "training_run_id": summary.get("mlflow_run_id"),
                 }
                 job.status = "completed"
                 await db.flush()

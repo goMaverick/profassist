@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 
+import { WorkspaceLink } from "@/components/layout/workspace-link";
 import { useActiveRoute } from "@/lib/active-route";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +25,11 @@ export function PageTabs({ tabs, className }: { tabs: PageTab[]; className?: str
   const isActive = useActiveRoute();
   return (
     <div className={cn("border-border border-b", className)}>
-      <nav className="-mb-px flex gap-0.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav className="-mb-px flex [scrollbar-width:none] gap-0.5 overflow-x-auto [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((tab) => {
           const active = isActive(tab.href, tab.exact);
           return (
-            <Link
+            <WorkspaceLink
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
@@ -37,12 +37,12 @@ export function PageTabs({ tabs, className }: { tabs: PageTab[]; className?: str
                 "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-sm font-medium whitespace-nowrap transition-colors",
                 active
                   ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  : "text-muted-foreground hover:text-foreground border-transparent",
               )}
             >
               {tab.icon && <tab.icon className="h-4 w-4" />}
               {tab.label}
-            </Link>
+            </WorkspaceLink>
           );
         })}
       </nav>

@@ -45,6 +45,7 @@ async def test_ml_admin_routes_are_registered() -> None:
     assert f"{prefix}/models" in paths
     assert f"{prefix}/plagiarism/probe" in paths
     assert f"{prefix}/plagiarism/contract" in paths
+    assert f"{prefix}/jobs/{{job_id}}/metrics" in paths
 
 
 @pytest.mark.anyio
@@ -54,6 +55,7 @@ async def test_ml_admin_routes_are_registered() -> None:
         ("get", "/admin/ml/models"),
         ("post", "/admin/ml/plagiarism/probe"),
         ("get", "/admin/ml/plagiarism/contract"),
+        ("get", "/admin/ml/jobs/00000000-0000-0000-0000-000000000001/metrics"),
     ],
 )
 async def test_non_admin_is_forbidden(client, method: str, path: str) -> None:
@@ -105,6 +107,47 @@ async def test_models_payload_has_two_cards_and_no_pass_fail(
         "env_only": True,
     }
     assert body["mlflow"] == {"reachable": True, "tracking_uri": "http://mlflow:5000"}
+
+
+@pytest.mark.anyio
+async def test_training_metrics_uses_the_saved_run_and_current_organization(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.api.deps import get_db_session
+    from app.profassist.deps import get_profassist_org
+
+    _override(True)
+    org_id, job_id = uuid.uuid4(), uuid.uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        organization_id=org_id,
+        operation="plagiarism-train",
+        status="completed",
+        result={"training_run_id": "registered-training-run"},
+    )
+    seen = []
+
+    async def get(_model, row_id):
+        assert row_id == job_id
+        return job
+
+    async def read_metrics(run_id, operation):
+        seen.append((run_id, operation))
+        return {"recall": 0.75}
+
+    app.dependency_overrides[get_db_session] = lambda: SimpleNamespace(get=get)
+    app.dependency_overrides[get_profassist_org] = lambda: SimpleNamespace(id=org_id)
+    monkeypatch.setattr(ml_admin, "training_metrics", read_metrics)
+    url = f"{settings.API_V1_STR}/profassist/admin/ml/jobs/{job_id}/metrics"
+
+    response = await client.get(url, params={"run_id": "different-run"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"recall": 0.75}
+
+    job.organization_id = uuid.uuid4()
+    response = await client.get(url)
+    assert response.status_code == 404
+    assert seen == [("registered-training-run", "plagiarism-train")]
 
 
 @pytest.mark.anyio

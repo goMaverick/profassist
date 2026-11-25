@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { MessageSquare, Search } from "lucide-react";
 
 import { APP_NAV_ITEMS, NavLinks } from "@/components/layout/app-nav";
 import { Header } from "@/components/layout/header";
-import { ProfessorChat } from "@/components/profassist/professor-chat";
 import { resetPageContext } from "@/components/profassist/page-context";
 import {
   Button,
@@ -17,6 +17,10 @@ import {
   Input,
 } from "@/components/ui";
 import { stripLocale } from "@/lib/active-route";
+
+const ProfessorChat = dynamic(() =>
+  import("@/components/profassist/professor-chat").then((module) => module.ProfessorChat),
+);
 
 const PAGES: Record<string, { title: string; section: string; description: string }> = {
   "/dashboard": {
@@ -83,6 +87,11 @@ const PAGES: Record<string, { title: string; section: string; description: strin
     title: "AI settings",
     section: "Admin",
     description: "Models, prompts, and the servers the assistant talks to. Keys stay hidden.",
+  },
+  "/admin/models": {
+    title: "Models",
+    section: "Admin",
+    description: "Choose a model, prepare its training data, and review how it performed.",
   },
   "/design": {
     title: "Course design",

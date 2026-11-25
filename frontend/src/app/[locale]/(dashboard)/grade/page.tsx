@@ -28,7 +28,7 @@ import {
   Label,
   Textarea,
 } from "@/components/ui";
-import { Banner, pa, run } from "@/components/profassist/bits";
+import { Banner, pa, run, useWorkspaceQuery } from "@/components/profassist/bits";
 import type { Box, Hit, MarginNote } from "@/components/profassist/document-viewer";
 import { CouncilStage } from "@/components/profassist/council-stage";
 import type { GradeStatusPoint } from "./grade-chart";
@@ -342,14 +342,22 @@ type Stage = "courses" | "assignments" | "dashboard";
 
 export default function GradePage() {
   const uploadRef = useRef<HTMLInputElement>(null);
-  const [courses, setCourses] = useState<CourseRow[]>([]);
-  const [homeLoading, setHomeLoading] = useState(true);
-  const [homeError, setHomeError] = useState("");
+  const {
+    data: home,
+    isPending: homeLoading,
+    error: homeLoadError,
+  } = useWorkspaceQuery<{ courses: CourseRow[] }>("/home");
+  const courses = home?.courses ?? [];
+  const homeError = homeLoadError?.message;
+  const onlyCourseId = courses.length === 1 ? courses[0]?.id : undefined;
   const [stage, setStage] = useState<Stage>("courses");
   const [courseId, setCourseId] = useState("");
   const [assessmentId, setAssessmentId] = useState("");
-  const [integrity, setIntegrity] = useState<IntegrityItem[]>([]);
-  const [integrityError, setIntegrityError] = useState("");
+  const { data: integrityOverview, error: integrityLoadError } = useWorkspaceQuery<{
+    items: IntegrityItem[];
+  }>(courseId ? "/integrity/overview?course=all" : null);
+  const integrity = integrityOverview?.items ?? [];
+  const integrityError = integrityLoadError?.message;
   const [error, setError] = useState("");
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
@@ -377,47 +385,10 @@ export default function GradePage() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    pa<{ courses: CourseRow[] }>("/home")
-      .then((data) => {
-        if (cancelled) return;
-        const list = data.courses || [];
-        setCourses(list);
-        const only = list[0];
-        if (list.length === 1 && only) {
-          setCourseId(only.id);
-          setStage("assignments");
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setHomeError(err instanceof Error ? err.message : "Could not load courses");
-      })
-      .finally(() => {
-        if (!cancelled) setHomeLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    pa<{ items: IntegrityItem[] }>("/integrity/overview?course=all")
-      .then((data) => {
-        if (cancelled) return;
-        setIntegrity(data.items || []);
-        setIntegrityError("");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setIntegrity([]);
-        setIntegrityError(err instanceof Error ? err.message : "Could not load integrity");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!onlyCourseId) return;
+    setCourseId(onlyCourseId);
+    setStage("assignments");
+  }, [onlyCourseId]);
 
   const course = courses.find((item) => item.id === courseId) || null;
 

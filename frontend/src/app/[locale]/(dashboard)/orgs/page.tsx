@@ -14,9 +14,8 @@ import { getErrorMessage, MAX_AVATAR_SIZE_BYTES } from "@/lib/utils";
 import { ROUTES } from "@/lib/constants";
 
 export default function OrgsPage() {
-  const { orgs, activeOrgId, fetchOrgs, switchOrg } = useOrganizations();
+  const { orgs, activeOrgId, fetchOrgs, switchOrg, isPending, error } = useOrganizations();
   const [createOpen, setCreateOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingOrgIdRef = useRef<string | null>(null);
@@ -47,16 +46,8 @@ export default function OrgsPage() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await fetchOrgs();
-      if (!cancelled) setIsLoading(false);
-    })();
     if (searchParams.get("create") === "1") setCreateOpen(true);
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchOrgs, searchParams]);
+  }, [searchParams]);
 
   return (
     <div className="space-y-6">
@@ -72,15 +63,22 @@ export default function OrgsPage() {
         }
       />
 
-      {isLoading ? (
+      {error && (
+        <p role="alert" className="text-destructive text-sm">
+          {error.message}
+        </p>
+      )}
+      {isPending ? (
         <LoadingState variant="skeleton-list" rows={3} />
       ) : orgs.length === 0 ? (
-        <EmptyState
-          icon={Building2}
-          title="No organizations yet"
-          description="Create your first workspace to invite teammates and share access to conversations and knowledge bases."
-          cta={{ label: "Create organization", onClick: () => setCreateOpen(true) }}
-        />
+        !error && (
+          <EmptyState
+            icon={Building2}
+            title="No organizations yet"
+            description="Create your first workspace to invite teammates and share access to conversations and knowledge bases."
+            cta={{ label: "Create organization", onClick: () => setCreateOpen(true) }}
+          />
+        )
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
           {orgs.map((org) => {
@@ -198,4 +196,3 @@ export default function OrgsPage() {
     </div>
   );
 }
-

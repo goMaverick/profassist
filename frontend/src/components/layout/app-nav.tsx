@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   Activity,
   BadgeCheck,
@@ -17,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { WorkspaceLink } from "@/components/layout/workspace-link";
 import { useActiveRoute } from "@/lib/active-route";
 import { ROUTES } from "@/lib/constants";
 import { cn, isAppAdmin } from "@/lib/utils";
@@ -83,7 +83,7 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             </p>
           ) : null}
           {group.items.map((item) => (
-            <Link
+            <WorkspaceLink
               key={item.href}
               href={item.href}
               onClick={onNavigate}
@@ -92,12 +92,12 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             >
               <item.icon className="h-4 w-4 shrink-0" />
               {item.label}
-            </Link>
+            </WorkspaceLink>
           ))}
         </div>
       ))}
       {isAppAdmin(user) ? (
-        <Link
+        <WorkspaceLink
           href={ROUTES.ADMIN}
           onClick={onNavigate}
           aria-current={isActive(ROUTES.ADMIN) ? "page" : undefined}
@@ -105,7 +105,7 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
         >
           <ShieldAlert className="h-4 w-4 shrink-0" />
           Admin
-        </Link>
+        </WorkspaceLink>
       ) : null}
     </nav>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowUp } from "lucide-react";
 import {
   PromptInput,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Label } from "@/components/ui/label";
+import { useAuthStore } from "@/stores";
 import {
   Select,
   SelectContent,
@@ -51,19 +52,9 @@ export function HomeChat({
   courseId?: string;
   onCourse?: (id: string) => void;
 }) {
-  const [name, setName] = useState("Professor");
+  const name = useAuthStore((state) => state.user?.full_name?.trim().split(/\s+/)[0]);
   const [text, setText] = useState("");
   const { turns, busy, error } = useChat();
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { full_name?: string } | null) => {
-        const first = data?.full_name?.split(" ")[0];
-        if (first) setName(first);
-      })
-      .catch(() => undefined);
-  }, []);
 
   async function send(message: string) {
     setText("");
@@ -73,7 +64,7 @@ export function HomeChat({
   return (
     <section className="pa-hero" aria-label="Ask ProfAssist">
       <div className="pa-greet">
-        <h2>Hi Professor {name}, what do you want to do?</h2>
+        <h2>Hi Professor{name ? ` ${name}` : ""}, what do you want to do?</h2>
         {courses.length > 0 && onCourse && (
           <div className="grid gap-2">
             <Label htmlFor="course-switcher">Course</Label>

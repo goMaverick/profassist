@@ -70,10 +70,11 @@ def _job_card(row: ProfAssistMLJob) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "error": row.error or None,
-        "model_version": row.model_version,
+        "model_version": result.get("candidate_version") or row.model_version,
         "snapshot_id": result.get("snapshot_id"),
         "release_id": result.get("release_id"),
         "gate_passed": result.get("gate_passed"),
+        "review_count": result.get("review_count"),
     }
 
 

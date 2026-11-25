@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import select
@@ -1068,51 +1069,64 @@ async def assignment_matrix_db(
     }
 
 
-def _split_paragraphs(text: str) -> list[str]:
-    body = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not body:
-        return []
-    return [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
-
-
-def _split_runs(paragraph: str, passages: list[dict[str, Any]], side: str) -> list[dict[str, Any]]:
-    for index, passage in enumerate(passages):
-        needle = str(passage.get(side) or "")
-        if not needle:
+def _passage_ranges(
+    text: str, passages: list[dict[str, Any]], side: str
+) -> list[tuple[int, int, dict[str, Any]]]:
+    ranges = []
+    for passage in passages:
+        start, end = passage.get(f"{side}_start"), passage.get(f"{side}_end")
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text):
+            ranges.append((start, end, passage))
             continue
-        at = paragraph.find(needle)
-        if at < 0:
-            continue
-        runs: list[dict[str, Any]] = []
-        if at:
-            runs.append(_run(paragraph[:at]))
-        runs.append(
-            _run(
-                needle,
-                str(passage.get("id") or ""),
-                bool(passage.get("common")),
+        words = str(passage.get(side) or "").split()
+        if words:
+            pattern = r"\s+".join(re.escape(word) for word in words)
+            ranges.extend(
+                (match.start(), match.end(), passage) for match in re.finditer(pattern, text)
             )
-        )
-        tail = paragraph[at + len(needle) :]
-        if tail:
-            runs.extend(
-                _split_runs(
-                    tail,
-                    passages[:index] + passages[index + 1 :],
-                    side,
-                )
-            )
-        return runs
-    return [_run(paragraph)]
+    return ranges
 
 
 def _document_paragraphs(
     text: str, passages: list[dict[str, Any]], side: str
 ) -> list[dict[str, Any]]:
-    paragraphs = _split_paragraphs(text)
-    if not paragraphs:
+    if not text.strip():
         return [{"runs": [_run("No text was stored for this submission.")]}]
-    return [{"runs": _split_runs(paragraph, passages, side)} for paragraph in paragraphs]
+
+    # Keep offsets in the original text, including CRLF and leading whitespace.
+    paragraph_breaks = list(re.finditer(r"(?>\r\n|[\r\n])[^\S\r\n]*(?>\r\n|[\r\n])", text))
+    paragraph_starts = [0, *(match.end() for match in paragraph_breaks)]
+    paragraph_ends = [*(match.start() for match in paragraph_breaks), len(text)]
+    ranges = _passage_ranges(text, passages, side)
+    paragraphs: list[dict[str, Any]] = []
+    for start, end in zip(paragraph_starts, paragraph_ends, strict=True):
+        body = text[start:end]
+        if not body.strip():
+            continue
+        start += len(body) - len(body.lstrip())
+        end -= len(body) - len(body.rstrip())
+        overlapping = [
+            (max(start, lower), min(end, upper), passage)
+            for lower, upper, passage in ranges
+            if lower < end and upper > start
+        ]
+        boundaries = sorted(
+            {start, end, *(point for lower, upper, _ in overlapping for point in (lower, upper))}
+        )
+        runs = []
+        for lower, upper in pairwise(boundaries):
+            covered = [passage for a, b, passage in overlapping if a <= lower and upper <= b]
+            ids = list(dict.fromkeys(str(passage.get("id") or "") for passage in covered))
+            run = _run(
+                text[lower:upper],
+                ids[0] if ids else "",
+                bool(ids) and all(p.get("common") for p in covered),
+            )
+            if len(ids) > 1:
+                run["ids"] = ids
+            runs.append(run)
+        paragraphs.append({"runs": runs})
+    return paragraphs
 
 
 def _submitted_label(submission: Any) -> str:

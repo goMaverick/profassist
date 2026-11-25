@@ -25,7 +25,7 @@ from app.profassist.ml.gateway import (
     model_cards,
     plagiarism_status,
 )
-from app.profassist.tracking import list_registered_models_async
+from app.profassist.tracking import list_registered_models_async, training_metrics
 
 router = APIRouter()
 
@@ -194,6 +194,35 @@ async def ml_job_list(
     from app.profassist.ml.training import list_jobs
 
     return await list_jobs(db, org.id, operation, course_id, assessment_id)
+
+
+@router.get("/admin/ml/jobs/{job_id}/metrics")
+async def ml_job_metrics(
+    job_id: uuid.UUID, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
+) -> dict[str, float]:
+    from app.profassist.errors import ProfassistError
+    from app.profassist.models import ProfAssistMLJob, ProfAssistMLRelease
+
+    del user
+    job = await db.get(ProfAssistMLJob, job_id)
+    if (
+        job is None
+        or job.organization_id != org.id
+        or job.operation not in {"dropout-train", "plagiarism-train"}
+    ):
+        raise ProfassistError(404, "Training run not found.")
+    if job.status != "completed":
+        return {}
+
+    result = job.result or {}
+    summary = (result.get("worker_result") or {}).get("summary") or {}
+    run_id = result.get("training_run_id") or summary.get("mlflow_run_id")
+    if not run_id and result.get("release_id"):
+        release = await db.get(ProfAssistMLRelease, uuid.UUID(result["release_id"]))
+        if release and release.organization_id == org.id:
+            legacy = (release.gate_evidence or {}).get("training_summary") or {}
+            run_id = legacy.get("mlflow_run_id")
+    return await training_metrics(run_id, job.operation) if isinstance(run_id, str) and run_id else {}
 
 
 @router.post("/admin/ml/plagiarism/snapshot")

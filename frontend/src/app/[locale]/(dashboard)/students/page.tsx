@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 
-import { Banner, pa, useWorkspace } from "@/components/profassist/bits";
+import { Banner, useWorkspace, useWorkspaceQuery } from "@/components/profassist/bits";
 import {
   Badge,
   Table,
@@ -120,15 +119,9 @@ function bandClass(band: string) {
 
 export default function StudentsPage() {
   const { course, error: loadError } = useWorkspace();
-  const [error, setError] = useState("");
-  const [data, setData] = useState<Payload | null>(null);
-
-  useEffect(() => {
-    if (!course) return;
-    pa<Payload>(`/courses/${course.id}/students`)
-      .then(setData)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Load failed"));
-  }, [course]);
+  const { data, error, isPending } = useWorkspaceQuery<Payload>(
+    course ? `/courses/${course.id}/students` : null,
+  );
 
   const warning = data?.early_warning;
   const roster = data?.students || [];
@@ -169,7 +162,12 @@ export default function StudentsPage() {
       <p className="text-sm text-[#525252]">
         {code ? `Course filter: ${code} ${title}`.trim() : "No course selected yet."}
       </p>
-      {(error || loadError) && <Banner>{error || loadError}</Banner>}
+      {(error || loadError) && <Banner>{error?.message || loadError}</Banner>}
+      {course && isPending && (
+        <p className="text-muted-foreground text-sm" role="status">
+          Loading student records…
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="gap-1" aria-label="AI">
           <Sparkles className="h-3 w-3" aria-hidden="true" />

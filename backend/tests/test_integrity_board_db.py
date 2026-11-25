@@ -11,6 +11,7 @@ import pytest
 from app.api.routes.v1 import profassist as route
 from app.core.config import settings
 from app.profassist.integrity_board import (
+    _document_paragraphs,
     _group_labels,
     _norm,
     _pair_id,
@@ -27,6 +28,32 @@ SHARED_TEXT = (
     "The group counted entries at the east stair every afternoon for four weeks "
     "and kept the tally in the same notebook."
 )
+
+
+def test_report_highlights_the_stored_occurrence_across_paragraphs() -> None:
+    text = "Repeated wording.\r\n\r\nBefore the repeated wording.\r\n\r\nA second paragraph follows."
+    start = text.index("repeated")
+    end = text.index(" follows")
+    passages = [
+        {"id": "outer", "left_start": start, "left_end": end},
+        {"id": "inner", "left": "wording. A second"},
+    ]
+
+    paragraphs = _document_paragraphs(text, passages, "left")
+
+    assert [run["id"] for run in paragraphs[0]["runs"]] == [""]
+    assert [
+        (run["text"], run.get("ids", [run["id"]]))
+        for paragraph in paragraphs[1:]
+        for run in paragraph["runs"]
+    ] == [
+        ("Before the ", [""]),
+        ("repeated ", ["outer"]),
+        ("wording.", ["outer", "inner"]),
+        ("A second", ["outer", "inner"]),
+        (" paragraph", ["outer"]),
+        (" follows.", [""]),
+    ]
 
 
 class _Result:

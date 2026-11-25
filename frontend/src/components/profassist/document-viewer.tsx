@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Download, Pencil, Trash2, ZoomIn, ZoomOut } from "lucide-react";
-import { getDocument, GlobalWorkerOptions, TextLayer } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, TextLayer, type PDFDocumentProxy } from "pdfjs-dist";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
@@ -33,6 +34,11 @@ export interface MarginNote {
   quote?: string;
 }
 
+interface PageSize {
+  width: number;
+  height: number;
+}
+
 export function fileUrl(path: string) {
   return `/api/profassist${path}`;
 }
@@ -40,10 +46,12 @@ export function fileUrl(path: string) {
 export function DocumentPane({
   url,
   title,
+  filename,
   kind = "pdf",
   downloadUrl,
   hits = [],
   activeId,
+  comparison = false,
   notes = [],
   allowSelection = false,
   onSelectText,
@@ -52,10 +60,12 @@ export function DocumentPane({
 }: {
   url: string;
   title: string;
+  filename?: string;
   kind?: "pdf" | "docx";
   downloadUrl?: string;
   hits?: Hit[];
   activeId?: string;
+  comparison?: boolean;
   notes?: MarginNote[];
   allowSelection?: boolean;
   onSelectText?: (pick: { page: number; quote: string; box: Box }) => void;
@@ -63,8 +73,10 @@ export function DocumentPane({
   onDeleteNote?: (id: string) => void;
 }) {
   const frame = useRef<HTMLDivElement>(null);
-  const [pdf, setPdf] = useState<Awaited<ReturnType<typeof loadPdf>> | null>(null);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState(0);
+  const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1.27);
   const [failed, setFailed] = useState("");
   const fitted = useRef(false);
@@ -74,8 +86,19 @@ export function DocumentPane({
     setFailed("");
     const task = getDocument({ url, withCredentials: true });
     task.promise
-      .then((document) => {
+      .then(async (document) => {
         if (cancelled) return;
+        const sizes = comparison
+          ? await Promise.all(
+              Array.from({ length: document.numPages }, async (_, index) => {
+                const page = await document.getPage(index + 1);
+                const { width, height } = page.getViewport({ scale: 1 });
+                return { width, height };
+              }),
+            )
+          : [];
+        if (cancelled) return;
+        setPageSizes(sizes);
         setPdf(document);
         setPages(document.numPages);
       })
@@ -86,10 +109,11 @@ export function DocumentPane({
       cancelled = true;
       void task.destroy();
     };
-  }, [url]);
+  }, [url, comparison]);
 
   const pane = title.replace(/\s+/g, "-");
   const activePage = hits.find((hit) => hit.id === activeId)?.page || notes[0]?.page || 1;
+  const minScale = comparison ? 0.35 : 0.9;
 
   useEffect(() => {
     const node = frame.current;
@@ -97,32 +121,71 @@ export function DocumentPane({
     const styles = getComputedStyle(node);
     const pad = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
     const gutter = node.classList.contains("has-notes") ? 220 : 0;
-    const fit = (node.clientWidth - pad - gutter - 8) / 595;
-    setScale(Math.min(1.45, Math.max(gutter ? 0.55 : 0.9, fit)));
+    const fit = (node.clientWidth - pad - gutter - 8) / (pageSizes[0]?.width ?? 595);
+    setScale(Math.min(1.45, Math.max(gutter ? 0.55 : minScale, fit)));
     fitted.current = true;
-  }, [pages]);
+  }, [pages, pageSizes, minScale]);
 
   useEffect(() => {
     if (!activeId) return;
-    document
-      .getElementById(`hit-${pane}-${activeId}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [activeId, pages, scale, pane]);
+    const target = document.getElementById(`hit-${pane}-${activeId}`);
+    const node = frame.current;
+    if (comparison && target && node) {
+      node.scrollTop +=
+        target.getBoundingClientRect().top -
+        node.getBoundingClientRect().top -
+        node.clientHeight / 3;
+    } else {
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [activeId, pages, scale, pane, comparison]);
+
+  function updateCurrentPage() {
+    const node = frame.current;
+    if (!node) return;
+    const readingLine = node.getBoundingClientRect().top + node.clientHeight / 3;
+    const firstVisible = Array.from(node.children).findIndex(
+      (page) => page.getBoundingClientRect().bottom > readingLine,
+    );
+    if (firstVisible >= 0) setCurrentPage(firstVisible + 1);
+  }
 
   return (
-    <section className="pa-doc">
+    <section
+      className={comparison ? "pa-doc pa-integrity-reader" : "pa-doc"}
+      aria-label={comparison ? `${title} report` : undefined}
+    >
       <header className="pa-doc-head">
-        <div className="pa-doc-title">
-          <strong>{title}</strong>
-          <Badge
-            className={
-              kind === "docx"
-                ? "border-transparent bg-blue-100 text-blue-800 hover:bg-blue-100"
-                : "border-transparent bg-muted text-muted-foreground hover:bg-muted"
-            }
-          >
-            {kind === "docx" ? "Word, shown as PDF" : "PDF"}
-          </Badge>
+        <div className="pa-doc-title min-w-0">
+          {comparison ? (
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">{title}</h3>
+              {filename && (
+                <p className="text-muted-foreground truncate text-xs" title={filename}>
+                  {filename}
+                </p>
+              )}
+            </div>
+          ) : (
+            <strong>{title}</strong>
+          )}
+          {comparison ? (
+            pages > 0 && (
+              <Badge variant="outline">
+                Page {currentPage} of {pages}
+              </Badge>
+            )
+          ) : (
+            <Badge
+              className={
+                kind === "docx"
+                  ? "border-transparent bg-blue-100 text-blue-800 hover:bg-blue-100"
+                  : "bg-muted text-muted-foreground hover:bg-muted border-transparent"
+              }
+            >
+              {kind === "docx" ? "Word, shown as PDF" : "PDF"}
+            </Badge>
+          )}
         </div>
         <div className="pa-doc-tools">
           <Button
@@ -131,7 +194,9 @@ export function DocumentPane({
             size="icon-sm"
             aria-label="Zoom out"
             title="Zoom out"
-            onClick={() => setScale((value) => Math.max(0.9, Number((value - 0.15).toFixed(2))))}
+            onClick={() =>
+              setScale((value) => Math.max(minScale, Number((value - 0.15).toFixed(2))))
+            }
           >
             <ZoomOut />
           </Button>
@@ -155,36 +220,51 @@ export function DocumentPane({
         </div>
       </header>
       {failed && <p role="alert">{failed}</p>}
-      <div className="pa-thumbs" aria-label="Pages">
-        {Array.from({ length: pages }, (_, index) => (
-          <button
-            key={index}
-            type="button"
-            className={index + 1 === activePage ? "is-active" : ""}
-            onClick={() =>
-              document
-                .getElementById(`page-${title}-${index + 1}`)
-                ?.scrollIntoView({ behavior: "smooth", block: "start" })
-            }
-          >
-            {pdf && <Thumb pdf={pdf} page={index + 1} pane={pane} />}
-            <span>{index + 1}</span>
-          </button>
-        ))}
-      </div>
-      <div className={`pa-doc-scroll${notes.length ? " has-notes" : ""}`} ref={frame}>
+      {comparison && !pages && !failed && (
+        <p role="status" className="text-muted-foreground py-3 text-sm">
+          Opening report…
+        </p>
+      )}
+      {!comparison && (
+        <div className="pa-thumbs" aria-label="Pages">
+          {Array.from({ length: pages }, (_, index) => (
+            <button
+              key={index}
+              type="button"
+              className={index + 1 === activePage ? "is-active" : ""}
+              onClick={() =>
+                document
+                  .getElementById(`page-${title}-${index + 1}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
+              {pdf && <Thumb pdf={pdf} page={index + 1} pane={pane} />}
+              <span>{index + 1}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        className={cn("pa-doc-scroll", notes.length > 0 && "has-notes")}
+        ref={frame}
+        onScroll={comparison ? updateCurrentPage : undefined}
+        role={comparison ? "region" : undefined}
+        aria-label={comparison ? `${title} full report` : undefined}
+        tabIndex={comparison ? 0 : undefined}
+      >
         {Array.from({ length: pages }, (_, index) => (
           <PageView
             key={`${url}-${index}-${scale}`}
             pdf={pdf}
             pageNumber={index + 1}
             scale={scale}
+            pageSize={pageSizes[index]}
             title={title}
             pane={pane}
             hits={hits.filter((hit) => hit.page === index + 1)}
             notes={notes.filter((note) => note.page === index + 1)}
             activeId={activeId}
-            allowSelection={allowSelection}
+            allowSelection={allowSelection || comparison}
             onSelectText={onSelectText}
             onEditNote={onEditNote}
             onDeleteNote={onDeleteNote}
@@ -195,19 +275,7 @@ export function DocumentPane({
   );
 }
 
-async function loadPdf(url: string) {
-  return getDocument({ url, withCredentials: true }).promise;
-}
-
-function Thumb({
-  pdf,
-  page,
-  pane,
-}: {
-  pdf: Awaited<ReturnType<typeof loadPdf>>;
-  page: number;
-  pane: string;
-}) {
+function Thumb({ pdf, page, pane }: { pdf: PDFDocumentProxy; page: number; pane: string }) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +303,7 @@ function PageView({
   pdf,
   pageNumber,
   scale,
+  pageSize,
   title,
   pane,
   hits,
@@ -245,9 +314,10 @@ function PageView({
   onEditNote,
   onDeleteNote,
 }: {
-  pdf: Awaited<ReturnType<typeof loadPdf>> | null;
+  pdf: PDFDocumentProxy | null;
   pageNumber: number;
   scale: number;
+  pageSize?: PageSize;
   title: string;
   pane: string;
   hits: Hit[];
@@ -321,8 +391,12 @@ function PageView({
     <article
       id={`page-${title}-${pageNumber}`}
       className="pa-page"
-      style={{ width: size.width || undefined }}
-      onMouseUp={selectText}
+      style={
+        pageSize
+          ? { width: pageSize.width * scale, height: pageSize.height * scale }
+          : { width: size.width || undefined }
+      }
+      onMouseUp={onSelectText ? selectText : undefined}
     >
       <canvas id={`canvas-${title}-${pageNumber}`} />
       <div id={`text-${title}-${pageNumber}`} className="pa-text-layer" />
@@ -330,7 +404,8 @@ function PageView({
         <span
           key={hit.id}
           id={`hit-${pane}-${hit.id}`}
-          className={`pa-hit pa-hit-${hit.tone}${hit.id === activeId ? " pa-pulse" : ""}`}
+          className={cn("pa-hit", `pa-hit-${hit.tone}`, hit.id === activeId && "pa-pulse")}
+          data-active-match={hit.id === activeId ? "" : undefined}
           style={{
             left: `${hit.box.x * 100}%`,
             top: `${hit.box.y * 100}%`,

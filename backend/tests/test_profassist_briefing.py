@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from threading import get_ident
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -158,9 +159,11 @@ async def test_briefing_facts_are_owner_and_org_scoped(monkeypatch) -> None:
     await db.flush()
 
     captured: dict = {}
+    request_thread = get_ident()
 
     def fake(facts: dict) -> dict:
         captured["facts"] = facts
+        captured["thread"] = get_ident()
         return {
             "headline": "One thing",
             "bullets": ["a", "b", "c"],
@@ -172,6 +175,7 @@ async def test_briefing_facts_are_owner_and_org_scoped(monkeypatch) -> None:
 
     result = await briefing.build_briefing(db, org_id, user_id)
 
+    assert captured["thread"] != request_thread
     facts = captured["facts"]
     assert facts["professor"] == {
         "name": "Dr Pat",
