@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
-import { MessageResponse } from "@/components/ai-elements/message";
+
+const MessageResponse = lazy(() =>
+  import("@/components/ai-elements/message").then((module) => ({ default: module.MessageResponse })),
+);
 
 interface CaseRow {
   groups: string[];
@@ -192,5 +195,9 @@ export function QuietTool({ name, output }: { name: string; output: unknown }) {
 
 export function AnswerText({ text }: { text: string }) {
   if (!text) return null;
-  return <MessageResponse className="pa-answer">{text}</MessageResponse>;
+  return (
+    <Suspense fallback={<p className="pa-answer whitespace-pre-wrap">{text}</p>}>
+      <MessageResponse className="pa-answer">{text}</MessageResponse>
+    </Suspense>
+  );
 }

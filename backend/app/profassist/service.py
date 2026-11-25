@@ -2016,6 +2016,11 @@ async def list_students(db: AsyncSession, org_id: uuid.UUID, course_id: uuid.UUI
         }
         for row in result.scalars().all()
     ]
+    from app.profassist.ml.dropout_jobs import list_student_predictions
+
+    predictions_by_student = await list_student_predictions(db, org_id, course_id)
+    for student in students:
+        student["dropout_prediction"] = predictions_by_student.get(student["id"])
     activity_result = await db.execute(
         select(MoodleActivity).where(
             MoodleActivity.organization_id == org_id,

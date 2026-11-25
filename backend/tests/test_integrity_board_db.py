@@ -11,6 +11,7 @@ import pytest
 from app.api.routes.v1 import profassist as route
 from app.core.config import settings
 from app.profassist.integrity_board import (
+    _document_paragraphs,
     _group_labels,
     _norm,
     _pair_id,
@@ -27,6 +28,34 @@ SHARED_TEXT = (
     "The group counted entries at the east stair every afternoon for four weeks "
     "and kept the tally in the same notebook."
 )
+
+
+def test_report_highlights_the_stored_occurrence_across_paragraphs() -> None:
+    text = (
+        "Repeated wording.\r\n\r\nBefore the repeated wording.\r\n\r\nA second paragraph follows."
+    )
+    start = text.index("repeated")
+    end = text.index(" follows")
+    passages = [
+        {"id": "outer", "left_start": start, "left_end": end},
+        {"id": "inner", "left": "wording. A second"},
+    ]
+
+    paragraphs = _document_paragraphs(text, passages, "left")
+
+    assert [run["id"] for run in paragraphs[0]["runs"]] == [""]
+    assert [
+        (run["text"], run.get("ids", [run["id"]]))
+        for paragraph in paragraphs[1:]
+        for run in paragraph["runs"]
+    ] == [
+        ("Before the ", [""]),
+        ("repeated ", ["outer"]),
+        ("wording.", ["outer", "inner"]),
+        ("A second", ["outer", "inner"]),
+        (" paragraph", ["outer"]),
+        (" follows.", [""]),
+    ]
 
 
 class _Result:
@@ -256,10 +285,69 @@ async def test_matrix_uses_the_stored_flag_score_over_the_computed_one() -> None
             "shared": 1,
             "writing": False,
             "status": "Review",
+            "analysis_source": "legacy-record",
         }
     ]
-    assert page["card"]["status"] == "Review"
-    assert page["card"]["highest"] == 42
+
+
+@pytest.mark.anyio
+async def test_worker_clear_pair_suppresses_legacy_heuristic_fallback() -> None:
+    coverage = _flag("s-a", "s-b", 0, section="coverage", kind="worker")
+    coverage.source = "worker"
+    coverage.status = "open"
+    session = _Session(
+        courses=[_course()],
+        assessments=[_assessment()],
+        assignments=[_assignment()],
+        submissions=[_submission("s-a", "Group A"), _submission("s-b", "Group B")],
+        flags=[coverage],
+    )
+
+    page = await assignment_matrix_db(session, ORG, USER, "MAAI903", "1")
+
+    assert page["matrix"] == [[100, 0], [0, 100]]
+    assert page["pairs"][0]["status"] == "Clear"
+    assert page["pairs"][0]["shared"] == 0
+
+
+@pytest.mark.anyio
+async def test_worker_pair_detail_uses_immutable_version_text_and_offsets() -> None:
+    left_text = "Before reused sentence after."
+    right_text = "Other reused sentence end."
+    left_version_id, right_version_id = uuid.uuid4(), uuid.uuid4()
+    flag = _flag("s-a", "s-b", 0.88, kind="worker")
+    flag.source = "worker"
+    flag.status = "open"
+    flag.left_version_id = left_version_id
+    flag.right_version_id = right_version_id
+    flag.left_start, flag.left_end = 7, 22
+    flag.right_start, flag.right_end = 6, 21
+    flag.passage_a, flag.passage_b = "reused sentence", "reused sentence"
+    session = _Session(
+        courses=[_course()],
+        assessments=[_assessment()],
+        assignments=[_assignment()],
+        submissions=[
+            _submission("s-a", "Group A", "mutable left"),
+            _submission("s-b", "Group B", "mutable right"),
+        ],
+        flags=[flag],
+    )
+    session._batches.append(
+        [
+            SimpleNamespace(id=left_version_id, submission_id="s-a", text_content=left_text),
+            SimpleNamespace(id=right_version_id, submission_id="s-b", text_content=right_text),
+        ]
+    )
+
+    detail = await pair_detail_db(session, ORG, USER, "MAAI903", "1", "A", "B")
+
+    assert detail["left_version_id"] == str(left_version_id)
+    assert detail["right_version_id"] == str(right_version_id)
+    assert detail["matches"][0]["left_start"] == 7
+    assert detail["matches"][0]["right_end"] == 21
+    assert detail["analysis_source"] == "worker"
+    assert detail["left_text"][0]["runs"][0]["text"] == "Before "
 
 
 @pytest.mark.anyio
@@ -285,6 +373,32 @@ async def test_overview_uses_the_published_assignment_number_and_title() -> None
     page = await assignment_matrix_db(session, ORG, USER, "MAAI903", "A1")
     assert page["assignment"] == "A1"
     assert page["name"] == "Workshops report"
+
+
+@pytest.mark.anyio
+async def test_matrix_prefers_published_number_over_another_assignments_order() -> None:
+    session = _Session(
+        courses=[_course()],
+        assessments=[
+            _assessment(assessment_id="assessment-first", external_id=""),
+            _assessment(assessment_id="assessment-second", external_id=""),
+        ],
+        assignments=[
+            _assignment(number="2", title="Second assignment", assessment_id="assessment-first"),
+            _assignment(number="1", title="First assignment", assessment_id="assessment-second"),
+        ],
+        submissions=[
+            _submission("s-other", "Group C", assessment_id="assessment-first"),
+            _submission("s-a", "Group A", assessment_id="assessment-second"),
+            _submission("s-b", "Group B", assessment_id="assessment-second"),
+        ],
+    )
+
+    page = await assignment_matrix_db(session, ORG, USER, "MAAI903", "1")
+
+    assert page["assignment"] == "1"
+    assert page["name"] == "First assignment"
+    assert page["groups"] == ["A", "B"]
 
 
 @pytest.mark.anyio

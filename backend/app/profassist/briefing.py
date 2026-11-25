@@ -6,6 +6,7 @@ If the model is unavailable the deterministic fallback still describes the real
 day, and the professor's dashboard never shows an error page for it.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -327,7 +328,7 @@ async def build_briefing(
     focus = ""
     trace_url: str | None = None
     try:
-        drafted = agents.run_briefing(facts)
+        drafted = await asyncio.to_thread(agents.run_briefing, facts)
         headline = _text(drafted.get("headline"), HEADLINE_LIMIT)
         bullets = _bullets(drafted.get("bullets"))
         focus = _text(drafted.get("focus"), 160)

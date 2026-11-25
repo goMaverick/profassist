@@ -50,6 +50,11 @@ services:
       - LANGFUSE_PUBLIC_BASE_URL=http://localhost:3100
       - LANGFUSE_PROJECT_ID=profassist-project
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - PLAGIARISM_WORKER_URL=${PLAGIARISM_WORKER_URL:-}
+      - PLAGIARISM_WORKER_TOKEN=${PROFASSIST_WORKER_TOKEN:-local-private-worker-token}
+      - PASSAGE_REUSE_MODEL_NAME=${PASSAGE_REUSE_MODEL_NAME:-}
+      - PASSAGE_REUSE_MODEL_VERSION=${PASSAGE_REUSE_MODEL_VERSION:-}
+      - PROFASSIST_WORKER_TIMEOUT_SECONDS=${PROFASSIST_WORKER_TIMEOUT_SECONDS:-300}
       - DOCLING_ENABLED=${DOCLING_ENABLED:-false}
       - MEM0_ENABLED=true
       - MEM0_EMBEDDER_PROVIDER=fastembed
@@ -195,6 +200,15 @@ services:
       - POSTGRES_HOST=db
       - POSTGRES_PASSWORD=postgres
       - PREFECT_API_URL=http://prefect-server:4200/api
+      - PLAGIARISM_WORKER_URL=${PLAGIARISM_WORKER_URL:-}
+      - PLAGIARISM_WORKER_TOKEN=${PROFASSIST_WORKER_TOKEN:-local-private-worker-token}
+      - PASSAGE_REUSE_MODEL_NAME=${PASSAGE_REUSE_MODEL_NAME:-}
+      - PASSAGE_REUSE_MODEL_VERSION=${PASSAGE_REUSE_MODEL_VERSION:-}
+      - PROFASSIST_WORKER_TIMEOUT_SECONDS=${PROFASSIST_WORKER_TIMEOUT_SECONDS:-300}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=profassist
+      - AWS_SECRET_ACCESS_KEY=profassist-secret
       - MOODLE_MODE=real
       - MOODLE_PUSH_ENABLED=false
       - MOODLE_BASE_URL=http://moodle-mock:8090
@@ -379,12 +393,13 @@ services:
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/mlflow
       --default-artifact-root s3://profassist/mlflow
+      --allowed-hosts mlflow:5000,localhost:5000,127.0.0.1:5000
     environment:
       - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=profassist
       - AWS_SECRET_ACCESS_KEY=profassist-secret
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     networks:
       - backend
     depends_on:
@@ -400,6 +415,56 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    restart: unless-stopped
+
+  profassist-worker-base:
+    profiles: [mlops]
+    build:
+      context: ${PROFASSIST_MLOPS_SOURCE:-../student-dropout-mlops}
+      dockerfile: Dockerfile.worker
+    image: profassist_mlops_worker_base:integration
+    entrypoint: ["python", "-c"]
+    command: ["pass"]
+    restart: "no"
+
+  profassist-worker:
+    profiles: [mlops]
+    build:
+      context: .
+      dockerfile: private-worker/Dockerfile
+      args:
+        PROFASSIST_WORKER_BASE_IMAGE: ${PROFASSIST_WORKER_BASE_IMAGE:-profassist_mlops_worker_base:integration}
+    image: profassist_worker:integration
+    container_name: profassist_private_worker
+    environment:
+      - PROFASSIST_WORKER_TOKEN=${PROFASSIST_WORKER_TOKEN:-local-private-worker-token}
+      - PROFASSIST_WORKER_TIMEOUT_SECONDS=${PROFASSIST_WORKER_TIMEOUT_SECONDS:-300}
+      - PROFASSIST_WORKER_STORE=/var/lib/profassist-worker
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=profassist
+      - AWS_SECRET_ACCESS_KEY=profassist-secret
+    volumes:
+      - profassist_worker_data:/var/lib/profassist-worker
+      - type: bind
+        source: ${PROFASSIST_MINILM_MODEL_DIR:-../student-dropout-mlops/models/minilm}
+        target: /app/models/minilm
+        read_only: true
+    networks:
+      - backend
+    depends_on:
+      profassist-worker-base:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
 
   frontend:
@@ -453,3 +518,4 @@ volumes:
   minio_data:
   langfuse_postgres_data:
   langfuse_clickhouse_data:
+  profassist_worker_data:

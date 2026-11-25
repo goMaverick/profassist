@@ -35,9 +35,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const moodleSettings =
     path === "/admin/integrations/moodle" || path.endsWith("/admin/integrations/moodle");
   const councilsSettings = path === "/admin/councils" || path.endsWith("/admin/councils");
+  const modelSettings = path === "/admin/models" || path.endsWith("/admin/models");
   return (
     <div className="space-y-6 pb-8">
-      {!aiSettings && !moodleSettings && !councilsSettings && (
+      {!aiSettings && !moodleSettings && !councilsSettings && !modelSettings && (
         <PageHeader
           eyebrow="Admin"
           title="Workspace administration"

@@ -30,6 +30,12 @@ def _env(name: str) -> str:
     return os.getenv(name, "").strip()
 
 
+def worker_job_timeout() -> httpx.Timeout:
+    """Allow the worker time to publish its result after the subprocess exits."""
+    seconds = max(1, int(os.getenv("PROFASSIST_WORKER_TIMEOUT_SECONDS", "300")))
+    return httpx.Timeout(seconds + 10, connect=10)
+
+
 def _worker_url() -> str:
     return _env("PLAGIARISM_WORKER_URL").rstrip("/")
 

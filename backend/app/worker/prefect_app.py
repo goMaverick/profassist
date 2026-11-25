@@ -14,6 +14,8 @@ import logging
 from prefect import aserve
 from prefect.client.schemas.schedules import IntervalSchedule
 
+from app.profassist.ml.dropout_jobs import profassist_dropout_job_flow
+from app.profassist.ml.jobs import profassist_ml_job_flow
 from app.worker.tasks.profassist_tasks import (
     course_memory_flow,
     grade_batch_flow,
@@ -39,6 +41,8 @@ async def main() -> None:
     deployments.append(await grade_batch_flow.ato_deployment(name="profassist-grade-batch"))
     # On-demand: triggered from the upload endpoint once a file is ready.
     deployments.append(await course_memory_flow.ato_deployment(name="profassist-course-memory"))
+    deployments.append(await profassist_ml_job_flow.ato_deployment(name="ml-job"))
+    deployments.append(await profassist_dropout_job_flow.ato_deployment(name="dropout-job"))
     # Primary Moodle pull. Each org's interval and pause are checked inside the flow.
     deployments.append(
         await moodle_sync_flow.ato_deployment(

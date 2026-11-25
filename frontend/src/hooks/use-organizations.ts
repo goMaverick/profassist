@@ -16,7 +16,7 @@ export function useOrganizations() {
   // React Query owns the list: cached across navigations, deduped, no refetch
   // storms (this replaces the old session-singleton guard). Mutations patch the
   // cache directly so the UI stays instant.
-  const { data: orgs = [] } = useQuery({
+  const { data: orgs = [], isPending, error } = useQuery({
     queryKey: qk.organizations.list(),
     queryFn: async () => (await apiClient.get<OrganizationList>("/orgs")).items,
   });
@@ -108,6 +108,8 @@ export function useOrganizations() {
 
   return {
     orgs,
+    isPending,
+    error,
     activeOrgId,
     activeOrg,
     fetchOrgs,

@@ -1,11 +1,11 @@
 "use client";
 
-import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import { pa, run } from "@/components/profassist/bits";
+import { pa, run, useWorkspaceQuery } from "@/components/profassist/bits";
 import type { Hit } from "@/components/profassist/document-viewer";
 import {
   Alert,
@@ -56,6 +56,9 @@ interface AssignmentCard {
   writing_flags: number;
   status: string;
   line: string;
+  analysis_sources?: string[];
+  course_id?: string;
+  assessment_id?: string;
 }
 interface Overview {
   courses: CourseOption[];
@@ -75,6 +78,7 @@ interface PairRow {
   shared: number;
   writing: boolean;
   status: string;
+  analysis_source?: string | null;
 }
 interface Matrix {
   course: string;
@@ -97,6 +101,7 @@ interface Run {
   id: string;
   text: string;
   common: boolean;
+  ids?: string[];
 }
 interface ReportSide {
   members: string;
@@ -120,6 +125,13 @@ interface Match {
   left_box: Box;
   right_box: Box;
   decision: string;
+  left_start?: number | null;
+  left_end?: number | null;
+  right_start?: number | null;
+  right_end?: number | null;
+  left_version_id?: string | null;
+  right_version_id?: string | null;
+  analysis_source?: "worker" | "legacy" | string | null;
 }
 interface DocSide {
   origin: string;
@@ -131,6 +143,10 @@ interface PairDetail {
   course: string;
   slug: string;
   assignment: string;
+  course_id?: string | null;
+  assessment_id?: string | null;
+  left_version_id?: string | null;
+  right_version_id?: string | null;
   name: string;
   left: string;
   right: string;
@@ -145,6 +161,14 @@ interface PairDetail {
   decisions: { flagged: number; ok: number; pending: number };
   documents: { left: DocSide; right: DocSide };
   why: string;
+}
+interface IntegrityJob {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+  assignment_id?: string;
+  model_version?: string;
+  reused?: boolean;
+  error?: string | null;
 }
 
 export default function IntegrityPage() {
@@ -179,6 +203,13 @@ function decisionLabel(decision: string) {
   return "Pending";
 }
 
+function analysisSourceLabel(source?: string | null) {
+  if (source === "worker") return "worker model";
+  if (source === "legacy-record") return "legacy stored result";
+  if (source === "legacy-heuristic" || source === "legacy") return "legacy heuristic";
+  return "source unreported";
+}
+
 function heat(percent: number) {
   if (percent >= 100) return "#e0e0e0";
   if (percent >= 75) return "#ffd7d9";
@@ -186,73 +217,89 @@ function heat(percent: number) {
   return "#defbe6";
 }
 
-function hitsFor(
-  rows: Match[],
-  visible: Array<Match & { n: number }>,
-  side: "left" | "right",
-): Hit[] {
-  const numbers = new Map(visible.map((row) => [row.id, row.n]));
-  return rows
-    .filter((row) => numbers.has(row.id) || row.source !== "shared")
-    .map((row) => ({
+function hitsFor(visible: Array<Match & { n: number }>, side: "left" | "right"): Hit[] {
+  return visible
+    .map((row): Hit => ({
       id: row.id,
-      n: numbers.get(row.id) || 0,
+      n: row.n,
       page: side === "left" ? row.page_left : row.page_right,
       box: side === "left" ? row.left_box : row.right_box,
       tone: row.source === "readings" ? "readings" : row.source === "brief" ? "brief" : "shared",
-    }));
+    }))
+    .filter(({ box, page }) => page > 0 && box.w > 0 && box.h > 0);
 }
 
-function showPassage(id: string) {
-  for (const side of ["left", "right"]) {
-    const node = document.getElementById(`${side}-${id}`);
-    if (!node) continue;
-    if (side === "left") node.scrollIntoView({ behavior: "smooth", block: "center" });
-    node.classList.remove("pa-pulse");
-    void node.offsetWidth;
-    node.classList.add("pa-pulse");
-  }
-}
-
-function SubmissionCard({
-  side,
+function SubmissionPane({
   group,
   meta,
   paragraphs,
+  matches,
+  activeId,
 }: {
-  side: "left" | "right";
   group: string;
   meta: ReportSide;
   paragraphs: Array<{ runs: Run[] }>;
+  matches: Array<Match & { n: number }>;
+  activeId?: string;
 }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const byId = useMemo(() => new Map(matches.map((match) => [match.id, match])), [matches]);
+
+  useEffect(() => {
+    const scroll = frame.current;
+    const target = scroll?.querySelector("[data-active-match]");
+    if (!scroll || !target) return;
+    scroll.scrollTop +=
+      target.getBoundingClientRect().top -
+      scroll.getBoundingClientRect().top -
+      scroll.clientHeight / 3;
+  }, [activeId]);
+
   return (
-    <article className="pa-panel pa-submission" id={`${side}-submission`}>
-      <header>
-        <strong>Group {group}</strong>
-        <span>{meta.members}</span>
-        <span>Submitted {meta.submitted}</span>
-      </header>
-      {paragraphs.map((paragraph, index) => (
-        <div className="pa-report-p" key={`${side}-${index}`}>
-          {paragraph.runs.map((run, runIndex) =>
-            run.id ? (
-              <Fragment key={`${run.id}-${runIndex}`}>
-                <span id={`${side}-${run.id}`} className={run.common ? "pa-from-brief" : undefined}>
-                  {run.common ? run.text : <mark>{run.text}</mark>}
-                </span>
-                {run.common ? (
-                  <Badge variant="outline" className={sourceClass("brief")}>
-                    From the brief - not counted
-                  </Badge>
-                ) : null}
-              </Fragment>
-            ) : (
-              <span key={`${side}-plain-${runIndex}`}>{run.text}</span>
-            ),
-          )}
+    <section className="pa-doc pa-integrity-reader" aria-label={`Group ${group} report`}>
+      <header className="pa-doc-head border-border border-b pb-2">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">Group {group}</h3>
+          {meta.members && <p className="text-muted-foreground text-xs">{meta.members}</p>}
         </div>
-      ))}
-    </article>
+        {meta.submitted && (
+          <span className="text-muted-foreground text-xs">Submitted {meta.submitted}</span>
+        )}
+      </header>
+      <div
+        className="pa-doc-scroll"
+        ref={frame}
+        role="region"
+        aria-label={`Group ${group} full text`}
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The report must be scrollable with the keyboard.
+        tabIndex={0}
+      >
+        <div className="pa-integrity-text">
+          {paragraphs.map((paragraph, index) => (
+            <p key={index}>
+              {paragraph.runs.map((run, runIndex) => {
+                const related = (run.ids ?? [run.id]).flatMap((id) => byId.get(id) ?? []);
+                if (!related.length) return <span key={runIndex}>{run.text}</span>;
+                const selected = related.some((match) => match.id === activeId);
+                const shared = related.some((match) => match.source === "shared");
+                return (
+                  <mark
+                    key={runIndex}
+                    className={shared ? "pa-integrity-highlight" : "pa-integrity-common"}
+                    data-active-match={selected ? "" : undefined}
+                  >
+                    <span className="sr-only">
+                      {related.map((match) => `Match ${match.n}`).join(", ")}.{" "}
+                    </span>
+                    {run.text}
+                  </mark>
+                );
+              })}
+            </p>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -262,9 +309,17 @@ function IntegrityDrill() {
   const course = params.get("course") || "all";
   const assignment = params.get("assignment") || "";
   const pair = params.get("pair") || "";
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const {
+    data: overview,
+    error: overviewError,
+    refetch: refreshOverview,
+  } = useWorkspaceQuery<Overview>(
+    !assignment ? `/integrity/overview?course=${encodeURIComponent(course)}` : null,
+  );
   const [matrix, setMatrix] = useState<Matrix | null>(null);
-  const [detail, setDetail] = useState<PairDetail | null>(null);
+  const pairKey = JSON.stringify([course, assignment, pair]);
+  const [loadedPair, setLoadedPair] = useState<{ key: string; detail: PairDetail } | null>(null);
+  const detail = loadedPair?.key === pairKey ? loadedPair.detail : null;
   const [sort, setSort] = useState<"percent" | "shared">("percent");
   const [why, setWhy] = useState(false);
   const [note, setNote] = useState("");
@@ -272,16 +327,12 @@ function IntegrityDrill() {
   const [error, setError] = useState("");
   const [strongOnly, setStrongOnly] = useState(false);
   const [hideCommon, setHideCommon] = useState(false);
-  const [viewer, setViewer] = useState(false);
-  const [cursor, setCursor] = useState(0);
-
-  useEffect(() => {
-    pa<Overview>(`/integrity/overview?course=${encodeURIComponent(course)}`)
-      .then(setOverview)
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Could not open integrity"),
-      );
-  }, [course]);
+  const [selection, setSelection] = useState<{ key: string; id: string } | null>(null);
+  const matchToolbar = useRef<HTMLDivElement>(null);
+  const [savingMatch, setSavingMatch] = useState(false);
+  const [job, setJob] = useState<IntegrityJob | null>(null);
+  const [scanning, setScanning] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     if (!assignment) {
@@ -293,22 +344,53 @@ function IntegrityDrill() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not open that assignment"),
       );
-  }, [course, assignment]);
+  }, [course, assignment, refresh]);
 
   useEffect(() => {
-    if (!assignment || !pair) {
-      setDetail(null);
-      return;
-    }
+    if (!assignment || !pair) return;
+    let cancelled = false;
     const [left, right] = pair.split("-");
     pa<PairDetail>(
       `/integrity/pair?course=${encodeURIComponent(course)}&number=${assignment}&left=${left}&right=${right}`,
     )
-      .then(setDetail)
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Could not open that pair"),
-      );
-  }, [course, assignment, pair]);
+      .then((data) => {
+        if (!cancelled) setLoadedPair({ key: pairKey, detail: data });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not open that pair");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [course, assignment, pair, pairKey, refresh]);
+
+  useEffect(() => {
+    if (!job?.job_id || job.status === "completed" || job.status === "failed") return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const status = await pa<IntegrityJob>(`/integrity/jobs/${job.job_id}`);
+        if (stopped) return;
+        setJob((current) => ({
+          ...current,
+          ...status,
+          model_version: status.model_version || current?.model_version,
+        }));
+        if (status.status === "completed") {
+          setRefresh((value) => value + 1);
+          if (!assignment) void refreshOverview();
+        }
+      } catch (err) {
+        if (!stopped) setError(err instanceof Error ? err.message : "Could not check scan status");
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 2000);
+    void poll();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.job_id, job?.status, assignment, refreshOverview]);
 
   const visible = useMemo(() => {
     const rows = (detail?.matches || []).filter((item) => {
@@ -318,9 +400,14 @@ function IntegrityDrill() {
     });
     return rows.map((item, index) => ({ ...item, n: index + 1 }));
   }, [detail, strongOnly, hideCommon]);
-  useEffect(() => {
-    setCursor(0);
-  }, [pair, strongOnly, hideCommon]);
+  const active =
+    visible.find((match) => selection?.key === pairKey && match.id === selection.id) ?? visible[0];
+  const previousMatch = active && visible[active.n - 2];
+  const nextMatch = active && visible[active.n];
+
+  function selectMatch(id: string) {
+    setSelection({ key: pairKey, id });
+  }
 
   const pairs = useMemo(() => {
     const rows = matrix?.pairs ? [...matrix.pairs] : [];
@@ -338,7 +425,8 @@ function IntegrityDrill() {
   }
 
   async function decide(matchId: string, action: "ok" | "flag") {
-    if (!detail) return;
+    if (!detail || savingMatch) return;
+    setSavingMatch(true);
     const result = await run(
       () =>
         pa<{ matches: Match[]; decisions: PairDetail["decisions"]; message: string }>(
@@ -357,15 +445,77 @@ function IntegrityDrill() {
         ),
       setError,
     );
+    setSavingMatch(false);
     if (!result) return;
-    setDetail((current) =>
-      current ? { ...current, matches: result.matches, decisions: result.decisions } : current,
+    setLoadedPair((current) =>
+      current?.key === pairKey
+        ? {
+            ...current,
+            detail: { ...current.detail, matches: result.matches, decisions: result.decisions },
+          }
+        : current,
     );
     setSaved(result.message);
   }
 
   async function act(action: "ok" | "flag" | "note") {
     if (!detail) return;
+    let recordedForTraining = false;
+    if (action === "ok" || action === "flag") {
+      const versionedMatches = detail.matches.filter(
+        (match) =>
+          match.decision === "flag" &&
+          typeof match.left_start === "number" &&
+          typeof match.left_end === "number" &&
+          typeof match.right_start === "number" &&
+          typeof match.right_end === "number",
+      );
+      const span = (match: Match) => ({
+        left_start: match.left_start as number,
+        left_end: match.left_end as number,
+        right_start: match.right_start as number,
+        right_end: match.right_end as number,
+      });
+      if (
+        !detail.course_id ||
+        !detail.assessment_id ||
+        !detail.left_version_id ||
+        !detail.right_version_id
+      ) {
+        setError(
+          "This pair has no immutable report versions yet, so it cannot be included in a training review.",
+        );
+        return;
+      }
+      if (action === "flag" && versionedMatches.length === 0) {
+        setError(
+          "Mark at least one versioned passage as Flagged before saving this pair as reuse.",
+        );
+        return;
+      }
+      const review = await run(
+        () =>
+          pa<{ saved: boolean; error?: string }>("/integrity/reviews", {
+            method: "POST",
+            body: JSON.stringify({
+              course_id: detail.course_id,
+              assessment_id: detail.assessment_id,
+              left_version_id: detail.left_version_id,
+              right_version_id: detail.right_version_id,
+              decision: action,
+              spans: action === "flag" ? versionedMatches.map(span) : [],
+              note,
+            }),
+          }),
+        setError,
+      );
+      if (!review) return;
+      if (!review.saved) {
+        setError(review.error || "The versioned review could not be saved.");
+        return;
+      }
+      recordedForTraining = true;
+    }
     const result = await run(
       () =>
         pa<{ message: string }>("/integrity/pair", {
@@ -381,7 +531,36 @@ function IntegrityDrill() {
         }),
       setError,
     );
-    if (result) setSaved(result.message);
+    if (result) {
+      setSaved(
+        recordedForTraining
+          ? `${result.message} Versioned pair review saved for training.`
+          : result.message,
+      );
+    }
+  }
+
+  async function startScan(item: AssignmentCard) {
+    if (!item.course_id || !item.assessment_id) {
+      setError("This assignment is missing the identifiers needed to start a verified scan.");
+      return;
+    }
+    setError("");
+    setScanning(item.assessment_id);
+    const result = await run(
+      () =>
+        pa<IntegrityJob & { error?: string }>(`/courses/${item.course_id}/integrity/jobs`, {
+          method: "POST",
+          body: JSON.stringify({ assessment_id: item.assessment_id }),
+        }),
+      setError,
+    );
+    setScanning("");
+    if (result?.error) {
+      setError(result.error);
+      return;
+    }
+    if (result) setJob(result);
   }
 
   const courseItems = [
@@ -418,10 +597,10 @@ function IntegrityDrill() {
           </>
         )}
       </nav>
-      {error && (
+      {(error || overviewError) && (
         <Alert variant="destructive">
           <AlertTitle>Integrity</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error || overviewError?.message}</AlertDescription>
         </Alert>
       )}
       {!assignment && (
@@ -469,34 +648,69 @@ function IntegrityDrill() {
           )}
           <div className="grid gap-3">
             {(overview?.items || []).map((item) => (
-              <button
-                key={`${item.slug}-${item.number}`}
-                type="button"
-                className="pa-panel pa-integrity-row"
-                onClick={() => go({ course: item.slug, assignment: item.number })}
-              >
-                <span className="pa-integrity-main">
+              <div key={`${item.slug}-${item.number}`} className="pa-panel pa-integrity-row">
+                <button
+                  type="button"
+                  className="pa-integrity-main text-left"
+                  onClick={() => go({ course: item.slug, assignment: item.number })}
+                >
                   <strong>
                     {item.course} · Assignment {item.number}
                   </strong>
                   <span> {item.name}</span>
                   <span className="pa-integrity-meta">{item.line}</span>
+                  {item.analysis_sources?.length ? (
+                    <span className="text-muted-foreground text-xs">
+                      Signals:{" "}
+                      {[...new Set(item.analysis_sources)]
+                        .map((source) => analysisSourceLabel(source))
+                        .join(" · ")}
+                    </span>
+                  ) : null}
                   <span className="pa-integrity-bar">
                     <span className="pa-mini-meter" aria-hidden="true">
                       <span style={{ width: `${item.highest}%`, background: heat(item.highest) }} />
                     </span>
                     Highest {item.highest}%
                   </span>
-                </span>
+                </button>
                 <span className="pa-integrity-side">
                   <Badge variant="outline" className={statusClass(item.status)}>
                     {item.status}
                   </Badge>
-                  <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      scanning === item.assessment_id ||
+                      (job != null && job.status !== "completed" && job.status !== "failed")
+                    }
+                    onClick={() => void startScan(item)}
+                  >
+                    {scanning === item.assessment_id ? "Starting…" : "Scan reports"}
+                  </Button>
+                  <button
+                    type="button"
+                    className="pa-why"
+                    aria-label={`Open assignment ${item.number}`}
+                    onClick={() => go({ course: item.slug, assignment: item.number })}
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  </button>
                 </span>
-              </button>
+              </div>
             ))}
           </div>
+          {job && (
+            <Alert variant={job.status === "failed" ? "destructive" : "default"}>
+              <AlertTitle>Report scan {job.status}</AlertTitle>
+              <AlertDescription>
+                {job.error ||
+                  `Job ${job.job_id}${job.model_version ? ` · model ${job.model_version}` : ""}${job.reused ? " · reused existing job" : ""}`}
+              </AlertDescription>
+            </Alert>
+          )}
         </>
       )}
       {assignment && !pair && matrix && (
@@ -571,6 +785,7 @@ function IntegrityDrill() {
                 </th>
                 <th>AI flag</th>
                 <th>Status</th>
+                <th>Signal source</th>
               </tr>
             </thead>
             <tbody>
@@ -593,6 +808,9 @@ function IntegrityDrill() {
                       {item.status}
                     </Badge>
                   </td>
+                  <td className="text-muted-foreground text-xs">
+                    {analysisSourceLabel(item.analysis_source)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -601,160 +819,216 @@ function IntegrityDrill() {
       )}
       {detail && (
         <>
-          <h2 className="m-0 font-normal">
-            Group {detail.left} and Group {detail.right}
-          </h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <span>{detail.percent}% similar</span>
-            <Badge variant="outline" className={statusClass(detail.status)}>
-              {detail.status}
-            </Badge>
-            <span>
-              {detail.decisions.flagged} flagged, {detail.decisions.ok} OK,{" "}
-              {detail.decisions.pending} pending
-            </span>
-          </div>
-          <div className="my-3 flex flex-wrap gap-2">
-            <Button
-              variant={strongOnly ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStrongOnly((on) => !on)}
+          <section aria-labelledby="integrity-pair-title" className="space-y-3">
+            <div>
+              <h2 id="integrity-pair-title" className="text-xl font-semibold tracking-tight">
+                Group {detail.left} vs Group {detail.right}
+              </h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {detail.course} · Assignment {detail.assignment} · {detail.name}
+              </p>
+              <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="outline" className={statusClass(detail.status)}>
+                  {detail.status}
+                </Badge>
+                <span>{detail.percent}% similar</span>
+                <span>
+                  {detail.decisions.flagged} flagged, {detail.decisions.ok} OK,{" "}
+                  {detail.decisions.pending} pending
+                </span>
+              </div>
+            </div>
+            <div
+              ref={matchToolbar}
+              tabIndex={-1}
+              className="bg-card border-border flex scroll-mt-16 flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
             >
-              Strong only
-            </Button>
-            <Button
-              variant={hideCommon ? "default" : "outline"}
-              size="sm"
-              onClick={() => setHideCommon((on) => !on)}
-            >
-              Hide brief and readings
-            </Button>
-            {detail.documents.left.view && detail.documents.right.view && (
-              <Button variant="secondary" size="sm" onClick={() => setViewer(true)}>
-                See in document
-              </Button>
-            )}
-          </div>
-          {visible.length === 0 && <p>No shared sentences in this view.</p>}
-          {visible.length > 0 && (
-            <Table aria-label="Matches">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>%</TableHead>
-                  <TableHead>Page</TableHead>
-                  <TableHead>Quote</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead aria-label="Actions" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visible.map((item) => (
-                  <TableRow
-                    key={item.id}
-                    onClick={() => {
-                      setCursor(item.n - 1);
-                      setViewer(true);
-                    }}
-                    className={cn("cursor-pointer", item.n === cursor + 1 && "bg-primary/5")}
+              <div
+                aria-live="polite"
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+              >
+                {active ? (
+                  <>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        active.source === "shared" && "text-destructive",
+                      )}
+                    >
+                      Match {active.n} of {visible.length}
+                    </span>
+                    {(["left", "right"] as const).map((side) => {
+                      const box = active[`${side}_box`];
+                      return detail.documents[side].view && box.w > 0 && box.h > 0 ? (
+                        <span key={side} className="text-muted-foreground text-xs">
+                          Group {detail[side]} p. {active[`page_${side}`]}
+                        </span>
+                      ) : null;
+                    })}
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">No matching passages in this view.</span>
+                )}
+              </div>
+              {active && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!previousMatch}
+                    onClick={() => previousMatch && selectMatch(previousMatch.id)}
                   >
-                    <TableCell>{item.n}</TableCell>
-                    <TableCell>{item.percent}%</TableCell>
-                    <TableCell>{item.page_left}</TableCell>
-                    <TableCell>
-                      <span className="pa-quote">{item.quote}</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={sourceClass(item.source)}>
-                        {item.tag}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={decisionClass(item.decision)}>
-                        {decisionLabel(item.decision)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span className="pa-row-actions">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void decide(item.id, "ok");
-                          }}
-                        >
-                          Mark OK
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void decide(item.id, "flag");
-                          }}
-                        >
-                          Flag
-                        </Button>
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {visible.length > 0 && (
-            <div className="pa-stepper">
-              <span>
-                Match {cursor + 1} of {visible.length}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={cursor === 0}
-                onClick={() => {
-                  setCursor((value) => Math.max(0, value - 1));
-                  setViewer(true);
-                }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Prev
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={cursor >= visible.length - 1}
-                onClick={() => {
-                  setCursor((value) => Math.min(visible.length - 1, value + 1));
-                  setViewer(true);
-                }}
-              >
-                <ChevronRight className="h-4 w-4" />
-                Next
-              </Button>
+                    <ChevronLeft aria-hidden="true" /> Previous
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!nextMatch}
+                    onClick={() => nextMatch && selectMatch(nextMatch.id)}
+                  >
+                    Next <ChevronRight aria-hidden="true" />
+                  </Button>
+                </div>
+              )}
             </div>
-          )}
-          {viewer && visible[cursor] && (
-            <div className="pa-pair">
-              <DocumentPane
-                url={fileUrl(detail.documents.left.view)}
-                title={`Group ${detail.left}`}
-                kind={detail.documents.left.origin === "docx" ? "docx" : "pdf"}
-                downloadUrl={fileUrl(detail.documents.left.original)}
-                hits={hitsFor(detail.matches || [], visible, "left")}
-                activeId={visible[cursor].id}
-              />
-              <DocumentPane
-                url={fileUrl(detail.documents.right.view)}
-                title={`Group ${detail.right}`}
-                kind={detail.documents.right.origin === "docx" ? "docx" : "pdf"}
-                downloadUrl={fileUrl(detail.documents.right.original)}
-                hits={hitsFor(detail.matches || [], visible, "right")}
-                activeId={visible[cursor].id}
-              />
+            <div className="pa-integrity-reports" key={pairKey}>
+              {(["left", "right"] as const).map((side) => {
+                const document = detail.documents[side];
+                return document.view ? (
+                  <DocumentPane
+                    key={`${side}:${document.view}`}
+                    url={fileUrl(document.view)}
+                    title={`Group ${detail[side]}`}
+                    filename={document.filename}
+                    kind={document.origin === "docx" ? "docx" : "pdf"}
+                    downloadUrl={document.original ? fileUrl(document.original) : undefined}
+                    hits={hitsFor(visible, side)}
+                    activeId={active?.id}
+                    comparison
+                  />
+                ) : (
+                  <SubmissionPane
+                    key={side}
+                    group={detail[side]}
+                    meta={detail[`${side}_meta`]}
+                    paragraphs={detail[`${side}_text`]}
+                    matches={visible}
+                    activeId={active?.id}
+                  />
+                );
+              })}
             </div>
-          )}
+            {active && (
+              <div className="bg-card border-border flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2">
+                <div aria-live="polite" className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-medium">Match {active.n}</span>
+                  <Badge variant="outline" className={decisionClass(active.decision)}>
+                    {decisionLabel(active.decision)}
+                  </Badge>
+                  <Badge variant="outline" className={sourceClass(active.source)}>
+                    {active.tag}
+                  </Badge>
+                  <span className="text-muted-foreground text-xs">{active.percent}% similar</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={savingMatch}
+                    aria-pressed={active.decision === "ok"}
+                    onClick={() => void decide(active.id, "ok")}
+                  >
+                    Mark OK
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={savingMatch}
+                    aria-pressed={active.decision === "flag"}
+                    onClick={() => void decide(active.id, "flag")}
+                  >
+                    Flag for follow-up
+                  </Button>
+                </div>
+              </div>
+            )}
+            <details className="bg-card border-border rounded-lg border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                Passage list and filters
+              </summary>
+              <div className="my-3 flex flex-wrap gap-2">
+                <Button
+                  variant={strongOnly ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={strongOnly}
+                  onClick={() => setStrongOnly((on) => !on)}
+                >
+                  Strong only
+                </Button>
+                <Button
+                  variant={hideCommon ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={hideCommon}
+                  onClick={() => setHideCommon((on) => !on)}
+                >
+                  Hide brief and readings
+                </Button>
+              </div>
+              {visible.length > 0 && (
+                <Table aria-label="Matches">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Match</TableHead>
+                      <TableHead>Similarity</TableHead>
+                      <TableHead>Quote</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((item) => (
+                      <TableRow
+                        key={item.id}
+                        className={cn(item.id === active?.id && "bg-primary/5")}
+                      >
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-current={item.id === active?.id ? "true" : undefined}
+                            onClick={() => {
+                              selectMatch(item.id);
+                              matchToolbar.current?.focus();
+                            }}
+                          >
+                            Match {item.n}
+                          </Button>
+                        </TableCell>
+                        <TableCell>{item.percent}%</TableCell>
+                        <TableCell>
+                          <span className="pa-quote">{item.quote}</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={sourceClass(item.source)}>
+                            {item.tag}
+                          </Badge>
+                          <p className="text-muted-foreground text-xs">
+                            {analysisSourceLabel(item.analysis_source)}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={decisionClass(item.decision)}>
+                            {decisionLabel(item.decision)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </details>
+          </section>
           <button
             type="button"
             className="pa-why"
@@ -768,11 +1042,17 @@ function IntegrityDrill() {
               {detail.why}
             </p>
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => act("ok")}>Mark as OK</Button>
-            <Button variant="destructive" onClick={() => act("flag")}>
-              Flag for follow-up
-            </Button>
+          <div className="border-border/70 mt-4 rounded-lg border p-3">
+            <p className="text-muted-foreground mb-2 text-xs">
+              Save a complete pair review for training. Flag the specific reused passages above
+              before recording a reuse decision.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => act("ok")}>Save reviewed as distinct reports</Button>
+              <Button variant="destructive" onClick={() => act("flag")}>
+                Save reviewed as report reuse
+              </Button>
+            </div>
           </div>
           <div className="mt-4 space-y-1.5">
             <Label htmlFor="integrity-note">Add a note</Label>

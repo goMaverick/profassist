@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { pa, ProfassistError, type Course } from "@/lib/profassist";
+import { useAuthStore, useOrgStore } from "@/stores";
 
 export function Banner({ children }: { children: React.ReactNode }) {
   return (
@@ -11,30 +13,49 @@ export function Banner({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function useWorkspace() {
-  const [course, setCourse] = useState<Course | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    pa<{ items: Course[] }>("/courses")
-      .then((data) => {
-        const saved = window.sessionStorage.getItem("pa-course") || "";
-        setCourse(data.items.find((item) => item.id === saved) || data.items[0] || null);
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load the workspace"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return { course, error, loading };
+export function useWorkspaceQuery<T>(path: string | null, staleTime = 0) {
+  const userId = useAuthStore((state) => state.user?.id);
+  const orgId = useOrgStore((state) => state.activeOrgId);
+  return useQuery({
+    queryKey: ["profassist", userId, orgId, path],
+    queryFn: ({ signal }) => pa<T>(path!, { signal }),
+    enabled: Boolean(userId && path),
+    staleTime,
+  });
 }
 
-export async function run<T>(action: () => Promise<T>, setError: (value: string) => void): Promise<T | null> {
+export function useWorkspace() {
+  const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
+  const { data, error, isPending } = useWorkspaceQuery<{ items: Course[] }>("/courses", 30_000);
+
+  useEffect(() => {
+    setSavedCourseId(window.sessionStorage.getItem("pa-course") || "");
+  }, []);
+
+  const course =
+    savedCourseId === null
+      ? null
+      : (data?.items.find((item) => item.id === savedCourseId) ?? data?.items[0] ?? null);
+
+  return {
+    course,
+    courses: data?.items ?? [],
+    error: error instanceof Error ? error.message : error ? "Could not load the workspace" : "",
+    loading: isPending || savedCourseId === null,
+  };
+}
+
+export async function run<T>(
+  action: () => Promise<T>,
+  setError: (value: string) => void,
+): Promise<T | null> {
   try {
     setError("");
     return await action();
   } catch (err) {
-    setError(err instanceof ProfassistError || err instanceof Error ? err.message : "Something went wrong");
+    setError(
+      err instanceof ProfassistError || err instanceof Error ? err.message : "Something went wrong",
+    );
     return null;
   }
 }

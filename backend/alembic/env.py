@@ -25,6 +25,7 @@ from app.db.models.organization import Invitation, Organization, OrganizationMem
 from app.db.models.audit_log import AppAdminAuditLog  # noqa: F401
 from app.db.models.knowledge_base import KnowledgeBase  # noqa: F401
 from app.profassist import models as _profassist_models  # noqa: F401
+from app.profassist import dropout_models as _profassist_dropout_models  # noqa: F401
 
 config = context.config
 

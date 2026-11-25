@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { CheckCircle2, CircleDashed, Flag, Send } from "lucide-react";
-import { pa } from "@/lib/profassist";
+import { useWorkspaceQuery } from "@/components/profassist/bits";
 import { HomeBriefing } from "@/components/profassist/home-briefing";
 import { HomeChat } from "@/components/profassist/home-chat";
 
@@ -19,34 +19,16 @@ interface Home {
 }
 
 export default function HomePage() {
-  const [home, setHome] = useState<Home | null>(null);
-  const [tasks, setTasks] = useState<Array<{ name: string; due?: string; number?: string }>>([]);
-  const [error, setError] = useState("");
   const [courseId, setCourseId] = useState("");
-  const [board, setBoard] = useState<
-    Array<{ course: string; slug: string; status: string; flagged_pairs: number }>
-  >([]);
-
-  useEffect(() => {
-    pa<Home>("/home")
-      .then((data) => {
-        setHome(data);
-        setCourseId(data.courses[0]?.id || "");
-      })
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Could not load home"),
-      );
-    pa<{
-      items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }>;
-    }>("/outlines")
-      .then((data) => setTasks(data.items[0]?.body?.tasks || []))
-      .catch(() => setTasks([]));
-    pa<{ items: Array<{ course: string; slug: string; status: string; flagged_pairs: number }> }>(
-      "/integrity/overview?course=all",
-    )
-      .then((data) => setBoard(data.items || []))
-      .catch(() => setBoard([]));
-  }, []);
+  const { data: home, error } = useWorkspaceQuery<Home>("/home");
+  const { data: outlines } = useWorkspaceQuery<{
+    items: Array<{ body?: { tasks?: Array<{ name: string; due?: string; number?: string }> } }>;
+  }>("/outlines");
+  const { data: overview } = useWorkspaceQuery<{
+    items: Array<{ course: string; slug: string; status: string; flagged_pairs: number }>;
+  }>("/integrity/overview?course=all");
+  const tasks = outlines?.items[0]?.body?.tasks ?? [];
+  const board = overview?.items ?? [];
 
   const course = home?.courses.find((item) => item.id === courseId) || home?.courses[0];
   const waiting = Math.max(0, (home?.drafts || 0) - (home?.approved || 0));
@@ -89,7 +71,7 @@ export default function HomePage() {
   return (
     <div className="pa-dash">
       <h1 className="sr-only">Home</h1>
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{error.message}</p>}
       <HomeBriefing />
       <HomeChat courses={home?.courses || []} courseId={course?.id} onCourse={setCourseId} />
       <section>

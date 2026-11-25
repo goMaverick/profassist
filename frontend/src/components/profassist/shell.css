@@ -517,43 +517,6 @@ mark {
   height: 100%;
 }
 
-.pa-pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.pa-submission header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.pa-submission header span,
-.pa-report-p {
-  color: #161616;
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-.pa-submission header span {
-  color: #525252;
-  font-size: 0.875rem;
-}
-
-.pa-report-p {
-  margin: 0 0 12px;
-}
-
-.pa-from-brief {
-  background: #e0e0e0;
-  color: #525252;
-}
-
 .pa-quote {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -568,18 +531,6 @@ mark {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-}
-
-.pa-stepper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  margin: 12px 0;
-  padding: 8px 0;
-  background: #f4f4f4;
 }
 
 .pa-doc {
@@ -698,6 +649,99 @@ mark {
 .pa-hit-brief,
 .pa-hit-readings { background: rgba(198, 198, 198, 0.8); }
 .pa-hit-note { background: rgba(15, 98, 254, 0.25); }
+
+.pa-integrity-reports {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pa-integrity-reader {
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  border-color: var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.pa-integrity-reader .pa-doc-head {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.pa-integrity-reader .pa-doc-title {
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.pa-integrity-reader .pa-doc-scroll {
+  height: clamp(22rem, 44vh, 38rem);
+  background: var(--color-muted);
+  border-radius: var(--radius);
+  overscroll-behavior: contain;
+}
+
+.pa-integrity-text {
+  min-height: 100%;
+  padding: clamp(0.875rem, 2vw, 1.5rem);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.pa-integrity-text p + p {
+  margin-top: 1em;
+}
+
+.pa-integrity-highlight {
+  background: color-mix(in oklab, var(--color-destructive) 19%, var(--color-card));
+  color: inherit;
+}
+
+.pa-integrity-highlight[data-active-match] {
+  background: color-mix(in oklab, var(--color-destructive) 29%, var(--color-card));
+  text-decoration: underline;
+  text-decoration-color: var(--color-destructive);
+  text-underline-offset: 0.15em;
+}
+
+.pa-integrity-common {
+  background: var(--color-muted);
+  color: inherit;
+}
+
+.pa-integrity-common[data-active-match] {
+  text-decoration: underline;
+}
+
+.pa-integrity-reader .pa-hit-shared {
+  background: rgb(222 41 55 / 28%);
+}
+
+.pa-integrity-reader .pa-hit {
+  pointer-events: none;
+}
+
+.pa-integrity-reader .pa-hit-shared i {
+  background: #a3212d;
+}
+
+.pa-integrity-reader .pa-hit:not(.pa-hit-shared) i {
+  background: #525252;
+}
+
+.pa-integrity-reader .pa-hit[data-active-match] {
+  outline: 2px solid #525252;
+  animation: none;
+}
+
+.pa-integrity-reader .pa-hit-shared[data-active-match] {
+  background: rgb(222 41 55 / 40%);
+  outline-color: #a3212d;
+}
 
 .pa-comment {
   position: absolute;

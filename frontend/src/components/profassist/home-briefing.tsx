@@ -1,11 +1,13 @@
 ﻿"use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { ArrowRight, BookOpen, ExternalLink, Layers, ListChecks, Sparkles } from "lucide-react";
 
 import { Badge, Button, Card, CardContent, Skeleton } from "@/components/ui";
 import { pa } from "@/lib/profassist";
+import { useAuthStore, useOrgStore } from "@/stores";
 
 interface BriefingMemory {
   documents: number;
@@ -52,25 +54,17 @@ function MemoryStat({ icon, value, label }: { icon: ReactNode; value: number; la
 }
 
 export function HomeBriefing() {
-  const [briefing, setBriefing] = useState<Briefing | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    pa<Briefing>("/home/briefing", { method: "POST", body: JSON.stringify({}) })
-      .then((data) => {
-        if (active) setBriefing(data);
-      })
-      .catch(() => {
-        if (active) setBriefing(null);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const userId = useAuthStore((state) => state.user?.id);
+  const orgId = useOrgStore((state) => state.activeOrgId);
+  const { data: briefing, isPending: loading } = useQuery({
+    queryKey: ["profassist", userId, orgId, "/home/briefing"],
+    // Let an in-flight briefing finish so a quick return to Home can reuse it.
+    queryFn: () => pa<Briefing>("/home/briefing", { method: "POST", body: "{}" }),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+    retry: false,
+    refetchOnReconnect: false,
+  });
 
   if (loading) {
     return (

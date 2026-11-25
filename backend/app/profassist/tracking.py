@@ -52,6 +52,47 @@ def tracking_uri() -> str:
     return os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000").rstrip("/")
 
 
+async def _training_run_data(run_id: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=REGISTRY_TIMEOUT_SECONDS) as client:
+            response = await client.get(
+                f"{tracking_uri()}/api/2.0/mlflow/runs/get", params={"run_id": run_id}
+            )
+            response.raise_for_status()
+            data = response.json()["run"]["data"]
+        return data if isinstance(data, dict) else {}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return {}
+
+
+async def training_namespace(run_id: str) -> str:
+    data = await _training_run_data(run_id)
+    for tag in data.get("tags") or []:
+        if isinstance(tag, dict) and tag.get("key") == "model.namespace":
+            name = tag.get("value")
+            return name if isinstance(name, str) else ""
+    return ""
+
+
+async def training_metrics(run_id: str, operation: str) -> dict[str, float]:
+    """Return the candidate's validation metrics, with a common scale for both models."""
+    keys = (
+        {"validation_recall": "recall", "validation_minilm_xgboost_precision": "precision"}
+        if operation == "plagiarism-train"
+        else {"recall": "recall", "precision": "precision"}
+    )
+    data = await _training_run_data(run_id)
+    return {
+        keys[item["key"]]: float(item["value"])
+        for item in data.get("metrics") or []
+        if isinstance(item, dict)
+        and isinstance(item.get("key"), str)
+        and item["key"] in keys
+        and type(item.get("value")) in (float, int)
+        and 0 <= item["value"] <= 1
+    }
+
+
 def _gateway() -> dict[str, Any]:
     from app.profassist.ml.gateway import model_cards
 
