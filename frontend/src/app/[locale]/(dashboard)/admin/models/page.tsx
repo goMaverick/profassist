@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, FileText, GraduationCap } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, FileText, GraduationCap } from "lucide-react";
 
 import { pa, useWorkspace } from "@/components/profassist/bits";
 import {
@@ -24,6 +24,13 @@ import { useOrgStore } from "@/stores";
 type Model = "dropout" | "reuse";
 type Step = "data" | "train" | "results";
 type ReleaseAction = "approve" | "rollback";
+
+interface TrainingResults {
+  precision?: number;
+  recall?: number;
+  mlflow_url?: string;
+  metaflow_url?: string;
+}
 
 interface Assignment {
   assessment_id: string;
@@ -118,6 +125,7 @@ const selectClass =
   "border-input bg-background text-foreground focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none";
 const number = new Intl.NumberFormat(undefined);
 const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+const runDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 function dateLabel(date?: string | null) {
   return date ? new Date(date).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
@@ -226,7 +234,7 @@ export default function ModelsPage() {
     <div className="max-w-5xl space-y-5">
       {course ? (
         <ModelChooser
-          key={orgId}
+          key={`workflow:${orgId}`}
           course={course}
           orgId={orgId}
           courseControl={
@@ -265,7 +273,7 @@ export default function ModelsPage() {
             ))}
         </Status>
       )}
-      <DiagnosticsPanel key={orgId} orgId={orgId} />
+      <DiagnosticsPanel key={`diagnostics:${orgId}`} orgId={orgId} />
     </div>
   );
 }
@@ -467,10 +475,7 @@ function ModelWorkflow({
     queryKey: ["models", orgId, "metrics", result?.job_id],
     enabled: step === "results" && result?.status === "completed",
     queryFn: ({ signal }) =>
-      pa<Partial<Record<"precision" | "recall", number>>>(
-        `/admin/ml/jobs/${result!.job_id}/metrics`,
-        { signal },
-      ),
+      pa<TrainingResults>(`/admin/ml/jobs/${result!.job_id}/metrics`, { signal }),
     retry: false,
     staleTime: 60_000,
   });
@@ -910,8 +915,11 @@ function ModelWorkflow({
                     {!result && <option value="">Choose a run</option>}
                     {trainingRuns.map((job) => (
                       <option key={job.job_id} value={job.job_id}>
-                        {dateLabel(job.created_at) || "Training run"} · {statusLabel(job)}
-                        {job.status === "completed" && job.model_version
+                        {job.created_at ? runDate.format(new Date(job.created_at)) : "Training run"}{" "}
+                        · {statusLabel(job)}
+                        {job.status === "completed" &&
+                        job.gate_passed !== false &&
+                        job.model_version
                           ? ` · Version ${job.model_version}`
                           : ""}
                       </option>
@@ -977,13 +985,33 @@ function ModelWorkflow({
                       );
                     })}
                   </div>
-                  <p className="text-muted-foreground text-xs">
-                    {metrics.isFetching
-                      ? "Loading validation results…"
-                      : metrics.data && Object.keys(metrics.data).length
-                        ? "Measured on examples held apart for validation."
-                        : "Detailed validation metrics are unavailable for this run."}
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-muted-foreground text-xs">
+                      {metrics.isFetching
+                        ? "Loading validation results…"
+                        : metrics.data?.precision !== undefined ||
+                            metrics.data?.recall !== undefined
+                          ? "Measured on examples held apart for validation."
+                          : "Detailed validation metrics are unavailable for this run."}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          ["MLflow", metrics.data?.mlflow_url],
+                          ["Metaflow", metrics.data?.metaflow_url],
+                        ] as const
+                      ).map(([name, href]) =>
+                        href ? (
+                          <Button key={name} asChild variant="outline" size="sm">
+                            <a href={href} target="_blank" rel="noopener noreferrer">
+                              Open run in {name}
+                              <ExternalLink aria-hidden="true" />
+                            </a>
+                          </Button>
+                        ) : null,
+                      )}
+                    </div>
+                  </div>
                   {resultRelease && eligible(resultRelease) && !resultRelease.active && (
                     <ReleaseForm
                       key={resultRelease.release_id}

@@ -1,4 +1,4 @@
-"""MLflow client for models that are not trained yet.
+"""MLflow client for the registry and training results.
 
 The tracking server is optional. When it is down, or has no registered models,
 the admin page stays on the empty state. This module never trains anything and
@@ -11,6 +11,7 @@ import copy
 import os
 import time
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -52,21 +53,23 @@ def tracking_uri() -> str:
     return os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000").rstrip("/")
 
 
-async def _training_run_data(run_id: str) -> dict[str, Any]:
+async def _training_run(run_id: str) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=REGISTRY_TIMEOUT_SECONDS) as client:
             response = await client.get(
                 f"{tracking_uri()}/api/2.0/mlflow/runs/get", params={"run_id": run_id}
             )
             response.raise_for_status()
-            data = response.json()["run"]["data"]
-        return data if isinstance(data, dict) else {}
+            run = response.json()["run"]
+        if not isinstance(run, dict):
+            return {}
+        return {key: run[key] for key in ("info", "data") if isinstance(run.get(key), dict)}
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return {}
 
 
 async def training_namespace(run_id: str) -> str:
-    data = await _training_run_data(run_id)
+    data = (await _training_run(run_id)).get("data") or {}
     for tag in data.get("tags") or []:
         if isinstance(tag, dict) and tag.get("key") == "model.namespace":
             name = tag.get("value")
@@ -74,15 +77,57 @@ async def training_namespace(run_id: str) -> str:
     return ""
 
 
-async def training_metrics(run_id: str, operation: str) -> dict[str, float]:
-    """Return the candidate's validation metrics, with a common scale for both models."""
+def _mlflow_run_url(run_id: str, experiment_id: Any) -> str | None:
+    if not isinstance(experiment_id, str) or not experiment_id:
+        return None
+    base = os.getenv("MLFLOW_PUBLIC_URL", "").strip().rstrip("/")
+    try:
+        url = urlsplit(base)
+        if url.scheme not in {"http", "https"} or not url.hostname:
+            return None
+    except ValueError:
+        return None
+    if url.username is not None or url.query or url.fragment:
+        return None
+    return f"{base}/#/experiments/{quote(experiment_id, safe='')}/runs/{quote(run_id, safe='')}"
+
+
+def _metaflow_run_url(data: dict[str, Any]) -> str | None:
+    template = os.getenv("METAFLOW_RUN_URL_TEMPLATE", "").strip()
+    if "{run_id}" not in template:
+        return None
+    tags = {
+        tag["key"]: tag["value"]
+        for tag in data.get("tags") or []
+        if isinstance(tag, dict)
+        and isinstance(tag.get("key"), str)
+        and isinstance(tag.get("value"), str)
+    }
+    flow, run_id = tags.get("metaflow.flow"), tags.get("metaflow.run_id")
+    if not flow or not run_id:
+        return None
+    href = template.replace("{flow}", quote(flow, safe="")).replace(
+        "{run_id}", quote(run_id, safe="")
+    )
+    try:
+        url = urlsplit(href)
+    except ValueError:
+        return None
+    if url.scheme not in {"http", "https"} or not url.hostname or url.username is not None:
+        return None
+    return href
+
+
+async def training_metrics(run_id: str, operation: str) -> dict[str, float | str]:
+    """Read normalized validation metrics and browser links for a saved run."""
     keys = (
         {"validation_recall": "recall", "validation_minilm_xgboost_precision": "precision"}
         if operation == "plagiarism-train"
         else {"recall": "recall", "precision": "precision"}
     )
-    data = await _training_run_data(run_id)
-    return {
+    run = await _training_run(run_id)
+    data = run.get("data") or {}
+    results: dict[str, float | str] = {
         keys[item["key"]]: float(item["value"])
         for item in data.get("metrics") or []
         if isinstance(item, dict)
@@ -91,6 +136,13 @@ async def training_metrics(run_id: str, operation: str) -> dict[str, float]:
         and type(item.get("value")) in (float, int)
         and 0 <= item["value"] <= 1
     }
+    info = run.get("info") or {}
+    if info.get("run_id") == run_id:
+        if url := _mlflow_run_url(run_id, info.get("experiment_id")):
+            results["mlflow_url"] = url
+        if url := _metaflow_run_url(data):
+            results["metaflow_url"] = url
+    return results
 
 
 def _gateway() -> dict[str, Any]:

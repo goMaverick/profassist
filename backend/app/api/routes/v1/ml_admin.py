@@ -199,7 +199,7 @@ async def ml_job_list(
 @router.get("/admin/ml/jobs/{job_id}/metrics")
 async def ml_job_metrics(
     job_id: uuid.UUID, user: CurrentAppAdmin, org: ProfOrg, db: DBSession
-) -> dict[str, float]:
+) -> dict[str, float | str]:
     from app.profassist.errors import ProfassistError
     from app.profassist.models import ProfAssistMLJob, ProfAssistMLRelease
 
