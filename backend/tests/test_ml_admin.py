@@ -114,6 +114,7 @@ async def test_training_metrics_uses_the_saved_run_and_current_organization(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.api.deps import get_db_session
+    from app.profassist import tracking
     from app.profassist.deps import get_profassist_org
 
     _override(True)
@@ -126,28 +127,54 @@ async def test_training_metrics_uses_the_saved_run_and_current_organization(
         result={"training_run_id": "registered-training-run"},
     )
     seen = []
+    run_info = {"run_id": "registered-training-run", "experiment_id": "42"}
 
     async def get(_model, row_id):
         assert row_id == job_id
         return job
 
-    async def read_metrics(run_id, operation):
-        seen.append((run_id, operation))
-        return {"recall": 0.75}
+    async def read_run(run_id):
+        seen.append(run_id)
+        return {
+            "info": run_info,
+            "data": {
+                "metrics": [{"key": "validation_recall", "value": 0.75}],
+                "tags": [
+                    {"key": "metaflow.flow", "value": "PlagiarismTrainingFlow"},
+                    {"key": "metaflow.run_id", "value": "123456"},
+                ],
+            },
+        }
 
     app.dependency_overrides[get_db_session] = lambda: SimpleNamespace(get=get)
     app.dependency_overrides[get_profassist_org] = lambda: SimpleNamespace(id=org_id)
-    monkeypatch.setattr(ml_admin, "training_metrics", read_metrics)
+    monkeypatch.setattr(tracking, "_training_run", read_run)
+    monkeypatch.setenv("MLFLOW_PUBLIC_URL", "https://models.example/mlflow/")
+    monkeypatch.setenv("METAFLOW_RUN_URL_TEMPLATE", "https://flows.example/{flow}/{run_id}")
     url = f"{settings.API_V1_STR}/profassist/admin/ml/jobs/{job_id}/metrics"
 
     response = await client.get(url, params={"run_id": "different-run"})
     assert response.status_code == 200, response.text
+    assert response.json() == {
+        "recall": 0.75,
+        "mlflow_url": "https://models.example/mlflow/#/experiments/42/runs/registered-training-run",
+        "metaflow_url": "https://flows.example/PlagiarismTrainingFlow/123456",
+    }
+
+    run_info["run_id"] = "different-run"
+    response = await client.get(url)
+    assert response.json() == {"recall": 0.75}
+    run_info["run_id"] = "registered-training-run"
+
+    monkeypatch.delenv("MLFLOW_PUBLIC_URL")
+    monkeypatch.delenv("METAFLOW_RUN_URL_TEMPLATE")
+    response = await client.get(url)
     assert response.json() == {"recall": 0.75}
 
     job.organization_id = uuid.uuid4()
     response = await client.get(url)
     assert response.status_code == 404
-    assert seen == [("registered-training-run", "plagiarism-train")]
+    assert seen == ["registered-training-run"] * 3
 
 
 @pytest.mark.anyio
