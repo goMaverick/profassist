@@ -130,6 +130,63 @@ def fingerprints(text: str, k: int = 8, window: int = 4) -> dict[str, str]:
     return chosen
 
 
+def expand_shared_passage(left: str, right: str, fingerprint: str) -> tuple[str, str]:
+    """Extend a shared fingerprint through adjacent matching text in both reports."""
+    anchor = tokens(fingerprint)
+    if not anchor:
+        return fingerprint, fingerprint
+
+    def locate(text: str) -> tuple[list[re.Match[str]], int | None]:
+        words = list(re.finditer(r"[a-z0-9']+", text, re.IGNORECASE | re.ASCII))
+        values = [word.group().lower() for word in words]
+        index = next(
+            (
+                i
+                for i, value in enumerate(values)
+                if value == anchor[0] and values[i : i + len(anchor)] == anchor
+            ),
+            None,
+        )
+        return words, index
+
+    left_words, a = locate(left)
+    right_words, b = locate(right)
+    if a is None or b is None:
+        return fingerprint, fingerprint
+
+    left_end, right_end = a + len(anchor) - 1, b + len(anchor) - 1
+
+    def same_link(i: int, j: int) -> bool:
+        return (
+            left[left_words[i].end() : left_words[i + 1].start()].strip()
+            == right[right_words[j].end() : right_words[j + 1].start()].strip()
+        )
+
+    while (
+        a > 0
+        and b > 0
+        and same_link(a - 1, b - 1)
+        and left_words[a - 1].group().lower() == right_words[b - 1].group().lower()
+    ):
+        a -= 1
+        b -= 1
+    while (
+        left_end + 1 < len(left_words)
+        and right_end + 1 < len(right_words)
+        and same_link(left_end, right_end)
+        and left_words[left_end + 1].group().lower() == right_words[right_end + 1].group().lower()
+    ):
+        left_end += 1
+        right_end += 1
+
+    left_stop, right_stop = left_words[left_end].end(), right_words[right_end].end()
+    punctuation = re.match(r"[.!?]+", left[left_stop:])
+    if punctuation and right.startswith(punctuation.group(), right_stop):
+        left_stop += len(punctuation.group())
+        right_stop += len(punctuation.group())
+    return left[left_words[a].start() : left_stop], right[right_words[b].start() : right_stop]
+
+
 def hash_embed(text: str, dim: int = 64) -> list[float]:
     vector = [0.0] * dim
     for token in tokens(text):
@@ -220,6 +277,11 @@ def compare_submissions(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
                         kind = "rare_detail"
                     if kind is None:
                         continue
+                    passage_a, passage_b = (
+                        expand_shared_passage(left_text, right_text, passage)
+                        if passage
+                        else (left_text[:280], right_text[:280])
+                    )
                     flags.append(
                         {
                             "left_id": left_row["id"],
@@ -231,8 +293,8 @@ def compare_submissions(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
                             "score": round(score, 3),
                             "embedding": round(embed, 3),
                             "kind": kind,
-                            "passage_a": passage or left_text[:280],
-                            "passage_b": passage or right_text[:280],
+                            "passage_a": passage_a,
+                            "passage_b": passage_b,
                             "rare_details": sorted(rare)[:8],
                         }
                     )
