@@ -225,12 +225,16 @@ async def create_integrity_job(
         job.error = ""
         # Prefect may start immediately; make the durable envelope visible first.
         await db.commit()
+        await db.execute(
+            sql_text("SELECT set_config('app.current_org', :org, true)"),
+            {"org": str(organization_id)},
+        )
         try:
             from prefect.deployments import run_deployment
 
             flow_run = await run_deployment(
                 "profassist-ml-job/ml-job",
-                parameters={"job_id": str(job.id)},
+                parameters={"job_id": str(job.id), "organization_id": str(job.organization_id)},
                 timeout=0,
                 idempotency_key=(
                     f"{job.id}:{previous_flow_run_id}" if previous_flow_run_id else str(job.id)
@@ -240,10 +244,6 @@ async def create_integrity_job(
         except Exception:
             job.status = "failed"
             job.error = "The model job could not be queued. Please retry."
-        await db.execute(
-            sql_text("SELECT set_config('app.current_org', :org, true)"),
-            {"org": str(organization_id)},
-        )
         await db.flush()
     return {
         "job_id": str(job.id),
@@ -285,7 +285,7 @@ async def get_job(
 
 
 @flow(name="profassist-ml-job", log_prints=True)
-async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
+async def profassist_ml_job_flow(job_id: str, organization_id: str | None = None) -> dict[str, Any]:
     """Load durable inputs, call private worker, and atomically persist evidence."""
     # Prefect serializes the flow function in a clean subprocess, so a module
     # side-effect import is not sufficient to register FK targets there.
@@ -296,50 +296,63 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
     except (ValueError, TypeError):
         return {"ok": False, "error": "invalid job"}
     async with get_db_context() as db:
+        if organization_id is not None:
+            try:
+                scope = str(uuid.UUID(organization_id))
+            except (ValueError, TypeError):
+                return {"ok": False, "error": "invalid organization"}
+            await db.execute(
+                sql_text("SELECT set_config('app.current_org', :org, true)"), {"org": scope}
+            )
         job = await db.get(ProfAssistMLJob, job_uuid)
-        if job is None:
+        if job is None or (organization_id is not None and str(job.organization_id) != scope):
             return {"ok": False, "error": "job not found"}
         if job.status == "completed":
             return {"ok": True, "job_id": job_id, "status": job.status}
         job.status = "running"
         job.error = ""
         await db.flush()
-        versions_result = await db.execute(
-            select(IntegritySourceVersion).where(
-                IntegritySourceVersion.organization_id == job.organization_id,
-                IntegritySourceVersion.id.in_(
-                    [uuid.UUID(value) for value in job.source_version_ids]
-                ),
-            )
+        external_input = (
+            job.result.get("external_input") if job.operation == "plagiarism-snapshot" else None
         )
-        versions_by_id = {str(row.id): row for row in versions_result.scalars().all()}
-        versions = [
-            versions_by_id[version_id]
-            for version_id in job.source_version_ids
-            if version_id in versions_by_id
-        ]
-        submissions_result = await db.execute(
-            select(Submission).where(
-                Submission.organization_id == job.organization_id,
-                Submission.id.in_([row.submission_id for row in versions]),
-            )
-        )
-        submissions = {str(row.id): row for row in submissions_result.scalars().all()}
         reports = []
-        for version in versions:
-            submission = submissions.get(str(version.submission_id))
-            if submission is not None:
-                reports.append(
-                    {
-                        "report_id": str(submission.id),
-                        "version_id": str(version.id),
-                        "text": version.text_content,
-                    }
+        if external_input is None and job.operation != "plagiarism-train":
+            versions_result = await db.execute(
+                select(IntegritySourceVersion).where(
+                    IntegritySourceVersion.organization_id == job.organization_id,
+                    IntegritySourceVersion.id.in_(
+                        [uuid.UUID(value) for value in job.source_version_ids]
+                    ),
                 )
-        if len(reports) < 2:
-            job.status = "failed"
-            job.error = "The assignment inputs are no longer available. Please retry."
-            return {"ok": False, "status": job.status}
+            )
+            versions_by_id = {str(row.id): row for row in versions_result.scalars().all()}
+            versions = [
+                versions_by_id[version_id]
+                for version_id in job.source_version_ids
+                if version_id in versions_by_id
+            ]
+            submissions_result = await db.execute(
+                select(Submission).where(
+                    Submission.organization_id == job.organization_id,
+                    Submission.id.in_([row.submission_id for row in versions]),
+                )
+            )
+            submissions = {str(row.id): row for row in submissions_result.scalars().all()}
+            reports = []
+            for version in versions:
+                submission = submissions.get(str(version.submission_id))
+                if submission is not None:
+                    reports.append(
+                        {
+                            "report_id": str(submission.id),
+                            "version_id": str(version.id),
+                            "text": version.text_content,
+                        }
+                    )
+            if len(reports) < 2:
+                job.status = "failed"
+                job.error = "The assignment inputs are no longer available. Please retry."
+                return {"ok": False, "status": job.status}
         course = await db.get(Course, job.course_id)
         scope = {
             "institution_id": str(job.organization_id),
@@ -360,24 +373,35 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                 job.status = "failed"
                 job.error = "The dataset snapshot is unavailable. Please retry."
                 return {"ok": False, "status": job.status}
-            review_result = await db.execute(
-                select(IntegrityPairReview).where(
-                    IntegrityPairReview.organization_id == job.organization_id,
-                    IntegrityPairReview.id.in_([uuid.UUID(value) for value in snapshot.review_ids]),
-                )
-            )
-            reports_by_version = {row["version_id"]: row for row in reports}
-            reviews_by_id = {str(review.id): review for review in review_result.scalars().all()}
-            if set(reviews_by_id) != set(snapshot.review_ids):
-                job.status = "failed"
-                job.error = "The frozen review revisions are unavailable. Please retry."
-                return {"ok": False, "status": job.status}
-            review_payload = [
-                _snapshot_review_payload(reviews_by_id[review_id], reports_by_version)
-                for review_id in snapshot.review_ids
-            ]
             context = {"job_id": job_id, "scope": scope}
-            payload = {"scope": scope, "reports": reports, "reviews": review_payload}
+            if external_input is not None:
+                if external_input.get("scope") != scope:
+                    job.status, job.error = (
+                        "failed",
+                        "The uploaded dataset scope changed. Upload it again.",
+                    )
+                    return {"ok": False, "status": job.status}
+                payload = external_input
+            else:
+                review_result = await db.execute(
+                    select(IntegrityPairReview).where(
+                        IntegrityPairReview.organization_id == job.organization_id,
+                        IntegrityPairReview.id.in_(
+                            [uuid.UUID(value) for value in snapshot.review_ids]
+                        ),
+                    )
+                )
+                reports_by_version = {row["version_id"]: row for row in reports}
+                reviews_by_id = {str(review.id): review for review in review_result.scalars().all()}
+                if set(reviews_by_id) != set(snapshot.review_ids):
+                    job.status = "failed"
+                    job.error = "The frozen review revisions are unavailable. Please retry."
+                    return {"ok": False, "status": job.status}
+                review_payload = [
+                    _snapshot_review_payload(reviews_by_id[review_id], reports_by_version)
+                    for review_id in snapshot.review_ids
+                ]
+                payload = {"scope": scope, "reports": reports, "reviews": review_payload}
         elif job.operation == "plagiarism-train":
             snapshot = await db.get(IntegrityDatasetSnapshot, uuid.UUID(job.result["snapshot_id"]))
             if (
@@ -450,6 +474,7 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                     "dataset_sha256": dataset_sha256,
                     "manifest_sha256": manifest_sha256,
                     "review_count": int(result.get("review_count") or 0),
+                    "synthetic": bool(job.result.get("synthetic")),
                 }
                 job.status = "completed"
                 await db.flush()
@@ -466,10 +491,14 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                     or summary.get("platform_snapshot_sha256") != snapshot.manifest_checksum
                 ):
                     raise ValueError("worker training result does not match the training dataset")
-                if summary.get("gate_passed") is False and not summary.get("candidate_version"):
+                if job.result.get("synthetic") or (
+                    summary.get("gate_passed") is False and not summary.get("candidate_version")
+                ):
                     job.result = {
                         "snapshot_id": str(snapshot.id),
-                        "gate_passed": False,
+                        "synthetic": bool(job.result.get("synthetic")),
+                        "candidate_version": summary.get("candidate_version"),
+                        "gate_passed": bool(summary.get("gate_passed")),
                         "training_run_id": summary.get("mlflow_run_id"),
                     }
                     job.status = "completed"
@@ -478,7 +507,7 @@ async def profassist_ml_job_flow(job_id: str) -> dict[str, Any]:
                         "ok": True,
                         "job_id": job_id,
                         "status": job.status,
-                        "gate_passed": False,
+                        "gate_passed": job.result["gate_passed"],
                     }
                 candidate_version = str(
                     summary.get("candidate_version") or summary.get("model_version") or ""

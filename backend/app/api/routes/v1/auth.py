@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.api.deps import CurrentUser, SessionSvc, UserSvc
+from app.core.config import settings
 from app.core.exceptions import AuthenticationError
 from app.core.security import (
     create_access_token,
@@ -38,7 +39,16 @@ async def login(
     session_service: SessionSvc,
 ) -> Any:
     """OAuth2 password login, returns access and refresh tokens."""
-    user = await user_service.authenticate(form_data.username, form_data.password)
+    username = form_data.username
+    if (
+        username == "admin"
+        and settings.LOCAL_DEMO_ADMIN_LOGIN
+        and settings.ENVIRONMENT == "local"
+        and request.client is not None
+        and request.client.host in {"127.0.0.1", "::1"}
+    ):
+        username = "demo-professor@example.com"
+    user = await user_service.authenticate(username, form_data.password)
     access_token = create_access_token(subject=str(user.id))
     refresh_token = create_refresh_token(subject=str(user.id))
 

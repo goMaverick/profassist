@@ -41,7 +41,7 @@ class DropoutReleaseActionBody(BaseModel):
 
 
 def _error(result: dict) -> dict:
-    if "error" in result:
+    if result.get("error"):
         raise ProfassistError(409, str(result["error"]))
     return result
 
@@ -52,20 +52,48 @@ async def dropout_export_import(
     org: ProfOrg,
     db: DBSession,
     course_id: uuid.UUID = Form(...),
-    snapshots_file: UploadFile = File(...),
-    manifest_file: UploadFile = File(...),
+    training_file: UploadFile | None = File(default=None),
+    confirmed_moodle: bool = Form(default=False),
+    synthetic: bool = Form(default=False),
+    snapshots_file: UploadFile | None = File(default=None),
+    manifest_file: UploadFile | None = File(default=None),
     outcomes_file: UploadFile | None = File(default=None),
 ) -> dict:
-    from app.profassist.ml.dropout_jobs import import_export
+    from app.profassist.ml.dropout_jobs import MAX_FILE_BYTES, import_export, split_training_csv
 
-    snapshots = await snapshots_file.read()
-    manifest = await manifest_file.read()
-    outcomes = await outcomes_file.read() if outcomes_file is not None else None
     try:
+        if training_file is not None:
+            if any(file is not None for file in (snapshots_file, manifest_file, outcomes_file)):
+                raise ValueError(
+                    "Upload one training CSV or use the original separate export files."
+                )
+            if not synthetic and not confirmed_moodle:
+                raise ValueError(
+                    "Confirm that the CSV contains historical data exported from Moodle."
+                )
+            from app.profassist.models import Course
+
+            course = await db.get(Course, course_id)
+            if course is None or course.organization_id != org.id:
+                raise ProfassistError(404, "Course not found in this workspace.")
+            snapshots, manifest, outcomes = split_training_csv(
+                await training_file.read(MAX_FILE_BYTES + 1),
+                org.id,
+                synthetic=synthetic,
+                course_external_id=str(course.external_id or ""),
+            )
+        elif snapshots_file is not None and manifest_file is not None:
+            snapshots = await snapshots_file.read(MAX_FILE_BYTES + 1)
+            manifest = await manifest_file.read(1024 * 1024 + 1)
+            outcomes = await outcomes_file.read(MAX_FILE_BYTES + 1) if outcomes_file else None
+        else:
+            raise ValueError("Upload a training CSV.")
         result = await import_export(db, org.id, user.id, course_id, snapshots, manifest, outcomes)
     except ValueError as exc:
         raise ProfassistError(422, str(exc)) from exc
-    return _error(result)
+    response = _error(result)
+    await db.commit()
+    return response
 
 
 @router.get("/admin/ml/dropout/exports")

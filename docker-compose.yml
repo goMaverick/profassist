@@ -50,6 +50,7 @@ services:
       - LANGFUSE_PUBLIC_BASE_URL=http://localhost:3100
       - LANGFUSE_PROJECT_ID=profassist-project
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - PREFECT_PUBLIC_URL=${PREFECT_PUBLIC_URL:-http://localhost:4200}
       - MLFLOW_PUBLIC_URL=${MLFLOW_PUBLIC_URL:-http://localhost:5000}
       - METAFLOW_RUN_URL_TEMPLATE=${METAFLOW_RUN_URL_TEMPLATE:-}
       - PLAGIARISM_WORKER_URL=${PLAGIARISM_WORKER_URL:-}
@@ -171,7 +172,7 @@ services:
     volumes:
       - prefect_data:/root/.local/share/prefect/
     environment:
-      - PREFECT_UI_URL=http://localhost:4200/api
+      - PREFECT_UI_API_URL=${PREFECT_PUBLIC_URL:-http://localhost:4200}/api
       - PREFECT_API_URL=http://localhost:4200/api
       - PREFECT_SERVER_API_HOST=0.0.0.0
     networks:
@@ -467,6 +468,23 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    restart: unless-stopped
+
+  metaflow-viewer:
+    profiles: [mlops]
+    image: profassist_worker:integration
+    pull_policy: never
+    command: ["python", "/viewer.py", "--host", "0.0.0.0", "--port", "58324", "--root", "/runs"]
+    ports:
+      - "127.0.0.1:58324:58324"
+    volumes:
+      - profassist_worker_data:/runs:ro
+      - ./private-worker/metaflow_viewer.py:/viewer.py:ro
+    depends_on:
+      profassist-worker:
+        condition: service_healthy
+    networks:
+      - backend
     restart: unless-stopped
 
   frontend:

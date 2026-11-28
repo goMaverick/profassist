@@ -1,3 +1,5 @@
+import { refreshAccessToken } from "@/lib/api-client";
+
 export class ProfassistError extends Error {
   constructor(
     message: string,
@@ -13,7 +15,17 @@ export async function pa<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !isForm && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`/api/profassist${path}`, { ...init, headers });
+  const request = () => fetch(`/api/profassist${path}`, { ...init, headers });
+  let response = await request();
+  const canReplay = typeof ReadableStream === "undefined" || !(init.body instanceof ReadableStream);
+  if (
+    response.status === 401 &&
+    canReplay &&
+    !init.signal?.aborted &&
+    (await refreshAccessToken())
+  ) {
+    response = await request();
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {

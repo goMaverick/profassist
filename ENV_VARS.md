@@ -25,7 +25,7 @@ group is for and which are required vs optional.
 | `SECRET_KEY` | **required in prod** | (generated) | JWT signing key. Rotating invalidates all tokens |
 | `API_KEY` | **required in prod** | (generated) | Static admin/service-to-service key for `X-API-Key` header |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | optional | `30` | JWT access token lifetime |
-| `REFRESH_TOKEN_EXPIRE_MINUTES` | optional | `10080` | JWT refresh token lifetime (7 days) |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | optional | `20160` | JWT refresh token lifetime (14 days) |
 
 ## Database
 | Variable | Required | Default | Description |

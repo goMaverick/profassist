@@ -21,6 +21,7 @@ from app.profassist.models import (
     ProfAssistMLJob,
     ProfAssistMLRelease,
 )
+from app.profassist.tracking import prefect_run_url
 
 
 def _digest(value: Any) -> str:
@@ -33,10 +34,14 @@ async def _dispatch(db: Any, job: ProfAssistMLJob) -> dict[str, Any]:
     job.status = "queued"
     job.error = ""
     await db.commit()
+    await db.execute(
+        text("SELECT set_config('app.current_org', :org, true)"),
+        {"org": str(job.organization_id)},
+    )
     try:
         run = await run_deployment(
             "profassist-ml-job/ml-job",
-            parameters={"job_id": str(job.id)},
+            parameters={"job_id": str(job.id), "organization_id": str(job.organization_id)},
             timeout=0,
             idempotency_key=(
                 f"{job.id}:{previous_flow_run_id}" if previous_flow_run_id else str(job.id)
@@ -46,10 +51,6 @@ async def _dispatch(db: Any, job: ProfAssistMLJob) -> dict[str, Any]:
     except Exception:
         job.status = "failed"
         job.error = "The model job could not be queued. Please retry."
-    await db.execute(
-        text("SELECT set_config('app.current_org', :org, true)"),
-        {"org": str(job.organization_id)},
-    )
     await db.flush()
     await db.refresh(job)
     return _job_card(job)
@@ -65,6 +66,7 @@ def _job_card(row: ProfAssistMLJob) -> dict[str, Any]:
     result = row.result if isinstance(row.result, dict) else {}
     return {
         "job_id": str(row.id),
+        "prefect_url": prefect_run_url(row.prefect_flow_run_id),
         "operation": row.operation,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -75,6 +77,7 @@ def _job_card(row: ProfAssistMLJob) -> dict[str, Any]:
         "release_id": result.get("release_id"),
         "gate_passed": result.get("gate_passed"),
         "review_count": result.get("review_count"),
+        "synthetic": bool(result.get("synthetic")),
     }
 
 
@@ -164,6 +167,80 @@ async def create_snapshot_job(
         "reports": reports,
         "reviews": reviews,
     }
+    return await _queue_snapshot_input(
+        db,
+        org_id,
+        user_id,
+        course_id,
+        assessment_id,
+        snapshot_input,
+        [str(row.id) for row in latest_by_submission.values()],
+        [str(row.id) for row in eligible],
+    )
+
+
+async def create_text_pair_snapshot(
+    db: Any,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    course_id: uuid.UUID,
+    assessment_id: uuid.UUID,
+    reports: list[dict],
+    reviews: list[dict],
+    *,
+    synthetic: bool,
+) -> dict[str, Any]:
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"snapshot:{org_id}:{assessment_id}"},
+    )
+    course = await db.get(Course, course_id)
+    assessment = await db.get(Assessment, assessment_id)
+    if (
+        course is None
+        or assessment is None
+        or course.organization_id != org_id
+        or assessment.organization_id != org_id
+        or assessment.course_id != course_id
+        or assessment.owner_user_id not in {None, user_id}
+    ):
+        return {"error": "Assignment not found."}
+    payload = {
+        "scope": {
+            "institution_id": str(org_id),
+            "course_id": str(course.external_id or course.id),
+            "assignment_id": str(assessment_id),
+        },
+        "reports": reports,
+        "reviews": reviews,
+    }
+    return await _queue_snapshot_input(
+        db,
+        org_id,
+        user_id,
+        course_id,
+        assessment_id,
+        payload,
+        [],
+        [],
+        external=True,
+        synthetic=synthetic,
+    )
+
+
+async def _queue_snapshot_input(
+    db: Any,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    course_id: uuid.UUID,
+    assessment_id: uuid.UUID,
+    snapshot_input: dict,
+    version_ids: list[str],
+    review_ids: list[str],
+    *,
+    external: bool = False,
+    synthetic: bool = False,
+) -> dict[str, Any]:
     active_result = await db.execute(
         select(ProfAssistMLRelease)
         .where(
@@ -201,8 +278,8 @@ async def create_snapshot_job(
             assessment_id=assessment_id,
             created_by=user_id,
             checksum=checksum,
-            report_version_ids=[str(row.id) for row in latest_by_submission.values()],
-            review_ids=[str(row.id) for row in eligible],
+            report_version_ids=version_ids,
+            review_ids=review_ids,
             status="queued",
         )
         db.add(snapshot)
@@ -217,6 +294,10 @@ async def create_snapshot_job(
     )
     job = job_result.scalars().first()
     if job is not None:
+        if external and bool((job.result or {}).get("synthetic")) != synthetic:
+            return {
+                "error": "These pairs were already uploaded with a different synthetic data setting."
+            }
         card = (
             await _dispatch(db, job)
             if job.status == "failed" or (job.status == "queued" and not job.prefect_flow_run_id)
@@ -231,17 +312,25 @@ async def create_snapshot_job(
         operation="plagiarism-snapshot",
         status="queued",
         input_fingerprint=fingerprint,
-        source_version_ids=[str(row.id) for row in latest_by_submission.values()],
+        source_version_ids=version_ids,
         model_name=model_name,
         model_version=model_version,
-        result={"snapshot_id": str(snapshot.id)},
+        result={
+            "snapshot_id": str(snapshot.id),
+            **({"external_input": snapshot_input, "synthetic": synthetic} if external else {}),
+        },
     )
     card = await _queue(db, job)
     return card | {"snapshot_id": str(snapshot.id), "reused": False}
 
 
 async def create_training_job(
-    db: Any, org_id: uuid.UUID, user_id: uuid.UUID, snapshot_id: uuid.UUID
+    db: Any,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    snapshot_id: uuid.UUID,
+    *,
+    synthetic: bool = False,
 ) -> dict[str, Any]:
     snapshot = await db.get(IntegrityDatasetSnapshot, snapshot_id)
     if (
@@ -259,6 +348,16 @@ async def create_training_job(
         or assessment.owner_user_id not in {None, user_id}
     ):
         return {"error": "Assignment not found."}
+    if not snapshot.report_version_ids:
+        source = await db.execute(
+            select(ProfAssistMLJob.result).where(
+                ProfAssistMLJob.organization_id == org_id,
+                ProfAssistMLJob.operation == "plagiarism-snapshot",
+                ProfAssistMLJob.input_fingerprint
+                == _digest({"operation": "plagiarism-snapshot", "checksum": snapshot.checksum}),
+            )
+        )
+        synthetic = synthetic or bool((source.scalar_one_or_none() or {}).get("synthetic"))
     active_result = await db.execute(
         select(ProfAssistMLRelease)
         .where(
@@ -284,6 +383,7 @@ async def create_training_job(
         {
             "operation": "plagiarism-train",
             "snapshot": snapshot.manifest_checksum,
+            **({"synthetic": True} if synthetic else {}),
             "model_name": model_name,
             "model_version": model_version,
         }
@@ -314,7 +414,7 @@ async def create_training_job(
         source_version_ids=list(snapshot.report_version_ids),
         model_name=model_name,
         model_version=model_version,
-        result={"snapshot_id": str(snapshot.id)},
+        result={"snapshot_id": str(snapshot.id), "synthetic": synthetic},
     )
     return await _queue(db, job) | {"reused": False}
 

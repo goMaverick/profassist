@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores";
@@ -63,13 +63,18 @@ function runAuthCheck(setUser: (u: User | null) => void): Promise<void> {
       const { access_token, ...userData } = data;
       setUser(userData as User);
       useAuthStore.getState().setAccessToken(access_token ?? null);
-    } catch {
+      authChecked = true;
+    } catch (error) {
       if (epoch !== authEpoch) return; // stale 401 must not clear a newer session
-      setUser(null);
-      useAuthStore.getState().setAccessToken(null);
+      if (error instanceof ApiError && error.status === 401) {
+        setUser(null);
+        useAuthStore.getState().setAccessToken(null);
+        authChecked = true;
+      } else {
+        throw error;
+      }
     } finally {
       if (epoch === authEpoch) {
-        authChecked = true;
         authCheckPromise = null;
       }
     }
@@ -81,12 +86,20 @@ export function useAuth() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, setUser, setLoading, logout } = useAuthStore();
 
-  // Check auth status once per session. /auth/me returns the access_token in
-  // the body (httpOnly cookie isn't JS-readable) for WebSocket auth.
-  useEffect(() => {
-    void runAuthCheck(setUser);
-    ensureTokenRefresh();
+  const [sessionCheckFailed, setSessionCheckFailed] = useState(false);
+  const checkSession = useCallback(async () => {
+    setSessionCheckFailed(false);
+    try {
+      await runAuthCheck(setUser);
+    } catch {
+      setSessionCheckFailed(true);
+    }
   }, [setUser]);
+
+  useEffect(() => {
+    void checkSession();
+    ensureTokenRefresh();
+  }, [checkSession]);
 
   const login = useCallback(
     async (credentials: LoginRequest) => {
@@ -160,6 +173,8 @@ export function useAuth() {
     user,
     isAuthenticated,
     isLoading,
+    sessionCheckFailed,
+    checkSession,
     login,
     register,
     logout: handleLogout,

@@ -41,6 +41,7 @@ interface Assignment {
 
 interface Job {
   job_id: string;
+  prefect_url?: string | null;
   operation?: string;
   status: string;
   created_at?: string | null;
@@ -52,6 +53,7 @@ interface Job {
   export_id?: string | null;
   gate_passed?: boolean | null;
   review_count?: number | null;
+  synthetic?: boolean;
 }
 
 interface Release {
@@ -68,6 +70,7 @@ interface Dataset {
   cohorts: string[];
   row_count: number;
   outcome_count: number;
+  sample_only?: boolean;
   status: string;
   created_at?: string | null;
   split?: { train?: string[]; validation?: string[]; test?: string[] };
@@ -380,6 +383,8 @@ function ModelWorkflow({
   const [step, setStep] = useState<Step>("data");
   const [dataId, setDataId] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [syntheticUpload, setSyntheticUpload] = useState(false);
+  const [syntheticReports, setSyntheticReports] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -521,8 +526,6 @@ function ModelWorkflow({
   async function addDataset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const outcomes = form.get("outcomes_file");
-    if (outcomes instanceof File && !outcomes.name) form.delete("outcomes_file");
     form.set("course_id", course.id);
     await work(async () => {
       const added = await post<Dataset & { error?: string }>("/admin/ml/dropout/exports", form);
@@ -533,6 +536,66 @@ function ModelWorkflow({
       setDataId(added.export_id);
       setUploadOpen(false);
       void cache.invalidateQueries({ queryKey: exportsKey });
+    });
+  }
+
+  async function downloadReportVersions() {
+    if (!assignment) return;
+    const query = new URLSearchParams({
+      course_id: course.id,
+      assessment_id: assignment.assessment_id,
+    });
+    await work(async () => {
+      const reports = await pa<{ items: unknown[] }>(
+        `/admin/ml/plagiarism/reviews/report-versions?${query}`,
+      );
+      if (!reports.items.length)
+        throw new Error("No saved report versions yet. Scan the assignment in Integrity first.");
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(reports.items, null, 2)], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "assignment-report-versions.json";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  }
+
+  async function importTextPairs(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!assignment) return;
+    const form = event.currentTarget;
+    const body = new FormData(form);
+    body.set("course_id", course.id);
+    body.set("assessment_id", assignment.assessment_id);
+    await work(async () => {
+      const job = await post<Job>("/admin/ml/plagiarism/text-pairs/import", body);
+      rememberJob(job, "plagiarism-snapshot");
+      if (job.snapshot_id) setDataId(job.snapshot_id);
+      form.reset();
+      setMessage("Text pairs uploaded. Preparing the training dataset.");
+    });
+  }
+
+  async function importReportReviews(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!assignment) return;
+    const form = event.currentTarget;
+    const body = new FormData(form);
+    body.set("course_id", course.id);
+    body.set("assessment_id", assignment.assessment_id);
+    await work(async () => {
+      const result = await post<{ review_count: number; snapshot_job: Job; error?: string }>(
+        "/admin/ml/plagiarism/reviews/import",
+        body,
+      );
+      const job = result.snapshot_job;
+      if (job.job_id) rememberJob(job, "plagiarism-snapshot");
+      if (job.snapshot_id) setDataId(job.snapshot_id);
+      form.reset();
+      setMessage(`${result.review_count} report reviews saved.`);
+      if (job.error) setError(job.error);
     });
   }
 
@@ -557,7 +620,10 @@ function ModelWorkflow({
               export_id: dataset.export_id,
               ...datasetSplit(dataset),
             })
-          : await post<Job>("/admin/ml/plagiarism/train", { snapshot_id: snapshot?.snapshot_id });
+          : await post<Job>("/admin/ml/plagiarism/train", {
+              snapshot_id: snapshot?.snapshot_id,
+              synthetic: syntheticReports,
+            });
       rememberJob(job, dropout ? "dropout-train" : "plagiarism-train");
       setStartedId(job.job_id);
     });
@@ -690,21 +756,32 @@ function ModelWorkflow({
                   ) : ready && dataset ? (
                     <Status title="Ready to train" kind="success">
                       {number.format(dataset.outcome_count)} student outcomes included.
+                      {dataset.sample_only && " Synthetic training run."}
                     </Status>
                   ) : (
                     <Status title="More data needed" kind="warning">
                       {problem}
                     </Status>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-expanded={uploadOpen}
-                    aria-controls="model-add-dataset"
-                    onClick={() => setUploadOpen((open) => !open)}
-                  >
-                    {uploadOpen ? "Close dataset form" : "Add a dataset"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-expanded={uploadOpen}
+                      aria-controls="model-add-dataset"
+                      onClick={() => setUploadOpen((open) => !open)}
+                    >
+                      {uploadOpen ? "Close dataset form" : "Add a dataset"}
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                      <a href="/samples/dropout-training-sample.csv" download>
+                        Download sample dataset
+                      </a>
+                    </Button>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    The sample CSV shows the required columns using fictional records.
+                  </p>
                   {uploadOpen && (
                     <form
                       id="model-add-dataset"
@@ -712,31 +789,32 @@ function ModelWorkflow({
                       className="border-border space-y-3 rounded-lg border p-3"
                     >
                       <p className="text-muted-foreground text-sm">
-                        Choose the files from the same export. Historical outcomes are required for
-                        training.
+                        Upload student activity through day 35 and final course outcomes in one CSV.
+                        The two latest cohorts are reserved for validation and testing.
                       </p>
-                      <div className="grid gap-3 lg:grid-cols-3">
-                        <UploadField
-                          name="snapshots_file"
-                          label="Student activity (CSV)"
-                          description="Activity through day 35."
-                          accept=".csv,text/csv"
-                          required
+                      <UploadField
+                        name="training_file"
+                        label="Training dataset (CSV)"
+                        description="One row per student, course, and cutoff. Include the Moodle export timestamp."
+                        accept=".csv,text/csv"
+                        required
+                      />
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          name="synthetic"
+                          value="true"
+                          checked={syntheticUpload}
+                          onChange={(event) => setSyntheticUpload(event.target.checked)}
                         />
-                        <UploadField
-                          name="outcomes_file"
-                          label="Course outcomes (CSV)"
-                          description="Required for training."
-                          accept=".csv,text/csv"
-                        />
-                        <UploadField
-                          name="manifest_file"
-                          label="Export information (JSON)"
-                          description="The manifest supplied with the export."
-                          accept=".json,application/json"
-                          required
-                        />
-                      </div>
+                        Synthetic data
+                      </label>
+                      {!syntheticUpload && (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" name="confirmed_moodle" value="true" required />I
+                          confirm these are historical records exported from Moodle.
+                        </label>
+                      )}
                       <Button type="submit" size="sm" disabled={busy}>
                         Check and add dataset
                       </Button>
@@ -831,6 +909,67 @@ function ModelWorkflow({
                       </Link>
                     </Button>
                   </div>
+                  {assignment && (
+                    <form
+                      onSubmit={importTextPairs}
+                      className="border-border space-y-3 rounded-lg border p-3"
+                    >
+                      <UploadField
+                        name="text_pairs_file"
+                        label="Text pairs (CSV)"
+                        description="Include both texts, a review label, and the exact shared wording for positive examples. Use several distinct pairs of both types."
+                        accept=".csv,text/csv"
+                        required
+                      />
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="synthetic" value="true" defaultChecked />{" "}
+                        Synthetic data
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="submit" size="sm" disabled={busy || Boolean(preparing)}>
+                          Upload text pairs
+                        </Button>
+                        <Button asChild size="sm" variant="outline">
+                          <a href="/samples/passage-reuse-reviews-sample.csv" download>
+                            Download sample CSV
+                          </a>
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                  {assignment && (
+                    <form
+                      onSubmit={importReportReviews}
+                      className="border-border space-y-3 rounded-lg border p-3"
+                    >
+                      <UploadField
+                        name="reviews_file"
+                        label="Reviewed report pairs (CSV)"
+                        description="Use current report version IDs. For flagged pairs, include zero-based start and exclusive end offsets for both passages."
+                        accept=".csv,text/csv"
+                        required
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="submit" size="sm" disabled={busy || Boolean(preparing)}>
+                          Upload reviewed pairs
+                        </Button>
+                        <Button asChild variant="outline" size="sm">
+                          <a href="/samples/passage-reuse-review-upload-template.csv" download>
+                            Download upload template
+                          </a>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => void downloadReportVersions()}
+                        >
+                          Download report IDs and text
+                        </Button>
+                      </div>
+                    </form>
+                  )}
                 </>
               )}
               <div className="border-border flex flex-wrap justify-between gap-2 border-t pt-3">
@@ -865,6 +1004,19 @@ function ModelWorkflow({
                   }
                 >
                   Results will appear here when training and checks finish.
+                  {currentlyTraining.prefect_url && (
+                    <div className="mt-3">
+                      <Button asChild variant="outline" size="sm">
+                        <a
+                          href={currentlyTraining.prefect_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open run in Prefect <ExternalLink aria-hidden="true" />
+                        </a>
+                      </Button>
+                    </div>
+                  )}
                 </Status>
               ) : (
                 <Status
@@ -873,6 +1025,16 @@ function ModelWorkflow({
                 >
                   {dropout && dataset ? datasetName(dataset) : assignment?.name}
                 </Status>
+              )}
+              {!dropout && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={syntheticReports}
+                    onChange={(event) => setSyntheticReports(event.target.checked)}
+                  />
+                  Train on synthetic report reviews
+                </label>
               )}
               <div className="border-border flex flex-wrap justify-between gap-2 border-t pt-3">
                 <Button variant="outline" onClick={() => go("data")}>
@@ -917,6 +1079,7 @@ function ModelWorkflow({
                       <option key={job.job_id} value={job.job_id}>
                         {job.created_at ? runDate.format(new Date(job.created_at)) : "Training run"}{" "}
                         · {statusLabel(job)}
+                        {job.synthetic ? " · Synthetic" : ""}
                         {job.status === "completed" &&
                         job.gate_passed !== false &&
                         job.model_version
@@ -962,11 +1125,13 @@ function ModelWorkflow({
                           : "default"
                     }
                   >
-                    {result.gate_passed === false
-                      ? "This version cannot be approved. Review the results or try another dataset."
-                      : eligible(resultRelease)
-                        ? "This version passed the required checks."
-                        : "Approval is available after release verification."}
+                    {result.synthetic
+                      ? "This synthetic run is for evaluation only."
+                      : result.gate_passed === false
+                        ? "This version cannot be approved. Review the results or try another dataset."
+                        : eligible(resultRelease)
+                          ? "This version passed the required checks."
+                          : "Approval is available after release verification."}
                   </Status>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {(["recall", "precision"] as const).map((key) => {
@@ -997,6 +1162,7 @@ function ModelWorkflow({
                     <div className="flex flex-wrap gap-2">
                       {(
                         [
+                          ["Prefect", result.prefect_url],
                           ["MLflow", metrics.data?.mlflow_url],
                           ["Metaflow", metrics.data?.metaflow_url],
                         ] as const
