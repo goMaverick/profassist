@@ -15,7 +15,7 @@
 import type { NextResponse } from "next/server";
 
 export const ACCESS_TOKEN_MAX_AGE = 60 * 15; // 15 minutes
-export const REFRESH_TOKEN_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+export const REFRESH_TOKEN_MAX_AGE = 60 * 60 * 24 * 14; // 14 days
 
 /** Exported for the unit test — the module-level value is read once at startup. */
 export function resolveCookieSecure(env: { COOKIE_SECURE?: string; NODE_ENV?: string }): boolean {

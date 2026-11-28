@@ -90,7 +90,8 @@ class Settings(BaseSettings):
         return v
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # 30 minutes
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    LOCAL_DEMO_ADMIN_LOGIN: bool = False
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 14  # 14 days
     ALGORITHM: str = "HS256"
 
     # Public URL of the frontend; used to build OAuth redirect targets and

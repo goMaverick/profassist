@@ -15,7 +15,7 @@ from app.profassist.models import (
     IntegritySourceVersion,
     Submission,
 )
-from app.profassist.similarity import compare_submissions
+from app.profassist.similarity import compare_submissions, expand_shared_passage, sections
 
 COURSES: list[dict[str, Any]] = []
 
@@ -815,14 +815,32 @@ def _pair_map(
         writing = str(getattr(flag, "kind", "") or "").lower() == "writing"
         if source == "worker" and str(getattr(flag, "section", "")) == "coverage":
             continue
+        left_passage = str(getattr(flag, "passage_b" if reverse else "passage_a", "") or "")
+        right_passage = str(getattr(flag, "passage_a" if reverse else "passage_b", "") or "")
+        if (
+            source != "worker"
+            and getattr(flag, "kind", "") == "fingerprint"
+            and left_passage == right_passage
+        ):
+            section = str(getattr(flag, "section", "") or "body")
+            left_row, right_row = (right, left) if reverse else (left, right)
+            left_sections, right_sections = (
+                sections(
+                    str(getattr(row, "scrubbed_text", "") or getattr(row, "raw_text", "") or "")
+                )
+                for row in (left_row, right_row)
+            )
+            left_passage, right_passage = expand_shared_passage(
+                left_sections.get(section, ""), right_sections.get(section, ""), left_passage
+            )
         entry["passages"].append(
             {
                 "id": f"{getattr(flag, 'section', '') or 'body'}-{len(entry['passages']) + 1}",
                 "percent": percent,
                 "common": False,
                 "writing": "High" if writing else ("Medium" if percent >= 50 else "Low"),
-                "left": str(getattr(flag, "passage_b" if reverse else "passage_a", "") or ""),
-                "right": str(getattr(flag, "passage_a" if reverse else "passage_b", "") or ""),
+                "left": left_passage,
+                "right": right_passage,
                 "left_version_id": str(
                     getattr(flag, "right_version_id" if reverse else "left_version_id", "") or ""
                 ),

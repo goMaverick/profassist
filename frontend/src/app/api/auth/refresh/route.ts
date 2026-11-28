@@ -29,13 +29,14 @@ export async function POST(request: NextRequest) {
 
     return response;
   } catch (error) {
-    if (error instanceof BackendApiError) {
+    if (error instanceof BackendApiError && error.status === 401) {
       const response = NextResponse.json({ detail: "Session expired" }, { status: 401 });
 
       clearAuthCookies(response);
 
       return response;
     }
-    return NextResponse.json({ detail: "Internal server error" }, { status: 500 });
+    const status = error instanceof BackendApiError ? error.status : 503;
+    return NextResponse.json({ detail: "Could not refresh the session" }, { status });
   }
 }

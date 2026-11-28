@@ -162,6 +162,39 @@ def _assignment(number="1", title="Workshops", assessment_id="assessment-1"):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("stored", [False, True])
+async def test_pair_detail_highlights_full_shared_passage(stored: bool) -> None:
+    shared = (
+        "A reliable experiment keeps a final test set untouched. "
+        "The test set estimates performance on examples that played no role in fitting the model."
+    )
+    prefix = "The panel discussed a range of methods. "
+    suffix = " The panel then reviewed the scoring record."
+    flag = _flag("s-a", "s-b", 1.0)
+    flag.passage_a = flag.passage_b = "test set estimates performance on examples that played"
+    session = _Session(
+        courses=[_course()],
+        assessments=[_assessment()],
+        assignments=[_assignment()],
+        submissions=[
+            _submission("s-a", "Group A", shared),
+            _submission("s-b", "Group B", prefix + shared + suffix),
+        ],
+        flags=[flag] if stored else [],
+    )
+
+    detail = await pair_detail_db(session, ORG, USER, "MAAI903", "1", "A", "B")
+
+    assert detail["percent"] == 100
+    assert [match["quote"] for match in detail["matches"]] == [shared]
+    assert [(run["text"], bool(run["id"])) for run in detail["right_text"][0]["runs"]] == [
+        (prefix, False),
+        (shared, True),
+        (suffix, False),
+    ]
+
+
+@pytest.mark.anyio
 async def test_overview_db_is_empty_without_submissions() -> None:
     session = _Session(courses=[_course()], assessments=[_assessment()])
 

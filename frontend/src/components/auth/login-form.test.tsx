@@ -49,7 +49,7 @@ describe("LoginForm", () => {
   it("renders email, password, and submit controls", () => {
     render(<LoginForm />);
 
-    expect(screen.getByLabelText("email")).toHaveAttribute("autocomplete", "email");
+    expect(screen.getByLabelText("email")).toHaveAttribute("autocomplete", "username");
     expect(screen.getByLabelText("password")).toHaveAttribute("type", "password");
     expect(screen.getByLabelText("password")).toHaveAttribute("autocomplete", "current-password");
     expect(screen.getByRole("button", { name: "login" })).toBeEnabled();

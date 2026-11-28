@@ -59,7 +59,7 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
 
-  const emailValid = !email || EMAIL_RE.test(email);
+  const emailValid = !email || email.trim() === "admin" || EMAIL_RE.test(email);
   const showEmailError = emailTouched && !!email && !emailValid;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,7 +69,7 @@ export function LoginForm() {
     setError("");
 
     try {
-      await login({ email, password });
+      await login({ email: email.trim(), password });
       toast.success(t("loginSuccess"));
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Login failed. Please try again.";
@@ -172,14 +172,14 @@ export function LoginForm() {
               />
               <Input
                 id="email"
-                type="email"
+                type="text"
                 placeholder={t("emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setEmailTouched(true)}
                 required
                 disabled={isLoading}
-                autoComplete="email"
+                autoComplete="username"
                 aria-invalid={showEmailError}
                 aria-describedby={showEmailError ? "email-error" : undefined}
                 className={`h-12 rounded-xl pl-11 ${showEmailError ? "border-destructive" : ""}`}

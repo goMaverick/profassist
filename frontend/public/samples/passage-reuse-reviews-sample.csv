@@ -1,0 +1,17 @@
+text_a,text_b,review_label,shared_passage
+Our garden study followed a written protocol. The north bed received water twice each week.,The garden appendix records this procedure. The north bed received water twice each week.,shared wording,The north bed received water twice each week.
+Our sound study followed a written protocol. The recorder sampled the signal at forty kilohertz.,The sound appendix records this procedure. The recorder sampled the signal at forty kilohertz.,shared wording,The recorder sampled the signal at forty kilohertz.
+Our traffic study followed a written protocol. The observers counted bicycles at the east crossing.,The traffic appendix records this procedure. The observers counted bicycles at the east crossing.,shared wording,The observers counted bicycles at the east crossing.
+Our weather study followed a written protocol. The sensor recorded air pressure every ten minutes.,The weather appendix records this procedure. The sensor recorded air pressure every ten minutes.,shared wording,The sensor recorded air pressure every ten minutes.
+Our library study followed a written protocol. The team counted occupied seats just before noon.,The library appendix records this procedure. The team counted occupied seats just before noon.,shared wording,The team counted occupied seats just before noon.
+Our water study followed a written protocol. The sample was chilled before the acidity test.,The water appendix records this procedure. The sample was chilled before the acidity test.,shared wording,The sample was chilled before the acidity test.
+Our survey study followed a written protocol. The questionnaire was sent on the final teaching day.,The survey appendix records this procedure. The questionnaire was sent on the final teaching day.,shared wording,The questionnaire was sent on the final teaching day.
+Our energy study followed a written protocol. The meters recorded demand during the evening peak.,The energy appendix records this procedure. The meters recorded demand during the evening peak.,shared wording,The meters recorded demand during the evening peak.
+We measured leaf growth with a ruler every Friday.,We counted how many flowers opened by midweek.,no shared wording,
+A microphone captured street noise at dawn.,We estimated room echo using a hand clap.,no shared wording,
+The team timed drivers at the north intersection.,Observers noted how many pedestrians used the bridge.,no shared wording,
+We logged outdoor temperatures at sunrise.,The survey recorded cloud cover in the afternoon.,no shared wording,
+Visitors booked study spaces through the library website.,Staff counted the borrowed books at closing time.,no shared wording,
+We weighed the sediment after evaporation.,The lab measured dissolved oxygen with a calibrated probe.,no shared wording,
+Students rated the usefulness of weekly office hours.,Interviewers asked volunteers about study routines.,no shared wording,
+Our worksheet estimated the annual cost of lighting.,The audit compared electricity tariffs across campus.,no shared wording,

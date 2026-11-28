@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -23,13 +24,17 @@ from app.profassist.dropout_models import (
     ProfAssistDropoutPrediction,
 )
 from app.profassist.ml.dropout.upstream.validation import (
+    FEATURE_COLUMNS,
     KEY_COLUMNS,
+    OUTCOME_COLUMNS,
+    SNAPSHOT_COLUMNS,
     _timestamp,
     _validate_outcome_frame,
     validate_snapshot_frame,
 )
 from app.profassist.ml.gateway import worker_job_timeout
 from app.profassist.models import Approval, Course, ProfAssistMLJob, ProfAssistMLRelease, Student
+from app.profassist.tracking import prefect_run_url
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_BYTES = 96 * 1024 * 1024
@@ -88,10 +93,15 @@ def _validate_manifest(
     *,
     org_id: uuid.UUID,
 ) -> tuple[str, list[str], dict[str, list[str]]]:
-    if manifest.get("schema_version") != "1.0" or manifest.get("synthetic") is not False:
-        raise ValueError(
-            "Only a non-synthetic Moodle export with schema_version 1.0 can be imported."
+    if manifest.get("schema_version") != "1.0" or (
+        manifest.get("synthetic") is not False
+        and not (
+            manifest.get("synthetic") is True
+            and manifest.get("fixture_only") is True
+            and manifest.get("provenance") == "synthetic_platform_fixture"
         )
+    ):
+        raise ValueError("Use a Moodle or explicitly synthetic export with schema_version 1.0.")
     export_id = manifest.get("export_id")
     if not isinstance(export_id, str) or not export_id.strip() or len(export_id) > 128:
         raise ValueError("Export manifest needs a non-empty export_id.")
@@ -271,6 +281,77 @@ def _validate_rows(
     return snapshots, outcomes
 
 
+def split_training_csv(
+    raw: bytes, org_id: uuid.UUID, *, synthetic: bool = False, course_external_id: str = ""
+) -> tuple[bytes, bytes, bytes]:
+    """Normalize an administrator-attested Moodle CSV into the worker contract."""
+    if not raw or len(raw) > MAX_FILE_BYTES:
+        raise ValueError("Upload a training CSV no larger than 32 MiB.")
+    frame = _frame(raw, "Training dataset")
+    columns = {*SNAPSHOT_COLUMNS, *OUTCOME_COLUMNS, "exported_at"}
+    missing, extra = columns - set(frame.columns), set(frame.columns) - columns
+    if missing or extra or not isinstance(frame.index, pd.RangeIndex):
+        raise ValueError(
+            f"Training CSV columns do not match the sample. Missing: {', '.join(sorted(missing)) or 'none'}. "
+            f"Unexpected: {', '.join(sorted(extra)) or 'none'}."
+        )
+    if synthetic:
+        if not course_external_id:
+            raise ValueError("The selected course needs an external course ID.")
+        frame = frame.assign(
+            tenant_id=str(org_id), course_id=course_external_id, source_system="synthetic_moodle"
+        )
+    elif set(frame["source_system"]) != {"moodle"}:
+        raise ValueError("Select Synthetic data to upload a fictional sample.")
+    exported = frame["exported_at"].unique()
+    if len(exported) != 1:
+        raise ValueError("Use the same Moodle export timestamp on every row.")
+    snapshots = frame.loc[:, list(SNAPSHOT_COLUMNS)]
+    outcomes = frame.loc[:, list(OUTCOME_COLUMNS)]
+    validate_snapshot_frame(snapshots)
+    _validate_outcome_frame(outcomes)
+    ordered = sorted(
+        {
+            (row.cohort_id, _timestamp(row.course_start_at, "course_start_at", row.cohort_id, []))
+            for row in snapshots.itertuples(index=False)
+        },
+        key=lambda item: (item[1], item[0]),
+    )
+    cohorts = [cohort for cohort, _ in ordered]
+    if (
+        len(cohorts) < 3
+        or len(set(cohorts)) != len(cohorts)
+        or len({start for _, start in ordered}) != len(cohorts)
+    ):
+        raise ValueError(
+            "Training requires at least three cohorts with distinct chronological start dates."
+        )
+    snapshot_bytes = snapshots.to_csv(index=False, lineterminator="\n").encode()
+    outcome_bytes = outcomes.to_csv(index=False, lineterminator="\n").encode()
+    manifest = {
+        "schema_version": "1.0",
+        "export_id": f"moodle-csv-{_sha(raw)}",
+        "exported_at": exported[0],
+        "timezone": "UTC",
+        "extraction_version": "profassist-combined-csv:1",
+        "included_event_categories": [],
+        "coverage_limitations": ["Event categories are not supplied by the combined CSV format."],
+        "synthetic": synthetic,
+        "fixture_only": synthetic,
+        "provenance": "synthetic_platform_fixture" if synthetic else "platform_export",
+        "provenance_basis": "workspace_admin_attestation",
+        "platform_scope": {"tenant_id": str(org_id)},
+        "cohorts": cohorts,
+        "split": {"train": cohorts[:-2], "validation": cohorts[-2:-1], "test": cohorts[-1:]},
+        "row_counts": {"lms_snapshots": len(snapshots), "student_outcomes": len(outcomes)},
+        "files": {
+            "raw/lms_snapshots.csv": {"sha256": _sha(snapshot_bytes)},
+            "raw/student_outcomes.csv": {"sha256": _sha(outcome_bytes)},
+        },
+    }
+    return snapshot_bytes, _manifest_bytes(manifest), outcome_bytes
+
+
 async def import_export(
     db: Any,
     org_id: uuid.UUID,
@@ -339,12 +420,16 @@ async def import_export(
             manifest=manifest,
             cohorts=cohorts,
             row_count=len(snapshots),
-            outcome_count=len(outcomes or []),
+            outcome_count=len(outcomes) if outcomes is not None else 0,
             status="validated",
         )
         db.add(row)
         await db.flush()
     return _export_card(row) | {"split": split, "reused": not created}
+
+
+def _is_sample_export(manifest: dict[str, Any]) -> bool:
+    return manifest.get("synthetic") is True or manifest.get("fixture_only") is True
 
 
 def _export_card(row: ProfAssistDropoutExport) -> dict[str, Any]:
@@ -357,6 +442,7 @@ def _export_card(row: ProfAssistDropoutExport) -> dict[str, Any]:
         "schema_version": row.schema_version,
         "cohorts": list(row.cohorts or []),
         "split": split,
+        "sample_only": _is_sample_export(manifest),
         "train_cohorts": split.get("train", []),
         "validation_cohorts": split.get("validation", []),
         "test_cohorts": split.get("test", []),
@@ -414,6 +500,7 @@ async def list_dropout_jobs(
                         "status",
                         "candidate_version",
                         "gate_passed",
+                        "synthetic",
                         "gate_decision",
                         "registration_status",
                         "model_version",
@@ -434,6 +521,7 @@ async def list_dropout_jobs(
                     else {}
                 ),
                 "export_id": (job.result or {}).get("export_id"),
+                "synthetic": bool((job.result or {}).get("synthetic") or summary.get("synthetic")),
             }
         )
     return {"items": items}
@@ -442,6 +530,7 @@ async def list_dropout_jobs(
 def _job_card(row: ProfAssistMLJob, *, reused: bool = False) -> dict[str, Any]:
     return {
         "job_id": str(row.id),
+        "prefect_url": prefect_run_url(row.prefect_flow_run_id),
         "operation": row.operation,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -455,17 +544,21 @@ def _job_card(row: ProfAssistMLJob, *, reused: bool = False) -> dict[str, Any]:
 async def _queue_dropout(db: Any, job: ProfAssistMLJob) -> dict[str, Any]:
     previous_run_id = job.prefect_flow_run_id
     retrying = job.status == "failed" and bool(previous_run_id)
-    idempotency_key = f"{job.id}:{previous_run_id}" if retrying else str(job.id)
     job.status, job.error = "queued", ""
     db.add(job)
     await db.flush()
+    idempotency_key = f"{job.id}:{previous_run_id}" if retrying else str(job.id)
     await db.commit()
+    await db.execute(
+        text("SELECT set_config('app.current_org', :org, true)"),
+        {"org": str(job.organization_id)},
+    )
     try:
         from prefect.deployments import run_deployment
 
         flow_run = await run_deployment(
             "profassist-dropout-job/dropout-job",
-            parameters={"job_id": str(job.id)},
+            parameters={"job_id": str(job.id), "organization_id": str(job.organization_id)},
             timeout=0,
             idempotency_key=idempotency_key,
         )
@@ -473,10 +566,6 @@ async def _queue_dropout(db: Any, job: ProfAssistMLJob) -> dict[str, Any]:
     except Exception:
         job.status = "failed"
         job.error = "The dropout job could not be queued. Please retry."
-    await db.execute(
-        text("SELECT set_config('app.current_org', :org, true)"),
-        {"org": str(job.organization_id)},
-    )
     await db.flush()
     await db.refresh(job)
     return _job_card(job)
@@ -661,6 +750,7 @@ async def create_train_job(
     export = await _export_for_job(db, org_id, export_id)
     if export is None or not export.outcomes_csv:
         return {"error": "A validated export with historical outcomes is required for training."}
+    fixture = _is_sample_export(export.manifest or {})
     split = (export.manifest or {}).get("split") or {}
     if (
         train_cohorts != split.get("train")
@@ -668,10 +758,12 @@ async def create_train_job(
         or test_cohorts != split.get("test", [])
     ):
         return {"error": "Training cohorts must exactly match the immutable export manifest split."}
-    active = await _active_dropout_release(db, org_id)
+    active = None if fixture else await _active_dropout_release(db, org_id)
     model_name = (
         active.model_name if active else os.getenv("DROPOUT_MODEL_NAME", "student-dropout").strip()
     )
+    if fixture:
+        model_name = "student-dropout-fixture"
     model_version = active.model_version if active else ""
     if not model_name:
         return {"error": "The course-withdrawal model name is not configured."}
@@ -682,6 +774,7 @@ async def create_train_job(
                 "export": export.checksum,
                 "split": split,
                 "active_release": str(active.id) if active else None,
+                **({"synthetic": True} if fixture else {}),
             }
         )
     )
@@ -705,6 +798,7 @@ async def create_train_job(
             model_version=model_version,
             result={
                 "export_id": str(export.id),
+                "synthetic": fixture,
                 "active_release_id": str(active.id) if active else None,
                 "train_cohorts": train_cohorts,
                 "validation_cohorts": validation_cohorts,
@@ -834,7 +928,9 @@ async def _worker_post(operation: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 @flow(name="profassist-dropout-job", log_prints=False)
-async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
+async def profassist_dropout_job_flow(
+    job_id: str, organization_id: str | None = None
+) -> dict[str, Any]:
     # A Prefect subprocess loads the flow without the API's ORM imports.
     import app.db.models  # noqa: F401
 
@@ -843,8 +939,17 @@ async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
     except (ValueError, TypeError):
         return {"ok": False, "error": "invalid job"}
     async with get_db_context() as db:
+        if organization_id is not None:
+            scope_id = str(uuid.UUID(organization_id))
+            await db.execute(
+                text("SELECT set_config('app.current_org', :org, true)"), {"org": scope_id}
+            )
         job = await db.get(ProfAssistMLJob, job_uuid)
-        if job is None or not job.operation.startswith("dropout-"):
+        if (
+            job is None
+            or not job.operation.startswith("dropout-")
+            or (organization_id is not None and str(job.organization_id) != scope_id)
+        ):
             return {"ok": False, "error": "job not found"}
         if job.status == "completed":
             return {"ok": True, "job_id": job_id, "status": job.status}
@@ -863,8 +968,11 @@ async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
             "version": job.model_version,
             "scope": scope,
         }
-        if job.operation == "dropout-train" and not job.model_version:
-            context.pop("version", None)
+        if job.operation == "dropout-train":
+            if not job.model_version:
+                context.pop("version", None)
+            if _is_sample_export(export.manifest or {}):
+                context["fixture"] = True
         files = {
             "snapshots.csv": {
                 "encoding": "base64",
@@ -887,18 +995,45 @@ async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
             }
             payload = {"files": files}
         elif job.operation == "dropout-train":
+            manifest = export.manifest
+            snapshots_csv, outcomes_csv = (
+                export.snapshots_csv.encode(),
+                export.outcomes_csv.encode(),
+            )
+            if context.get("fixture") and manifest.get("platform_scope") != scope:
+                # Older demo fixtures used a placeholder tenant. Keep the stored export intact.
+                snapshots_csv = (
+                    _frame(snapshots_csv, "Snapshot export")
+                    .assign(tenant_id=org_id)
+                    .to_csv(index=False, lineterminator="\n")
+                    .encode()
+                )
+                outcomes_csv = (
+                    _frame(outcomes_csv, "Outcome export")
+                    .assign(tenant_id=org_id)
+                    .to_csv(index=False, lineterminator="\n")
+                    .encode()
+                )
+                manifest = {
+                    **manifest,
+                    "platform_scope": scope,
+                    "files": {
+                        "raw/lms_snapshots.csv": {"sha256": _sha(snapshots_csv)},
+                        "raw/student_outcomes.csv": {"sha256": _sha(outcomes_csv)},
+                    },
+                }
             files = {
                 "manifest.json": {
                     "encoding": "base64",
-                    "content": base64.b64encode(_manifest_bytes(export.manifest)).decode(),
+                    "content": base64.b64encode(_manifest_bytes(manifest)).decode(),
                 },
                 "raw/lms_snapshots.csv": {
                     "encoding": "base64",
-                    "content": base64.b64encode(export.snapshots_csv.encode()).decode(),
+                    "content": base64.b64encode(snapshots_csv).decode(),
                 },
                 "raw/student_outcomes.csv": {
                     "encoding": "base64",
-                    "content": base64.b64encode(export.outcomes_csv.encode()).decode(),
+                    "content": base64.b64encode(outcomes_csv).decode(),
                 },
             }
             payload = {
@@ -929,7 +1064,10 @@ async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
             if job.operation == "dropout-score":
                 await _persist_predictions(db, job, export, result)
             elif job.operation == "dropout-train":
-                await _persist_candidate(db, job, export, result)
+                if context.get("fixture"):
+                    result["summary"] = {**(result.get("summary") or {}), "synthetic": True}
+                else:
+                    await _persist_candidate(db, job, export, result)
             if job.operation == "dropout-score":
                 summary = result.get("summary") or {}
                 job.result = {
@@ -958,6 +1096,35 @@ async def profassist_dropout_job_flow(job_id: str) -> dict[str, Any]:
                 failed_job.status = "failed"
                 failed_job.error = "The private dropout worker could not complete this job."
             return {"ok": False, "job_id": job_id, "status": "failed"}
+
+
+def _prediction_explanation(payload: Any) -> list[dict[str, Any]] | None:
+    if payload is None or payload == "":
+        return None
+    try:
+        factors = json.loads(payload) if isinstance(payload, str) else payload
+    except ValueError as exc:
+        raise ValueError("Dropout scorer returned a malformed explanation.") from exc
+    if not isinstance(factors, list) or len(factors) > 3:
+        raise ValueError("Dropout scorer returned a malformed explanation.")
+    seen = set()
+    output = []
+    for factor in factors:
+        if not isinstance(factor, dict):
+            raise ValueError("Dropout scorer returned a malformed explanation factor.")
+        feature, value, effect = (factor.get(key) for key in ("feature", "value", "effect"))
+        if (
+            feature not in FEATURE_COLUMNS
+            or feature in seen
+            or (value is not None and (type(value) not in (int, float) or not math.isfinite(value)))
+            or type(effect) not in (int, float)
+            or not math.isfinite(effect)
+            or effect == 0
+        ):
+            raise ValueError("Dropout scorer returned an invalid explanation factor.")
+        seen.add(feature)
+        output.append({"feature": feature, "value": value, "effect": effect})
+    return sorted(output, key=lambda factor: abs(factor["effect"]), reverse=True) or None
 
 
 async def _persist_predictions(
@@ -1026,6 +1193,7 @@ async def _persist_predictions(
                 probability=probability,
                 risk_band=row["risk_band"],
                 prediction_status=row["prediction_status"],
+                explanation=_prediction_explanation(row.get("explanation")),
                 model_name=job.model_name,
                 model_version=job.model_version,
                 feature_schema_version=str(row["feature_schema_version"]),
@@ -1283,6 +1451,7 @@ async def list_student_predictions(
                 "batch_id": row.batch_id,
                 "cutoff_at": row.cutoff_at.isoformat(),
                 "coverage_status": "eligible",
+                "explanation": row.explanation,
             },
         )
     return output

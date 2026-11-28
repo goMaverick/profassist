@@ -10,6 +10,7 @@ import asyncio
 import copy
 import os
 import time
+import uuid
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -90,6 +91,24 @@ def _mlflow_run_url(run_id: str, experiment_id: Any) -> str | None:
     if url.username is not None or url.query or url.fragment:
         return None
     return f"{base}/#/experiments/{quote(experiment_id, safe='')}/runs/{quote(run_id, safe='')}"
+
+
+def prefect_run_url(run_id: str | None) -> str | None:
+    base = os.getenv("PREFECT_PUBLIC_URL", "http://localhost:4200").strip().rstrip("/")
+    try:
+        run = uuid.UUID(run_id or "")
+        url = urlsplit(base)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username is not None
+            or url.query
+            or url.fragment
+        ):
+            return None
+    except ValueError:
+        return None
+    return f"{base}/runs/flow-run/{run}"
 
 
 def _metaflow_run_url(data: dict[str, Any]) -> str | None:

@@ -1,5 +1,7 @@
 # Private model worker runtime
 
+`make demo` starts the local dashboard with the MLflow, Prefect, and Metaflow services. Set `PROFASSIST_MLOPS_SOURCE` and `PROFASSIST_MINILM_MODEL_DIR` as described below when the companion checkout or encoder lives outside the default location. The Metaflow viewer reads task metadata from the worker's private output volume and is published on loopback at `http://localhost:58324`. Models links to Prefect as soon as the job has a flow run ID.
+
 ProfAssist calls the model worker over the Compose-only `backend` network. The
 worker listens on port 8081 inside that network; it has no published host port.
 `GET /health` is a fixed liveness response. `POST /jobs/{operation}` requires a

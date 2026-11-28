@@ -12,7 +12,7 @@ function fetchMe(token: string) {
 /**
  * Returns the current user AND echoes the access token so the client can use it
  * for WebSocket auth (Sec-WebSocket-Protocol). The access cookie is short-lived
- * (15 min); when it has expired we transparently refresh it using the 7-day
+ * (15 min); when it has expired we transparently refresh it using the 14-day
  * refresh cookie so the session — and the chat socket — stay alive across
  * reloads without forcing a re-login.
  */
@@ -37,22 +37,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }
 
+  let refreshed: { access_token: string; refresh_token?: string };
   try {
-    const refreshed = await backendFetch<{ access_token: string; refresh_token?: string }>(
-      "/api/v1/auth/refresh",
-      { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) },
-    );
-    const data = await fetchMe(refreshed.access_token);
-    const response = NextResponse.json({ ...data, access_token: refreshed.access_token });
-    setAuthCookies(response, {
-      accessToken: refreshed.access_token,
-      refreshToken: refreshed.refresh_token,
+    refreshed = await backendFetch("/api/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken }),
     });
-    return response;
-  } catch {
-    // Refresh failed → truly logged out. Clear cookies.
-    const response = NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
-    clearAuthCookies(response);
-    return response;
+  } catch (error) {
+    if (error instanceof BackendApiError && error.status === 401) {
+      const response = NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
+      clearAuthCookies(response);
+      return response;
+    }
+    const status = error instanceof BackendApiError ? error.status : 503;
+    return NextResponse.json({ detail: "Could not refresh the session" }, { status });
   }
+
+  const response = await fetchMe(refreshed.access_token)
+    .then((data) => NextResponse.json({ ...data, access_token: refreshed.access_token }))
+    .catch((error: unknown) => {
+      const status = error instanceof BackendApiError ? error.status : 503;
+      return NextResponse.json({ detail: "Failed to get user" }, { status });
+    });
+  setAuthCookies(response, {
+    accessToken: refreshed.access_token,
+    refreshToken: refreshed.refresh_token,
+  });
+  return response;
 }

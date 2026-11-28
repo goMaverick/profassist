@@ -42,6 +42,26 @@ interface Warning {
     data_revision?: string | null;
   }>;
 }
+const factorLabels = {
+  active_days_14d: "Active days in the last 14 days",
+  active_days_previous_14d: "Active days in the preceding 14 days",
+  interactions_14d: "Interactions in the last 14 days",
+  interactions_previous_14d: "Interactions in the preceding 14 days",
+  resource_views_14d: "Resource views in the last 14 days",
+  forum_posts_14d: "Forum posts in the last 14 days",
+  late_submissions_to_date: "Late submissions by the cutoff",
+  assignments_due_to_date: "Assignments due by the cutoff",
+  scores_available_count: "Recorded scores by the cutoff",
+  mean_score_pct_to_date: "Average recorded score (%)",
+  missed_assignments: "Missed assignments by the cutoff",
+  activity_change: "Change in active days across the two periods",
+  days_since_last_activity: "Days since last recorded activity",
+  no_activity_history: "No recorded activity history",
+};
+
+type ScoreFactor = { feature: keyof typeof factorLabels; value: number | null; effect: number };
+const factorNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+
 interface Payload {
   course?: { code: string; title: string };
   students: Array<{
@@ -57,6 +77,7 @@ interface Payload {
       batch_id?: string | null;
       cutoff_at?: string | null;
       coverage_status?: string | null;
+      explanation?: ScoreFactor[] | null;
       status?: string | null;
     } | null;
   }>;
@@ -268,7 +289,41 @@ export default function StudentsPage() {
                     )}
                   </TableCell>
                   <TableCell className="py-3">
-                    {why || row?.note || "No eligible score available"}
+                    {prediction && score != null ? (
+                      <details>
+                        <summary className="cursor-pointer font-medium">Why this score?</summary>
+                        {prediction.explanation?.length ? (
+                          <>
+                            <ul className="mt-2 space-y-1 text-sm">
+                              {prediction.explanation.map(({ feature, value, effect }) => (
+                                <li key={feature}>
+                                  {factorLabels[feature]} ·{" "}
+                                  {value == null
+                                    ? "Missing at cutoff"
+                                    : feature === "no_activity_history"
+                                      ? value
+                                        ? "Yes"
+                                        : "No"
+                                      : factorNumber.format(value)}
+                                  {" · "}
+                                  {effect > 0 ? "Raised score" : "Lowered score"}
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="text-muted-foreground mt-2 text-xs">
+                              These inputs influenced the model score compared with its training
+                              baseline.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-muted-foreground mt-1 text-sm">
+                            Explanation unavailable for this saved score.
+                          </p>
+                        )}
+                      </details>
+                    ) : (
+                      why || row?.note || "No eligible score available"
+                    )}
                     {score != null &&
                       (prediction?.model_version ||
                         prediction?.batch_id ||

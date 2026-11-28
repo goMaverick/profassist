@@ -101,6 +101,8 @@ dev-frontend:
 # === One-command POC demo ====================================================
 # One key, one command. `.env` is gitignored; never commit a real key.
 # The first account to register at /register becomes the app admin.
+demo: export PLAGIARISM_WORKER_URL ?= http://profassist-worker:8081
+demo: export METAFLOW_RUN_URL_TEMPLATE ?= http://localhost:58324/flows/{flow}/{run_id}
 demo:
 	@test -f .env || (cp .env.example .env && \
 		echo "" && \
@@ -114,9 +116,10 @@ demo:
 		exit 1; \
 	fi
 	@echo "▶ Building app, prefect-runner, frontend…"
-	docker compose build app prefect-runner frontend
+	docker compose --profile mlops build profassist-worker-base
+	docker compose --profile mlops build app prefect-runner frontend profassist-worker
 	@echo "▶ Starting the stack…"
-	docker compose up -d --force-recreate
+	docker compose --profile mlops up -d --force-recreate
 	@echo "▶ Waiting for the API (up to 3 minutes)…"
 	@i=0; while [ $$i -lt 60 ]; do \
 		if curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1; then \
@@ -135,6 +138,7 @@ demo:
 	@echo "   Langfuse:      http://localhost:3100"
 	@echo "   MLflow:        http://localhost:5000"
 	@echo "   Prefect:       http://localhost:4200"
+	@echo "   Metaflow:      http://localhost:58324"
 	@echo "   Moodle mock:   http://localhost:8090/health"
 	@echo ""
 	@echo "Register at /register; the first user becomes app admin."
@@ -144,13 +148,13 @@ demo:
 	@echo "Logs: 'make demo-logs'   Stop: 'make demo-down'"
 
 demo-down:
-	docker compose down
+	docker compose --profile mlops down
 
 demo-logs:
-	docker compose logs -f
+	docker compose --profile mlops logs -f
 
 demo-ps:
-	docker compose ps
+	docker compose --profile mlops ps
 
 # === Staging: built images, no bind mounts (production-like, local DB) ===
 stage:

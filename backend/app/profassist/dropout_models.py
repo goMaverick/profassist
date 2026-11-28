@@ -125,6 +125,7 @@ class ProfAssistDropoutPrediction(Base, TimestampMixin):
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     probability: Mapped[float] = mapped_column(Float, nullable=False)
     risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    explanation: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     prediction_status: Mapped[str] = mapped_column(String(16), nullable=False, default="scored")
     model_name: Mapped[str] = mapped_column(String(128), nullable=False)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
